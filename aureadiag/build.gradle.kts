@@ -1,4 +1,4 @@
-plugins { id("com.android.application") version "8.5.2" }
+plugins { id("com.android.application") version "8.6.1" }
 android {
     namespace = "com.aurea.diagnostics"
     compileSdk = 34

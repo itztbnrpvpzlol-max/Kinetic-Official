@@ -15,7 +15,8 @@ import kotlin.math.roundToInt
 /** One open composition. A new instance is always empty. */
 class EditorState(val settings: AppSettings, val projectId: String = UUID.randomUUID().toString(), var projectName: String = "Untitled") {
     var resolution by mutableIntStateOf(settings.resolution)
-    var duration by mutableFloatStateOf(settings.compSeconds.toFloat())
+    private var baseDuration by mutableFloatStateOf(settings.compSeconds.toFloat())
+    val duration: Float get() = maxOf(baseDuration, layers.maxOfOrNull { it.end } ?: 0f, 0.1f)
     var layers by mutableStateOf<List<Layer>>(emptyList())
         private set
     var time by mutableFloatStateOf(0f)
@@ -35,7 +36,7 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
     val frame: Float get() = 1f / settings.fps
     val selected: Layer? get() = layers.firstOrNull { it.id == selectedId }
     fun restoreProject(savedDuration: Float, savedResolution: Int, savedLayers: List<Layer>, savedTime: Float = 0f) {
-        duration = savedDuration.coerceAtLeast(0.1f)
+        baseDuration = maxOf(savedDuration, savedLayers.maxOfOrNull { it.end } ?: 0f, 0.1f)
         resolution = savedResolution.coerceIn(0, 3)
         time = savedTime.coerceIn(0f, duration)
         layers = savedLayers
@@ -100,10 +101,11 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
         if (seekTo != null) time = seekTo.coerceIn(0f, duration)
     }
 
-    fun seek(t: Float) { time = t.coerceIn(0f, duration) }
+    fun seek(t: Float) { val target = t.coerceAtLeast(0f); if (target > duration) baseDuration = target; time = target }
 
     fun seekSnap(t: Float, windowSec: Float) {
-        val raw = t.coerceIn(0f, duration)
+        val raw = t.coerceAtLeast(0f)
+        if (raw > duration) baseDuration = raw
         if (settings.snap) {
             val times = selected?.props?.values?.flatMap { p -> p.keys.map { it.t } } ?: emptyList()
             val near = times.minByOrNull { abs(it - raw) }
@@ -144,6 +146,33 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
         val dur = if (isTimed) (length ?: 5f).coerceAtLeast(0.1f) else remaining()
         val src = if (isTimed) dur else Float.POSITIVE_INFINITY
         addLayer(newLayer(type, name, time, dur, lw, lh, uri, src))
+    }
+
+    fun extractAudio(id: String) {
+        val source = layers.firstOrNull { it.id == id } ?: return
+        if (source.type != LayerType.VIDEO || source.uri == null) return
+        val audio = newLayer(LayerType.AUDIO, nextName("Extracted Audio"), source.start,
+            source.duration, 0f, 0f, source.uri, source.srcLength).copy(srcOffset = source.srcOffset)
+        addLayer(audio)
+    }
+
+    fun addMediaTrimmed(type: LayerType, name: String, uri: String, w: Int, h: Int, sourceLength: Float?, trimStart: Float, trimEnd: Float) {
+        val startOffset = trimStart.coerceAtLeast(0f)
+        val endOffset = trimEnd.coerceAtLeast(startOffset + 0.1f)
+        val duration = (endOffset - startOffset).coerceAtLeast(0.1f)
+        val layerWidth: Float
+        val layerHeight: Float
+        if (type == LayerType.AUDIO) {
+            layerWidth = 0f; layerHeight = 0f
+        } else if (w <= 0 || h <= 0) {
+            layerWidth = COMP_W; layerHeight = COMP_H
+        } else {
+            val scale = minOf(COMP_W / w, COMP_H / h)
+            layerWidth = w * scale; layerHeight = h * scale
+        }
+        val layer = newLayer(type, name, time, duration, layerWidth, layerHeight, uri,
+            sourceLength ?: Float.POSITIVE_INFINITY).copy(srcOffset = if (type == LayerType.IMAGE) 0f else startOffset)
+        addLayer(layer)
     }
 
     fun deleteLayer(id: String) {
@@ -200,11 +229,36 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
         l.copy(duration = (l.duration + dt).coerceIn(0.1f, max(0.1f, l.srcLength - l.srcOffset)))
     }
 
-    fun trimLeft(id: String, dt: Float) = updateLayer(id, push = false) { l ->
+    fun trimLeft(id: String, dt: Float) = updateLayer(id) { l ->
         val lo = max(-l.srcOffset, -l.start)
         val hi = l.duration - 0.1f
         val d = dt.coerceIn(lo, max(lo, hi))
         l.copy(start = l.start + d, duration = l.duration - d, srcOffset = l.srcOffset + d)
+    }
+
+    fun moveLayerStartToPlayhead(id: String) {
+        val l = layers.firstOrNull { it.id == id } ?: return
+        val target = time.coerceIn(0f, duration)
+        if (target >= l.end - frame) return
+        val delta = target - l.start
+        val maxSource = if (l.srcLength.isFinite()) (l.srcLength - l.srcOffset).coerceAtLeast(frame) else Float.POSITIVE_INFINITY
+        val nextDuration = minOf(l.duration - delta, maxSource).coerceAtLeast(frame)
+        updateLayer(id) { it.copy(start = target, duration = nextDuration, srcOffset = (it.srcOffset + delta).coerceAtLeast(0f)) }
+    }
+
+    fun moveLayerEndToPlayhead(id: String) {
+        val l = layers.firstOrNull { it.id == id } ?: return
+        val target = time.coerceAtLeast(l.start + frame)
+        val requested = target - l.start
+        val maxDuration = if (l.srcLength.isFinite()) (l.srcLength - l.srcOffset).coerceAtLeast(frame) else Float.POSITIVE_INFINITY
+        updateLayer(id) { it.copy(duration = requested.coerceIn(frame, maxDuration)) }
+    }
+
+    fun extendLayerToPlayhead(id: String) {
+        val l = layers.firstOrNull { it.id == id } ?: return
+        if (time <= l.end) return
+        val maxDuration = if (l.srcLength.isFinite()) (l.srcLength - l.srcOffset).coerceAtLeast(l.duration) else duration - l.start
+        updateLayer(id) { it.copy(duration = (time - it.start).coerceIn(it.duration, maxDuration)) }
     }
 
     /** Parenting keeps the child where it is on screen (position only, if position isn't keyframed). */

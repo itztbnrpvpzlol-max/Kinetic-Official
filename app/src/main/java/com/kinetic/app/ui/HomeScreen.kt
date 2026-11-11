@@ -9,7 +9,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -118,7 +118,7 @@ private fun ProjectCard(project: ProjectStore.ProjectInfo, onClick: () -> Unit, 
             Spacer(Modifier.height(3.dp))
             Text("${project.layerCount} layers  ·  ${DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(project.updatedAt))}", color = KColors.Muted, fontSize = 11.sp, maxLines = 1)
         }
-        IconButton(onClick = onDelete) { Icon(Icons.Default.DeleteOutline, "Delete project", tint = KColors.Muted) }
+        IconButton(onClick = onDelete) { Icon(Icons.Default.Delete, "Delete project", tint = KColors.Muted) }
     }
 }
 

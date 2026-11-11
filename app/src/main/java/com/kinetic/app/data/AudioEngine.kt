@@ -1,85 +1,138 @@
 package com.kinetic.app.data
 
 import android.content.Context
-import android.media.MediaPlayer
 import android.net.Uri
+import android.os.SystemClock
+import androidx.media3.common.C
+import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
+import androidx.media3.common.TrackSelectionParameters
+import androidx.media3.exoplayer.ExoPlayer
 import com.kinetic.app.model.Layer
 import com.kinetic.app.model.LayerType
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import kotlin.math.abs
 
-class AudioEngine(private val ctx: Context, private val scope: CoroutineScope) {
-    private val players = HashMap<String, MediaPlayer>()
-    private val pending = HashSet<String>()
+/**
+ * Timeline-aware audio transport.
+ *
+ * ExoPlayer's playback clock advances continuously between sync points. The editor
+ * only seeks when a clip starts/resumes or when measured drift exceeds the correction
+ * threshold, avoiding the repeated seek/rebuffer loop that causes audible stutter.
+ */
+class AudioEngine(context: Context) {
+    private val appContext = context.applicationContext
+    private val players = HashMap<String, ExoPlayer>()
+    private val appliedSpeed = HashMap<String, Float>()
+    private val appliedVolume = HashMap<String, Float>()
+    private val lastCorrectionMs = HashMap<String, Long>()
     private var released = false
+
+    fun prepare(layers: List<Layer>) {
+        if (released) return
+        for (layer in layers) {
+            val uri = layer.uri ?: continue
+            if (layer.type != LayerType.AUDIO && layer.type != LayerType.VIDEO) continue
+            if (!players.containsKey(layer.id)) players[layer.id] = createPlayer(uri)
+        }
+    }
 
     fun sync(layers: List<Layer>, time: Float, playing: Boolean) {
         if (released) return
-        val ids = HashSet<String>()
-        for (l in layers) {
-            val u = l.uri ?: continue
-            if (l.type != LayerType.AUDIO && l.type != LayerType.VIDEO) continue
-            ids.add(l.id)
-            val want = playing && l.visible && l.activeAt(time)
-            val p = players[l.id]
-            if (p == null) {
-                if (want && pending.add(l.id)) load(l.id, u)
+
+        val activeIds = HashSet<String>()
+        for (layer in layers) {
+            val uri = layer.uri ?: continue
+            if (layer.type != LayerType.AUDIO && layer.type != LayerType.VIDEO) continue
+            activeIds.add(layer.id)
+
+            val shouldPlay = playing && layer.visible && layer.activeAt(time)
+            var player = players[layer.id]
+            if (player == null && shouldPlay) {
+                player = createPlayer(uri)
+                players[layer.id] = player
+            }
+            if (player == null) continue
+
+            if (!shouldPlay) {
+                if (player.playWhenReady) player.playWhenReady = false
                 continue
             }
-            try {
-                if (!want) {
-                    if (p.isPlaying) p.pause()
-                } else {
-                    val pos = ((time - l.start + l.srcOffset) * 1000f).toInt().coerceAtLeast(0)
-                    if (!p.isPlaying) {
-                        p.seekTo(pos)
-                        p.start()
-                    } else if (abs(p.currentPosition - pos) > 300) {
-                        p.seekTo(pos)
-                    }
+
+            val speed = layer.speed.coerceIn(0.1f, 4f)
+            if (appliedSpeed[layer.id] != speed) {
+                player.setPlaybackSpeed(speed)
+                appliedSpeed[layer.id] = speed
+            }
+            val volume = layer.volume.coerceIn(0f, 2f)
+            if (appliedVolume[layer.id] != volume) {
+                player.volume = volume
+                appliedVolume[layer.id] = volume
+            }
+
+            val targetMs = sourcePositionMs(layer, time)
+            if (!player.playWhenReady) {
+                // A paused clip may have been left at a stale source position.
+                player.seekTo(targetMs)
+                player.playWhenReady = true
+                lastCorrectionMs[layer.id] = SystemClock.elapsedRealtime()
+                continue
+            }
+
+            // Never seek a player while it is buffering. Once ready, correct only
+            // meaningful drift and rate-limit corrections to avoid oscillation.
+            if (player.playbackState == Player.STATE_READY) {
+                val drift = abs(player.currentPosition - targetMs)
+                val now = SystemClock.elapsedRealtime()
+                val last = lastCorrectionMs[layer.id] ?: 0L
+                if (drift > DRIFT_CORRECTION_MS && now - last >= CORRECTION_COOLDOWN_MS) {
+                    player.seekTo(targetMs)
+                    lastCorrectionMs[layer.id] = now
                 }
-            } catch (_: Exception) {
             }
         }
-        val iter = players.entries.iterator()
-        while (iter.hasNext()) {
-            val e = iter.next()
-            if (e.key !in ids) {
-                try { e.value.release() } catch (_: Exception) { }
-                iter.remove()
-            }
+
+        val stale = players.keys.filter { it !in activeIds }
+        for (id in stale) {
+            players.remove(id)?.release()
+            appliedSpeed.remove(id)
+            appliedVolume.remove(id)
+            lastCorrectionMs.remove(id)
         }
     }
 
-    private fun load(id: String, uri: String) {
-        scope.launch {
-            val mp = withContext(Dispatchers.IO) {
-                try {
-                    MediaPlayer().apply { setDataSource(ctx, Uri.parse(uri)); prepare() }
-                } catch (e: Exception) {
-                    null
-                }
-            }
-            pending.remove(id)
-            if (mp == null) return@launch
-            if (released) mp.release() else players[id] = mp
+    private fun createPlayer(uri: String): ExoPlayer =
+        ExoPlayer.Builder(appContext).build().apply {
+            trackSelectionParameters = TrackSelectionParameters.Builder(appContext)
+                .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, true)
+                .build()
+            setMediaItem(MediaItem.fromUri(Uri.parse(uri)))
+            repeatMode = Player.REPEAT_MODE_OFF
+            volume = 1f
+            prepare()
         }
-    }
+
+    private fun sourcePositionMs(layer: Layer, time: Float): Long =
+        (((time - layer.start).coerceAtLeast(0f) * layer.speed + layer.srcOffset)
+            .coerceAtLeast(0f) * 1000f).toLong()
 
     fun pauseAll() {
-        for (p in players.values) {
-            try { if (p.isPlaying) p.pause() } catch (_: Exception) { }
-        }
+        for (player in players.values) player.playWhenReady = false
     }
 
     fun release() {
+        if (released) return
         released = true
-        for (p in players.values) {
-            try { p.release() } catch (_: Exception) { }
-        }
+        for (player in players.values) player.release()
         players.clear()
+        appliedSpeed.clear()
+        appliedVolume.clear()
+        lastCorrectionMs.clear()
+    }
+
+    companion object {
+        // Keep correction tight enough to avoid obvious lip-sync drift without
+        // turning small scheduling jitter into repeated decoder seeks.
+        private const val DRIFT_CORRECTION_MS = 220L
+        private const val CORRECTION_COOLDOWN_MS = 350L
     }
 }

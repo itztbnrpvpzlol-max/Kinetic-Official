@@ -80,6 +80,8 @@ class ProjectStore(context: Context) {
             .put("width", l.width.toDouble()).put("height", l.height.toDouble()).put("visible", l.visible)
             .put("parentId", l.parentId).put("scaleLinked", l.scaleLinked).put("text", l.text)
             .put("color", l.color).put("props", props)
+            .put("effects", JSONArray(l.effects)).put("speed", l.speed.toDouble()).put("volume", l.volume.toDouble())
+            .put("maskEnabled", l.maskEnabled).put("blendMode", l.blendMode)
     }
 
     private fun layerFromJson(j: JSONObject): Layer {
@@ -110,6 +112,10 @@ class ProjectStore(context: Context) {
             width = j.optDouble("width", 100.0).toFloat(), height = j.optDouble("height", 100.0).toFloat(),
             visible = j.optBoolean("visible", true), parentId = j.optString("parentId").takeIf { it.isNotBlank() && it != "null" },
             scaleLinked = j.optBoolean("scaleLinked", false), text = j.optString("text", "Text"),
-            color = j.optInt("color", 0xFF8D8BA3.toInt()), props = props)
+            color = j.optInt("color", 0xFF8D8BA3.toInt()), props = props,
+            effects = (j.optJSONArray("effects") ?: JSONArray()).let { a -> (0 until a.length()).map { a.optString(it) } },
+            speed = j.optDouble("speed", 1.0).toFloat().coerceIn(0.1f, 4f),
+            volume = j.optDouble("volume", 1.0).toFloat().coerceIn(0f, 2f),
+            maskEnabled = j.optBoolean("maskEnabled", false), blendMode = j.optString("blendMode", "Normal"))
     }
 }

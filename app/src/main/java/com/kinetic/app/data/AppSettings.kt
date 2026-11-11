@@ -17,6 +17,7 @@ class AppSettings(context: Context) {
         val COMP_LENGTHS = listOf(5, 10, 30, 60)
         val TIME_FORMATS = listOf("00:00", "Frames", "Timecode")
         val SENSITIVITY = listOf("Slow", "Normal", "Fast")
+        val PREVIEW_MEMORY_MB = listOf(64, 128, 256, 512)
         private val SENS_VALUES = listOf(0.25f, 1f, 3f)
     }
 
@@ -35,6 +36,10 @@ class AppSettings(context: Context) {
         private set
     var loop by mutableStateOf(prefs.getBoolean("loop", false))
         private set
+    var afterEffectsScrubbing by mutableStateOf(prefs.getBoolean("afterEffectsScrubbing", true))
+        private set
+    var previewMemoryIndex by mutableIntStateOf(prefs.getInt("previewMemoryIndex", 1).coerceIn(0, 3))
+        private set
 
     fun updateResolution(i: Int) { resolution = i; prefs.edit().putInt("resolution", i).apply() }
     fun updateFrameRate(i: Int) { frameRate = i; prefs.edit().putInt("frameRate", i).apply() }
@@ -43,6 +48,9 @@ class AppSettings(context: Context) {
     fun updateSensitivity(i: Int) { sensitivity = i; prefs.edit().putInt("sensitivity", i).apply() }
     fun updateSnap(v: Boolean) { snap = v; prefs.edit().putBoolean("snap", v).apply() }
     fun updateLoop(v: Boolean) { loop = v; prefs.edit().putBoolean("loop", v).apply() }
+    fun updateAfterEffectsScrubbing(v: Boolean) { afterEffectsScrubbing = v; prefs.edit().putBoolean("afterEffectsScrubbing", v).apply() }
+    fun updatePreviewMemory(i: Int) { previewMemoryIndex = i.coerceIn(0, 3); prefs.edit().putInt("previewMemoryIndex", previewMemoryIndex).apply() }
+    val previewMemoryMb: Int get() = PREVIEW_MEMORY_MB[previewMemoryIndex]
 
     val fps: Int get() = FPS[frameRate]
     val compSeconds: Int get() = COMP_LENGTHS[compLength]

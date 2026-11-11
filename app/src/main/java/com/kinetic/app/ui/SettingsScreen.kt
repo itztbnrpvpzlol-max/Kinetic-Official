@@ -49,8 +49,14 @@ fun SettingsScreen(settings: AppSettings, onBack: () -> Unit) {
             SwitchRow("Snap playhead to keyframes", settings.snap) { settings.updateSnap(it) }
             SwitchRow("Loop playback", settings.loop) { settings.updateLoop(it) }
 
+            Section("Preview & performance")
+            ChoiceRow("Preview memory cache", AppSettings.PREVIEW_MEMORY_MB.map { "$it MB" }, settings.previewMemoryIndex) { settings.updatePreviewMemory(it) }
+
             Section("Properties")
-            ChoiceRow("Scrub sensitivity", AppSettings.SENSITIVITY, settings.sensitivity) { settings.updateSensitivity(it) }
+            ChoiceRow("Interaction style", listOf("After Effects", "Alight Motion"), if (settings.afterEffectsScrubbing) 0 else 1) { settings.updateAfterEffectsScrubbing(it == 0) }
+            if (settings.afterEffectsScrubbing) {
+                ChoiceRow("Scrub sensitivity", AppSettings.SENSITIVITY, settings.sensitivity) { settings.updateSensitivity(it) }
+            }
 
             Spacer(Modifier.height(24.dp))
             Text("Kinetic 0.2", color = KColors.Dim, fontSize = 12.sp)

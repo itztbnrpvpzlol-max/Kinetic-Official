@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -47,13 +48,28 @@ import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
 
-private const val PAD_L = 40f
+private const val PAD_L = 48f
 private const val PAD_R = 14f
-private const val PAD_V = 16f
+private const val PAD_V = 18f
+
+private enum class GraphMode { AUTO, VALUE, SPEED }
+
+private data class GraphHandle(
+    val segment: Int,
+    val outgoing: Boolean,
+    val time: Float,
+    val value: Float
+)
 
 private class GMap(
-    val w: Float, val h: Float, val dur: Float, val lo: Float, val hi: Float,
-    val padL: Float, val padR: Float, val padV: Float
+    val w: Float,
+    val h: Float,
+    val dur: Float,
+    val lo: Float,
+    val hi: Float,
+    val padL: Float,
+    val padR: Float,
+    val padV: Float
 ) {
     fun x(t: Float) = padL + t / dur * (w - padL - padR)
     fun y(v: Float) = padV + (1f - (v - lo) / (hi - lo)) * (h - 2f * padV)
@@ -61,56 +77,134 @@ private class GMap(
     fun v(y: Float) = lo + (1f - (y - padV) / (h - 2f * padV)) * (hi - lo)
 }
 
-private fun gmap(w: Float, h: Float, dur: Float, r: Pair<Float, Float>, d: Float) =
-    GMap(w, h, dur, r.first, r.second, PAD_L * d, PAD_R * d, PAD_V * d)
+private fun gmap(w: Float, h: Float, dur: Float, range: Pair<Float, Float>, density: Float) =
+    GMap(w, h, max(dur, 0.1f), range.first, range.second, PAD_L * density, PAD_R * density, PAD_V * density)
 
-private fun speedAt(p: Prop, t: Float): Float {
-    val d = 0.02f
-    return abs(p.valueAt(t + d) - p.valueAt(t - d)) / (2f * d)
+private fun isSpatial(id: PropId): Boolean = when (id) {
+    PropId.ANCHOR_X, PropId.ANCHOR_Y, PropId.POS_X, PropId.POS_Y -> true
+    else -> false
+}
+
+private fun graphColor(id: PropId): Color = when (id) {
+    PropId.POS_X, PropId.ANCHOR_X -> Color(0xFF8D78FF)
+    PropId.POS_Y, PropId.ANCHOR_Y -> Color(0xFF36C9C1)
+    PropId.SCALE_X -> Color(0xFFFFB454)
+    PropId.SCALE_Y -> Color(0xFFFF7B91)
+    PropId.ROTATION -> Color(0xFF66B7FF)
+    PropId.OPACITY -> Color(0xFFB4D66B)
+}
+
+private fun speedAt(p: Prop, t: Float, duration: Float): Float {
+    val step = min(0.005f, max(0.0005f, duration / 10000f))
+    return abs(p.valueAt(t + step) - p.valueAt(t - step)) / (2f * step)
+}
+
+private fun keySpeed(keys: List<Keyframe>, index: Int): Float {
+    if (index !in keys.indices) return 0f
+    val key = keys[index]
+    val incoming = if (index > 0) {
+        abs(key.v - keys[index - 1].v) / max(key.t - keys[index - 1].t, 0.001f)
+    } else 0f
+    val outgoing = if (index < keys.lastIndex) {
+        abs(keys[index + 1].v - key.v) / max(keys[index + 1].t - key.t, 0.001f)
+    } else 0f
+    return max(incoming, outgoing)
 }
 
 private fun computeRange(p: Prop, dur: Float, speed: Boolean): Pair<Float, Float> {
     var lo = Float.MAX_VALUE
     var hi = -Float.MAX_VALUE
-    val n = 120
-    for (i in 0..n) {
-        val t = dur * i / n
-        val v = if (speed) speedAt(p, t) else p.valueAt(t)
-        lo = min(lo, v); hi = max(hi, v)
+    val samples = 240
+    for (i in 0..samples) {
+        val t = max(dur, 0.1f) * i / samples
+        val v = if (speed) speedAt(p, t, dur) else p.valueAt(t)
+        lo = min(lo, v)
+        hi = max(hi, v)
     }
-    if (!speed) for (k in p.keys) { lo = min(lo, k.v); hi = max(hi, k.v) }
-    if (speed) {
+    if (!speed) {
+        for (key in p.keys) {
+            lo = min(lo, key.v)
+            hi = max(hi, key.v)
+        }
+    } else {
         lo = 0f
         hi = max(hi, 1f)
-        return 0f to hi * 1.18f
     }
-    if (hi - lo < 1e-3f) { lo -= 10f; hi += 10f }
-    val pad = (hi - lo) * 0.18f
-    return (lo - pad) to (hi + pad)
+    if (hi - lo < 1e-3f) {
+        val pad = max(abs(hi) * 0.15f, 10f)
+        lo -= pad
+        hi += pad
+    } else {
+        val pad = (hi - lo) * 0.14f
+        lo -= pad
+        hi += pad
+    }
+    if (speed) lo = 0f
+    return lo to hi
 }
 
-private fun segIndex(selected: Int, count: Int): Int = when {
-    count < 2 || selected < 0 -> -1
-    selected < count - 1 -> selected
-    else -> selected - 1
+private fun valueHandles(keys: List<Keyframe>, keyIndex: Int): List<GraphHandle> {
+    if (keyIndex !in keys.indices) return emptyList()
+    val result = ArrayList<GraphHandle>(2)
+    if (keyIndex < keys.lastIndex) {
+        val a = keys[keyIndex]
+        val b = keys[keyIndex + 1]
+        if (a.type == KeyType.BEZIER) {
+            val dt = b.t - a.t
+            val dv = b.v - a.v
+            result += GraphHandle(keyIndex, true, a.t + a.x1 * dt, a.v + a.y1 * dv)
+        }
+    }
+    if (keyIndex > 0) {
+        val segment = keyIndex - 1
+        val a = keys[segment]
+        val b = keys[keyIndex]
+        if (a.type == KeyType.BEZIER) {
+            val dt = b.t - a.t
+            val dv = b.v - a.v
+            result += GraphHandle(segment, false, a.t + a.x2 * dt, a.v + a.y2 * dv)
+        }
+    }
+    return result
 }
 
-private fun handlePts(keys: List<Keyframe>, i: Int): List<Pair<Float, Float>>? {
-    if (i !in 0 until keys.size - 1) return null
-    val a = keys[i]
-    val b = keys[i + 1]
-    if (a.type != KeyType.BEZIER) return null
-    val dt = b.t - a.t
-    val dv = b.v - a.v
-    return listOf((a.t + a.x1 * dt) to (a.v + a.y1 * dv), (a.t + a.x2 * dt) to (a.v + a.y2 * dv))
+private fun speedHandles(keys: List<Keyframe>, keyIndex: Int): List<GraphHandle> {
+    if (keyIndex !in keys.indices) return emptyList()
+    val result = ArrayList<GraphHandle>(2)
+    if (keyIndex < keys.lastIndex) {
+        val a = keys[keyIndex]
+        val b = keys[keyIndex + 1]
+        if (a.type == KeyType.BEZIER) {
+            val dt = max(b.t - a.t, 0.001f)
+            val base = abs(b.v - a.v) / dt
+            val value = if (a.x1 > 1e-4f) base * abs(a.y1 / a.x1) else 0f
+            result += GraphHandle(keyIndex, true, a.t + a.x1 * dt, value)
+        }
+    }
+    if (keyIndex > 0) {
+        val segment = keyIndex - 1
+        val a = keys[segment]
+        val b = keys[keyIndex]
+        if (a.type == KeyType.BEZIER) {
+            val dt = max(b.t - a.t, 0.001f)
+            val base = abs(b.v - a.v) / dt
+            val value = if (a.x2 < 0.9999f) base * abs((1f - a.y2) / (1f - a.x2)) else 0f
+            result += GraphHandle(segment, false, a.t + a.x2 * dt, value)
+        }
+    }
+    return result
 }
 
-private fun hitKey(keys: List<Keyframe>, g: GMap, x: Float, y: Float, r: Float): Int {
+private fun hitKey(keys: List<Keyframe>, map: GMap, x: Float, y: Float, radius: Float, speed: Boolean): Int {
     var best = -1
-    var bd = r
-    keys.forEachIndexed { i, k ->
-        val d = hypot(g.x(k.t) - x, g.y(k.v) - y)
-        if (d <= bd) { bd = d; best = i }
+    var bestDistance = radius
+    keys.forEachIndexed { index, key ->
+        val value = if (speed) keySpeed(keys, index) else key.v
+        val distance = hypot(map.x(key.t) - x, map.y(value) - y)
+        if (distance <= bestDistance) {
+            bestDistance = distance
+            best = index
+        }
     }
     return best
 }
@@ -118,204 +212,322 @@ private fun hitKey(keys: List<Keyframe>, g: GMap, x: Float, y: Float, r: Float):
 @Composable
 fun GraphPanel(editor: EditorState, layer: Layer, modifier: Modifier = Modifier) {
     val animated = PropId.values().filter { layer.p(it).animated }
-    val sel: PropId? = editor.selectedProp?.takeIf { layer.p(it).animated } ?: animated.firstOrNull()
-    var speed by remember { mutableStateOf(false) }
-
-    if (sel == null) {
-        Box(modifier.fillMaxSize().padding(16.dp), contentAlignment = Alignment.Center) {
+    if (animated.isEmpty()) {
+        Box(modifier.fillMaxSize().padding(18.dp), contentAlignment = Alignment.Center) {
             Text(
-                "Turn on a stopwatch in Properties to add keyframes, then shape them here.",
-                color = KColors.Muted, fontSize = 13.sp, textAlign = TextAlign.Center
+                "No animated properties yet. Enable a stopwatch in Properties and add at least two keyframes.",
+                color = KColors.Muted,
+                fontSize = 13.sp,
+                textAlign = TextAlign.Center
             )
         }
         return
     }
 
-    val prop = layer.p(sel)
-    val keys = prop.keys
-    val dur = editor.duration
-    var frozen by remember { mutableStateOf<Pair<Float, Float>?>(null) }
-    val range = frozen ?: computeRange(prop, dur, speed)
+    val selected = editor.selectedProp?.takeIf { it in animated } ?: animated.first()
+    var graphMode by remember(layer.id) { mutableStateOf(GraphMode.AUTO) }
+    var visibleProps by remember(layer.id) { mutableStateOf(setOf(animated.first())) }
+    var frozenRange by remember { mutableStateOf<Pair<Float, Float>?>(null) }
+    LaunchedEffect(selected) { visibleProps = visibleProps + selected }
 
+    val prop = layer.p(selected)
+    val keys = prop.keys
+    val duration = max(editor.duration, 0.1f)
+    val speedGraph = graphMode == GraphMode.SPEED || (graphMode == GraphMode.AUTO && isSpatial(selected))
+    val range = frozenRange ?: computeRange(prop, duration, speedGraph)
+    val shownProps = (visibleProps + selected).filter { it in animated }
     val latestLayer by rememberUpdatedState(layer)
-    val latestSel by rememberUpdatedState(sel)
-    val latestSpeed by rememberUpdatedState(speed)
+    val latestSelected by rememberUpdatedState(selected)
+    val latestSpeed by rememberUpdatedState(speedGraph)
     val latestRange by rememberUpdatedState(range)
-    val labelPaint = remember { Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF8D8BA3.toInt() } }
+    val labelPaint = remember { Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF9B9AA9.toInt() } }
 
     Column(modifier.fillMaxSize()) {
         Row(
-            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp).height(34.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp).height(38.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            for (p in animated) Chip(p.label, p == sel) { editor.selectProp(p) }
-            Box(Modifier.padding(horizontal = 4.dp))
-            Chip("Value", !speed) { speed = false }
-            Chip("Speed", speed) { speed = true }
+            animated.forEach { id ->
+                val isSelected = id == selected
+                Chip((if (visibleProps.contains(id)) "● " else "○ ") + id.label, isSelected) {
+                    editor.selectProp(id)
+                    visibleProps = if (visibleProps.contains(id)) visibleProps - id else visibleProps + id
+                }
+            }
+            Chip("All curves", visibleProps.containsAll(animated.toSet())) {
+                visibleProps = if (visibleProps.containsAll(animated.toSet())) setOf(selected) else animated.toSet()
+            }
+        }
+
+        Row(
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp).height(36.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Chip("Auto", graphMode == GraphMode.AUTO) { graphMode = GraphMode.AUTO; frozenRange = null }
+            Chip("Value Graph", graphMode == GraphMode.VALUE) { graphMode = GraphMode.VALUE; frozenRange = null }
+            Chip("Speed Graph", graphMode == GraphMode.SPEED) { graphMode = GraphMode.SPEED; frozenRange = null }
+            Box(Modifier.weight(1f))
+            Text(if (speedGraph) "Velocity / second" else "Property value", color = KColors.Dim, fontSize = 10.sp)
         }
 
         Canvas(
             Modifier
                 .weight(1f)
                 .fillMaxWidth()
-                .pointerInput(Unit) {
-                    detectTapGestures { o ->
-                        val g = gmap(size.width.toFloat(), size.height.toFloat(), editor.duration, latestRange, density)
-                        val ks = latestLayer.p(latestSel).keys
-                        val k = if (latestSpeed) -1 else hitKey(ks, g, o.x, o.y, 24.dp.toPx())
-                        if (k >= 0) editor.selectKey(latestSel, k, ks[k].t) else editor.seek(g.t(o.x))
+                .pointerInput(selected, speedGraph) {
+                    detectTapGestures { point ->
+                        val map = gmap(size.width.toFloat(), size.height.toFloat(), duration, latestRange, density)
+                        val current = latestLayer.p(latestSelected)
+                        val index = hitKey(current.keys, map, point.x, point.y, 25.dp.toPx(), latestSpeed)
+                        if (index >= 0) editor.selectKey(latestSelected, index, current.keys[index].t)
+                        else editor.seek(map.t(point.x).coerceIn(0f, duration))
                     }
                 }
-                .pointerInput(Unit) {
-                    var mode = 0 // 0 scrub, 1 key, 2 out-handle, 3 in-handle
-                    var idx = -1
-                    val hitR = 24.dp.toPx()
+                .pointerInput(selected, speedGraph) {
+                    var mode = 0 // 0 scrub, 1 value key, 2 value out, 3 value in, 4 speed out, 5 speed in
+                    var segment = -1
+                    val hitRadius = 25.dp.toPx()
                     detectDragGestures(
-                        onDragStart = { o ->
-                            val l = latestLayer
-                            val s = latestSel
-                            val ks = l.p(s).keys
-                            frozen = latestRange
-                            val g = gmap(size.width.toFloat(), size.height.toFloat(), editor.duration, latestRange, density)
-                            mode = 0; idx = -1
-                            if (!latestSpeed) {
-                                val seg = segIndex(editor.selectedKey, ks.size)
-                                val hp = if (seg >= 0) handlePts(ks, seg) else null
-                                if (hp != null) {
-                                    if (hypot(g.x(hp[0].first) - o.x, g.y(hp[0].second) - o.y) < hitR) { mode = 2; idx = seg }
-                                    else if (hypot(g.x(hp[1].first) - o.x, g.y(hp[1].second) - o.y) < hitR) { mode = 3; idx = seg }
-                                }
-                                if (mode == 0) {
-                                    val k = hitKey(ks, g, o.x, o.y, hitR)
-                                    if (k >= 0) { mode = 1; idx = k; editor.selectKey(s, k, null) }
-                                }
+                        onDragStart = { point ->
+                            val current = latestLayer.p(latestSelected)
+                            val currentKeys = current.keys
+                            frozenRange = latestRange
+                            val map = gmap(size.width.toFloat(), size.height.toFloat(), duration, latestRange, density)
+                            mode = 0
+                            segment = -1
+                            val keyIndex = editor.selectedKey
+                            val handles = if (latestSpeed) speedHandles(currentKeys, keyIndex) else valueHandles(currentKeys, keyIndex)
+                            val handle = handles.minByOrNull {
+                                hypot(map.x(it.time) - point.x, map.y(it.value) - point.y)
                             }
-                            if (mode != 0) editor.beginEdit() else editor.seek(g.t(o.x))
+                            if (handle != null && hypot(map.x(handle.time) - point.x, map.y(handle.value) - point.y) <= hitRadius) {
+                                segment = handle.segment
+                                mode = if (latestSpeed) {
+                                    if (handle.outgoing) 4 else 5
+                                } else {
+                                    if (handle.outgoing) 2 else 3
+                                }
+                            } else if (!latestSpeed) {
+                                val index = hitKey(currentKeys, map, point.x, point.y, hitRadius, false)
+                                if (index >= 0) {
+                                    mode = 1
+                                    segment = index
+                                    editor.selectKey(latestSelected, index, null)
+                                }
+                            } else {
+                                val index = hitKey(currentKeys, map, point.x, point.y, hitRadius, true)
+                                if (index >= 0) editor.selectKey(latestSelected, index, null)
+                            }
+                            if (mode != 0) editor.beginEdit() else editor.seek(map.t(point.x).coerceIn(0f, duration))
                         },
-                        onDragEnd = { frozen = null; mode = 0 },
-                        onDragCancel = { frozen = null; mode = 0 }
+                        onDragEnd = { frozenRange = null; mode = 0 },
+                        onDragCancel = { frozenRange = null; mode = 0 }
                     ) { change, _ ->
                         change.consume()
-                        val l = latestLayer
-                        val s = latestSel
-                        val ks = l.p(s).keys
-                        val g = gmap(size.width.toFloat(), size.height.toFloat(), editor.duration, latestRange, density)
+                        val currentLayer = latestLayer
+                        val id = latestSelected
+                        val currentKeys = currentLayer.p(id).keys
+                        val map = gmap(size.width.toFloat(), size.height.toFloat(), duration, latestRange, density)
                         val x = change.position.x
                         val y = change.position.y
                         when (mode) {
-                            1 -> if (idx in ks.indices) {
-                                val prevT = if (idx > 0) ks[idx - 1].t + editor.frame / 2f else 0f
-                                val nextT = if (idx < ks.size - 1) ks[idx + 1].t - editor.frame / 2f else editor.duration
-                                // A value-graph point edits the value only. Retiming is performed
-                                // with the keyframe diamond in the timeline lane.
-                                var nv = g.v(y)
-                                if (s == PropId.OPACITY) nv = nv.coerceIn(0f, 100f)
-                                editor.replaceKey(l.id, s, idx, ks[idx].copy(v = nv), push = false)
+                            1 -> if (segment in currentKeys.indices) {
+                                var newValue = map.v(y)
+                                if (id == PropId.OPACITY) newValue = newValue.coerceIn(0f, 100f)
+                                editor.replaceKey(
+                                    currentLayer.id, id, segment,
+                                    currentKeys[segment].copy(v = newValue), push = false
+                                )
                             }
-                            2, 3 -> if (idx in 0 until ks.size - 1) {
-                                val a = ks[idx]
-                                val b = ks[idx + 1]
+                            2, 3 -> if (segment in currentKeys.indices && segment < currentKeys.lastIndex) {
+                                val a = currentKeys[segment]
+                                val b = currentKeys[segment + 1]
                                 val dt = max(b.t - a.t, 0.01f)
                                 val dv = b.v - a.v
-                                val tt = ((g.t(x) - a.t) / dt).coerceIn(0f, 1f)
-                                val vv = (if (abs(dv) > 1e-4f) (g.v(y) - a.v) / dv else 0f).coerceIn(-2f, 3f)
-                                val nk = if (mode == 2) a.copy(type = KeyType.BEZIER, x1 = tt, y1 = vv)
-                                else a.copy(type = KeyType.BEZIER, x2 = tt, y2 = vv)
-                                editor.replaceKey(l.id, s, idx, nk, push = false)
+                                val influence = ((map.t(x) - a.t) / dt).coerceIn(0.02f, 0.98f)
+                                val value = if (abs(dv) > 1e-4f) ((map.v(y) - a.v) / dv).coerceIn(-2f, 3f) else 0f
+                                val changed = if (mode == 2) {
+                                    a.copy(type = KeyType.BEZIER, x1 = influence, y1 = value)
+                                } else {
+                                    a.copy(type = KeyType.BEZIER, x2 = influence, y2 = value)
+                                }
+                                editor.replaceKey(currentLayer.id, id, segment, changed, push = false)
                             }
-                            else -> editor.seek(g.t(x))
+                            4, 5 -> if (segment in currentKeys.indices && segment < currentKeys.lastIndex) {
+                                val a = currentKeys[segment]
+                                val b = currentKeys[segment + 1]
+                                val dt = max(b.t - a.t, 0.01f)
+                                val baseSpeed = abs(b.v - a.v) / dt
+                                val influence = ((map.t(x) - a.t) / dt).coerceIn(0.02f, 0.98f)
+                                val targetSpeed = map.v(y).coerceAtLeast(0f)
+                                val changed = if (mode == 4) {
+                                    val controlY = if (baseSpeed > 1e-4f) targetSpeed / baseSpeed * influence else 0f
+                                    a.copy(type = KeyType.BEZIER, x1 = influence, y1 = controlY.coerceIn(-2f, 3f))
+                                } else {
+                                    val controlY = if (baseSpeed > 1e-4f) 1f - targetSpeed / baseSpeed * (1f - influence) else 1f
+                                    a.copy(type = KeyType.BEZIER, x2 = influence, y2 = controlY.coerceIn(-2f, 3f))
+                                }
+                                editor.replaceKey(currentLayer.id, id, segment, changed, push = false)
+                            }
+                            else -> editor.seek(map.t(x).coerceIn(0f, duration))
                         }
                     }
                 }
         ) {
-            val g = gmap(size.width, size.height, dur, range, density)
+            val activeMap = gmap(size.width, size.height, duration, range, density)
             labelPaint.textSize = 10.sp.toPx()
-            val grid = Color(0xFF24242F)
+            val grid = Color(0xFF292936)
             for (i in 0..4) {
-                val v = g.lo + (g.hi - g.lo) * i / 4f
-                val yy = g.y(v)
-                drawLine(grid, Offset(g.padL, yy), Offset(size.width - g.padR, yy), 1f)
-                drawIntoCanvas { it.nativeCanvas.drawText(fmt("%.0f", v), 2.dp.toPx(), yy + 3.dp.toPx(), labelPaint) }
-            }
-            val step = if (dur <= 10f) 1 else if (dur <= 30f) 5 else 10
-            var sec = 0
-            while (sec <= dur) {
-                val xx = g.x(sec.toFloat())
-                drawLine(grid, Offset(xx, g.padV), Offset(xx, size.height - g.padV), 1f)
-                sec += step
-            }
-
-            val curve = Path()
-            val n = 200
-            for (i in 0..n) {
-                val t = dur * i / n
-                val v = if (speed) speedAt(prop, t) else prop.valueAt(t)
-                if (i == 0) curve.moveTo(g.x(t), g.y(v)) else curve.lineTo(g.x(t), g.y(v))
-            }
-            drawPath(curve, KColors.Accent, style = Stroke(2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
-
-            if (speed) {
-                for (k in keys) drawLine(Color(0x558466FF), Offset(g.x(k.t), g.padV), Offset(g.x(k.t), size.height - g.padV), 1.dp.toPx())
-            } else {
-                val seg = segIndex(editor.selectedKey, keys.size)
-                val hp = if (seg >= 0) handlePts(keys, seg) else null
-                if (hp != null) {
-                    val ka = keys[seg]
-                    val kb = keys[seg + 1]
-                    val o1 = Offset(g.x(hp[0].first), g.y(hp[0].second))
-                    val o2 = Offset(g.x(hp[1].first), g.y(hp[1].second))
-                    drawLine(KColors.Muted, Offset(g.x(ka.t), g.y(ka.v)), o1, 1.5.dp.toPx())
-                    drawLine(KColors.Muted, Offset(g.x(kb.t), g.y(kb.v)), o2, 1.5.dp.toPx())
-                    drawCircle(KColors.Text, 5.dp.toPx(), o1)
-                    drawCircle(KColors.Text, 5.dp.toPx(), o2)
+                val value = range.first + (range.second - range.first) * i / 4f
+                val y = activeMap.y(value)
+                drawLine(grid, Offset(activeMap.padL, y), Offset(size.width - activeMap.padR, y), 1f)
+                drawIntoCanvas {
+                    it.nativeCanvas.drawText(
+                        fmt("%.1f", value),
+                        2.dp.toPx(),
+                        y + 3.dp.toPx(),
+                        labelPaint
+                    )
                 }
-                keys.forEachIndexed { i, k ->
-                    val c = Offset(g.x(k.t), g.y(k.v))
-                    if (i == editor.selectedKey) {
-                        drawCircle(Color.White, 8.dp.toPx(), c)
-                        drawCircle(KColors.Accent, 5.dp.toPx(), c)
+            }
+            val step = if (duration <= 10f) 1 else if (duration <= 30f) 5 else 10
+            var second = 0
+            while (second <= duration.toInt()) {
+                val x = activeMap.x(second.toFloat())
+                drawLine(grid, Offset(x, activeMap.padV), Offset(x, size.height - activeMap.padV), 1f)
+                second += step
+            }
+
+            shownProps.forEach { id ->
+                val current = layer.p(id)
+                val currentSpeed = speedGraph
+                val ownRange = if (id == selected) range else computeRange(current, duration, currentSpeed)
+                val map = gmap(size.width, size.height, duration, ownRange, density)
+                val curve = Path()
+                val samples = 260
+                for (i in 0..samples) {
+                    val t = duration * i / samples
+                    val value = if (currentSpeed) speedAt(current, t, duration) else current.valueAt(t)
+                    if (i == 0) curve.moveTo(map.x(t), map.y(value)) else curve.lineTo(map.x(t), map.y(value))
+                }
+                drawPath(
+                    curve,
+                    graphColor(id),
+                    style = Stroke(
+                        if (id == selected) 2.6.dp.toPx() else 1.6.dp.toPx(),
+                        cap = StrokeCap.Round,
+                        join = StrokeJoin.Round
+                    )
+                )
+            }
+
+            if (speedGraph) {
+                keys.forEachIndexed { index, key ->
+                    val point = Offset(activeMap.x(key.t), activeMap.y(keySpeed(keys, index)))
+                    if (index == editor.selectedKey) {
+                        drawCircle(Color.White, 8.dp.toPx(), point)
+                        drawCircle(graphColor(selected), 5.dp.toPx(), point)
                     } else {
-                        drawCircle(KColors.Accent, 6.dp.toPx(), c)
+                        drawCircle(graphColor(selected), 5.dp.toPx(), point)
+                    }
+                }
+                speedHandles(keys, editor.selectedKey).forEach { handle ->
+                    val key = keys[editor.selectedKey]
+                    val anchor = if (handle.outgoing) {
+                        Offset(activeMap.x(key.t), activeMap.y(keySpeed(keys, editor.selectedKey)))
+                    } else {
+                        Offset(activeMap.x(key.t), activeMap.y(keySpeed(keys, editor.selectedKey)))
+                    }
+                    val control = Offset(activeMap.x(handle.time), activeMap.y(handle.value))
+                    drawLine(KColors.Muted, anchor, control, 1.5.dp.toPx())
+                    drawCircle(Color.White, 6.dp.toPx(), control)
+                    drawCircle(graphColor(selected), 3.5.dp.toPx(), control)
+                }
+            } else {
+                valueHandles(keys, editor.selectedKey).forEach { handle ->
+                    val key = keys[editor.selectedKey]
+                    val anchor = Offset(activeMap.x(key.t), activeMap.y(key.v))
+                    val control = Offset(activeMap.x(handle.time), activeMap.y(handle.value))
+                    drawLine(KColors.Muted, anchor, control, 1.5.dp.toPx())
+                    drawCircle(Color.White, 6.dp.toPx(), control)
+                    drawCircle(graphColor(selected), 3.5.dp.toPx(), control)
+                }
+                keys.forEachIndexed { index, key ->
+                    val point = Offset(activeMap.x(key.t), activeMap.y(key.v))
+                    if (index == editor.selectedKey) {
+                        drawCircle(Color.White, 8.dp.toPx(), point)
+                        drawCircle(graphColor(selected), 5.dp.toPx(), point)
+                    } else {
+                        drawCircle(graphColor(selected), 5.dp.toPx(), point)
                     }
                 }
             }
-            val px = g.x(editor.time)
-            drawLine(Color(0xCCFFFFFF), Offset(px, 0f), Offset(px, size.height), 1.5.dp.toPx())
+
+            val playheadX = activeMap.x(editor.time)
+            drawLine(Color(0xDDE8E8EF), Offset(playheadX, 0f), Offset(playheadX, size.height), 1.5.dp.toPx())
         }
 
-        val sk = editor.selectedKey
+        val selectedKey = editor.selectedKey
         Row(
-            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp).height(40.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp).height(44.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            if (sk in keys.indices) {
-                val k = keys[sk]
-                fun set(nk: Keyframe) = editor.replaceKey(layer.id, sel, sk, nk, push = true)
+            if (selectedKey in keys.indices) {
+                val key = keys[selectedKey]
                 Text(
-                    "${fmt("%.2f", k.t)}s  ${sel.format(k.v)}",
-                    color = KColors.Muted, fontSize = 11.sp, modifier = Modifier.padding(end = 4.dp)
+                    fmt("%.2fs", key.t) + "  " + selected.format(key.v),
+                    color = KColors.Muted,
+                    fontSize = 11.sp,
+                    modifier = Modifier.padding(end = 4.dp)
                 )
-                Chip("Linear", k.type == KeyType.LINEAR) { set(k.copy(type = KeyType.LINEAR)) }
-                Chip("Hold", k.type == KeyType.HOLD) { set(k.copy(type = KeyType.HOLD)) }
-                Chip("Ease", k.type == KeyType.BEZIER && k.x1 == 0.42f && k.x2 == 0.58f) {
-                    set(k.copy(type = KeyType.BEZIER, x1 = 0.42f, y1 = 0f, x2 = 0.58f, y2 = 1f))
+                fun setSegment(segment: Int, transform: (Keyframe) -> Keyframe) {
+                    if (segment in keys.indices && segment < keys.lastIndex) {
+                        editor.replaceKey(layer.id, selected, segment, transform(keys[segment]), push = true)
+                    }
                 }
-                Chip("Ease in", k.type == KeyType.BEZIER && k.x1 == 0.42f && k.x2 == 1f) {
-                    set(k.copy(type = KeyType.BEZIER, x1 = 0.42f, y1 = 0f, x2 = 1f, y2 = 1f))
+                val outgoing = if (selectedKey < keys.lastIndex) selectedKey else selectedKey - 1
+                val incoming = selectedKey - 1
+                Chip("Linear", outgoing in keys.indices && keys[outgoing].type == KeyType.LINEAR) {
+                    setSegment(outgoing) { it.copy(type = KeyType.LINEAR) }
                 }
-                Chip("Ease out", k.type == KeyType.BEZIER && k.x1 == 0f && k.x2 == 0.58f) {
-                    set(k.copy(type = KeyType.BEZIER, x1 = 0f, y1 = 0f, x2 = 0.58f, y2 = 1f))
+                Chip("Hold", outgoing in keys.indices && keys[outgoing].type == KeyType.HOLD) {
+                    setSegment(outgoing) { it.copy(type = KeyType.HOLD) }
                 }
-                Chip("Elastic", k.type == KeyType.ELASTIC) { set(k.copy(type = KeyType.ELASTIC)) }
-                Chip("Bounce", k.type == KeyType.BOUNCE) { set(k.copy(type = KeyType.BOUNCE)) }
+                Chip("Ease In", incoming in keys.indices && keys[incoming].type == KeyType.BEZIER) {
+                    setSegment(incoming) { it.copy(type = KeyType.BEZIER, x2 = 0.58f, y2 = 1f) }
+                }
+                Chip("Ease Out", selectedKey in keys.indices && keys[selectedKey].type == KeyType.BEZIER) {
+                    setSegment(selectedKey) { it.copy(type = KeyType.BEZIER, x1 = 0.42f, y1 = 0f) }
+                }
+                Chip("Easy Ease", false) {
+                    editor.beginEdit()
+                    if (incoming in keys.indices && incoming < keys.lastIndex) {
+                        editor.replaceKey(layer.id, selected, incoming, keys[incoming].copy(type = KeyType.BEZIER, x2 = 0.667f, y2 = 1f), push = false)
+                    }
+                    if (selectedKey in keys.indices && selectedKey < keys.lastIndex) {
+                        val latest = layer.p(selected).keys[selectedKey]
+                        editor.replaceKey(layer.id, selected, selectedKey, latest.copy(type = KeyType.BEZIER, x1 = 0.333f, y1 = 0f), push = false)
+                    }
+                }
+                Chip("Elastic", outgoing in keys.indices && keys[outgoing].type == KeyType.ELASTIC) {
+                    setSegment(outgoing) { it.copy(type = KeyType.ELASTIC) }
+                }
+                Chip("Bounce", outgoing in keys.indices && keys[outgoing].type == KeyType.BOUNCE) {
+                    setSegment(outgoing) { it.copy(type = KeyType.BOUNCE) }
+                }
                 Chip("Wiggle", prop.expression?.startsWith("wiggle", true) == true) {
-                    editor.setExpression(layer.id, sel, if (prop.expression == null) "wiggle(2, 20)" else null)
+                    editor.setExpression(layer.id, selected, if (prop.expression == null) "wiggle(2, 20)" else null)
                 }
-                Chip("Delete", false) { editor.deleteKey(layer.id, sel, sk) }
+                Chip("Delete", false) { editor.deleteKey(layer.id, selected, selectedKey) }
             } else {
                 Text(
-                    "Drag points vertically to change value. Drag timeline diamonds to retime.",
-                    color = KColors.Dim, fontSize = 11.sp
+                    if (speedGraph) "Select a keyframe, then drag its direction handles to change velocity and influence."
+                    else "Drag keyframes vertically to change values. Drag Bézier handles to reshape the curve.",
+                    color = KColors.Dim,
+                    fontSize = 11.sp
                 )
             }
         }

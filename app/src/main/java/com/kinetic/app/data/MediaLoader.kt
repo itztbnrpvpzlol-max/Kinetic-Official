@@ -1,6 +1,7 @@
 package com.kinetic.app.data
 
 import android.content.Context
+import android.os.Build
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
@@ -10,19 +11,25 @@ import android.util.LruCache
 import com.kinetic.app.model.LayerType
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.util.concurrent.ConcurrentHashMap
 
 object MediaLoader {
     class Info(val length: Float?, val width: Int, val height: Int)
 
-    private val cache = object : LruCache<String, Bitmap>(48 * 1024 * 1024) {
+    private val cache = object : LruCache<String, Bitmap>(128 * 1024 * 1024) {
         override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount
     }
-    private val retrievers = HashMap<String, MediaMetadataRetriever>()
+    private val retrievers = ConcurrentHashMap<String, MediaMetadataRetriever>()
+    private val retrieverLocks = ConcurrentHashMap<String, Any>()
 
-    @Synchronized
+    fun configureCache(memoryMb: Int) { cache.resize(memoryMb.coerceIn(32, 512) * 1024 * 1024) }
+
     fun releaseAll() {
-        retrievers.values.forEach { runCatching { it.release() } }
+        retrievers.forEach { (key, retriever) ->
+            synchronized(retrieverLocks.getOrPut(key) { Any() }) { runCatching { retriever.release() } }
+        }
         retrievers.clear()
+        retrieverLocks.clear()
     }
 
     fun displayName(ctx: Context, uri: Uri): String {
@@ -86,16 +93,31 @@ object MediaLoader {
         return ctx.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, o) }
     }
 
-    @Synchronized
     private fun videoFrame(ctx: Context, uri: Uri, sec: Float, maxEdge: Int): Bitmap? {
-        val r = retrievers.getOrPut(uri.toString()) {
-            MediaMetadataRetriever().apply { setDataSource(ctx, uri) }
+        val key = uri.toString()
+        val lock = retrieverLocks.computeIfAbsent(key) { Any() }
+        return synchronized(lock) {
+            val r = retrievers.computeIfAbsent(key) {
+                MediaMetadataRetriever().apply { setDataSource(ctx, uri) }
+            }
+            val timeUs = (sec * 1_000_000f).toLong()
+            if (Build.VERSION.SDK_INT >= 27) {
+                var sourceW = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: maxEdge
+                var sourceH = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: maxEdge
+                val rotation = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
+                if (rotation == 90 || rotation == 270) { val swap = sourceW; sourceW = sourceH; sourceH = swap }
+                val scale = minOf(1f, maxEdge.toFloat() / maxOf(sourceW, sourceH, 1))
+                val targetW = (sourceW * scale).toInt().coerceAtLeast(1)
+                val targetH = (sourceH * scale).toInt().coerceAtLeast(1)
+                r.getScaledFrameAtTime(timeUs, MediaMetadataRetriever.OPTION_CLOSEST, targetW, targetH)
+            } else {
+                val frame = r.getFrameAtTime(timeUs, MediaMetadataRetriever.OPTION_CLOSEST) ?: return@synchronized null
+                val longest = maxOf(frame.width, frame.height)
+                if (longest <= maxEdge) frame else {
+                    val scale = maxEdge.toFloat() / longest
+                    Bitmap.createScaledBitmap(frame, (frame.width * scale).toInt(), (frame.height * scale).toInt(), true)
+                }
+            }
         }
-        val f = r.getFrameAtTime((sec * 1_000_000f).toLong(), MediaMetadataRetriever.OPTION_CLOSEST)
-            ?: return null
-        val m = maxOf(f.width, f.height)
-        if (m <= maxEdge) return f
-        val s = maxEdge.toFloat() / m
-        return Bitmap.createScaledBitmap(f, (f.width * s).toInt(), (f.height * s).toInt(), true)
     }
 }
