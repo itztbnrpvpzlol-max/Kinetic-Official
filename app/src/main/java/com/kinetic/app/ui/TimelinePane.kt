@@ -117,17 +117,15 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
     var graphSelection by remember { mutableStateOf<Pair<String, PropId>?>(null) }
     val leftPx = with(density) { LEFT_W.toPx() }
     val contentSec = max(editor.duration, editor.layers.maxOfOrNull { it.end } ?: 0f)
-    val contentW = (contentSec * pps).dp + 96.dp
+    // Half-viewport gutters allow time zero and the end to align with the fixed playhead.
+    val centerGutter = ((paneW - leftPx).coerceAtLeast(0f) / dens / 2f).dp
+    val contentW = centerGutter + (contentSec * pps).dp + centerGutter + 48.dp
 
-    // keep the playhead in view during playback
-    LaunchedEffect(editor.playing, pps) {
-        if (editor.playing) {
-            snapshotFlow { editor.time }.collect { t ->
-                val x = t * pps * dens
-                val viewW = paneW - leftPx
-                if (x < hScroll.value) hScroll.scrollTo(max(0f, x - 24f * dens).toInt())
-                else if (x > hScroll.value + viewW - 24f * dens) hScroll.scrollTo((x - viewW + 64f * dens).toInt())
-            }
+    // Center the playhead under the preview transport's play control.
+    LaunchedEffect(editor.time, pps, paneW) {
+        if (paneW > leftPx) {
+            val target = centerGutter.value * dens + editor.time * pps * dens
+            hScroll.scrollTo(target.coerceAtLeast(0f).toInt())
         }
     }
 
@@ -136,12 +134,23 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
             .fillMaxWidth()
             .onSizeChanged { paneW = it.width }
             .pointerInput(Unit) { detectPinch { z -> pps = (pps * z).coerceIn(18f, 400f) } }
+            .pointerInput(pps, paneW) {
+                detectDragGestures { change, drag ->
+                    if (change.position.x > leftPx) {
+                        change.consume()
+                        hScroll.dispatchRawDelta(-drag.x)
+                        val viewW = (paneW - leftPx).coerceAtLeast(1f)
+                        val centeredTime = (hScroll.value / dens) / pps
+                        editor.seek(centeredTime.coerceAtLeast(0f))
+                    }
+                }
+            }
     ) {
         Column(Modifier.fillMaxSize()) {
             Row(Modifier.fillMaxWidth().height(30.dp)) {
                 Spacer(Modifier.width(LEFT_W))
                 Box(Modifier.weight(1f).fillMaxHeight().horizontalScroll(hScroll)) {
-                    Ruler(editor, pps, contentW)
+                    Ruler(editor, pps, contentW, centerGutter)
                 }
             }
             LazyColumn(
@@ -162,7 +171,7 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
                 }
                 items(editor.layers, key = { it.id }) { layer ->
                     LayerRow(
-                        editor, layer, pps, hScroll, contentW,
+                        editor, layer, pps, hScroll, contentW, centerGutter,
                         expanded = layer.id in expandedLayers,
                         onToggleExpanded = { expandedLayers = if (layer.id in expandedLayers) expandedLayers - layer.id else expandedLayers + layer.id },
                         graphSelection = graphSelection,
@@ -173,7 +182,7 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
         }
         // playhead
         Canvas(Modifier.fillMaxSize()) {
-            val x = leftPx + editor.time * pps * dens - hScroll.value
+            val x = leftPx + (paneW - leftPx) / 2f
             if (x >= leftPx - 1f && x <= size.width) {
                 drawLine(Color.White, Offset(x, 14.dp.toPx()), Offset(x, size.height), 2.dp.toPx())
                 val tri = Path().apply {
@@ -189,7 +198,7 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun Ruler(editor: EditorState, pps: Float, contentW: Dp) {
+private fun Ruler(editor: EditorState, pps: Float, contentW: Dp, centerGutter: Dp) {
     val dens = LocalDensity.current.density
     val textPaint = remember {
         Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF8D8BA3.toInt() }
@@ -198,11 +207,11 @@ private fun Ruler(editor: EditorState, pps: Float, contentW: Dp) {
         Modifier
             .width(contentW)
             .fillMaxHeight()
-            .pointerInput(pps) { detectTapGestures { o -> editor.seekSnap(o.x / dens / pps, 8f / pps) } }
-            .pointerInput(pps) {
+            .pointerInput(pps, centerGutter) { detectTapGestures { o -> editor.seekSnap(((o.x / dens - centerGutter.value) / pps).coerceAtLeast(0f), 8f / pps) } }
+            .pointerInput(pps, centerGutter) {
                 detectDragGestures { change, _ ->
                     change.consume()
-                    editor.seekSnap(change.position.x / dens / pps, 8f / pps)
+                    editor.seekSnap(((change.position.x / dens - centerGutter.value) / pps).coerceAtLeast(0f), 8f / pps)
                 }
             }
     ) {
@@ -210,10 +219,11 @@ private fun Ruler(editor: EditorState, pps: Float, contentW: Dp) {
         val step = if (pps >= 40f) 1 else if (pps >= 20f) 2 else 5
         val secs = (size.width / dens / pps).toInt() + 1
         val tick = Color(0xFF34344A)
-        val endX = editor.duration * pps * dens
+        val originX = centerGutter.toPx()
+        val endX = originX + editor.duration * pps * dens
         if (endX < size.width) drawRect(Color(0x55000000), Offset(endX, 0f), Size(size.width - endX, size.height))
         for (s in 0..secs) {
-            val x = s * pps * dens
+            val x = originX + s * pps * dens
             if (pps >= 80f) {
                 drawLine(tick, Offset(x + pps * dens / 2f, size.height - 5.dp.toPx()), Offset(x + pps * dens / 2f, size.height), 1.dp.toPx())
             }
@@ -228,7 +238,7 @@ private fun Ruler(editor: EditorState, pps: Float, contentW: Dp) {
 
 @Composable
 private fun LayerRow(
-    editor: EditorState, layer: Layer, pps: Float, hScroll: ScrollState, contentW: Dp,
+    editor: EditorState, layer: Layer, pps: Float, hScroll: ScrollState, contentW: Dp, centerGutter: Dp,
     expanded: Boolean, onToggleExpanded: () -> Unit,
     graphSelection: Pair<String, PropId>?, onGraphSelection: (PropId) -> Unit
 ) {
@@ -309,7 +319,7 @@ private fun LayerRow(
                 }
             }
             Box(Modifier.weight(1f).fillMaxHeight().horizontalScroll(hScroll)) {
-                Box(Modifier.width(contentW).fillMaxHeight()) { Clip(editor, layer, pps, selected) }
+                Box(Modifier.width(contentW).fillMaxHeight()) { Clip(editor, layer, pps, selected, centerGutter) }
             }
         }
         val parentName = layer.parentId?.let { id -> editor.layers.firstOrNull { it.id == id }?.name }
@@ -319,7 +329,7 @@ private fun LayerRow(
             }
         }
         if (expanded) TransformTimelineGroup(
-            editor, layer, pps, hScroll, contentW,
+            editor, layer, pps, hScroll, contentW, centerGutter,
             graphOpen = graphSelection?.first == layer.id,
             graphProp = graphSelection?.takeIf { it.first == layer.id }?.second,
             onGraphSelection = onGraphSelection
@@ -328,7 +338,7 @@ private fun LayerRow(
 }
 
 @Composable
-private fun Clip(editor: EditorState, layer: Layer, pps: Float, selected: Boolean) {
+private fun Clip(editor: EditorState, layer: Layer, pps: Float, selected: Boolean, centerGutter: Dp) {
     val ctx = LocalContext.current
     val dens = LocalDensity.current.density
     val shape = RoundedCornerShape(8.dp)
@@ -343,7 +353,7 @@ private fun Clip(editor: EditorState, layer: Layer, pps: Float, selected: Boolea
 
     Box(
         Modifier
-            .offset(x = (layer.start * pps).dp)
+            .offset(x = centerGutter + (layer.start * pps).dp)
             .width(max(layer.duration * pps, 6f).dp)
             .fillMaxHeight()
             .padding(vertical = 3.dp)
@@ -426,7 +436,7 @@ private fun Waveform(seed: String) {
 
 @Composable
 private fun TransformTimelineGroup(
-    editor: EditorState, layer: Layer, pps: Float, hScroll: ScrollState, contentW: Dp,
+    editor: EditorState, layer: Layer, pps: Float, hScroll: ScrollState, contentW: Dp, centerGutter: Dp,
     graphOpen: Boolean, graphProp: PropId?, onGraphSelection: (PropId) -> Unit
 ) {
     Row(Modifier.fillMaxWidth().height(28.dp).background(KColors.Surface2), verticalAlignment = Alignment.CenterVertically) {
@@ -440,7 +450,7 @@ private fun TransformTimelineGroup(
     }
     if (layer.type != LayerType.AUDIO) {
         for (id in PropId.values()) {
-            PropertyTimelineRow(editor, layer, id, pps, hScroll, contentW, graphProp == id, onGraphSelection)
+            PropertyTimelineRow(editor, layer, id, pps, hScroll, contentW, centerGutter, graphProp == id, onGraphSelection)
             if (graphOpen && graphProp == id) {
                 GraphPanel(editor, layer, Modifier.fillMaxWidth().height(208.dp).background(KColors.Bg))
             }
@@ -450,7 +460,7 @@ private fun TransformTimelineGroup(
 
 @Composable
 private fun PropertyTimelineRow(
-    editor: EditorState, layer: Layer, id: PropId, pps: Float, hScroll: ScrollState, contentW: Dp,
+    editor: EditorState, layer: Layer, id: PropId, pps: Float, hScroll: ScrollState, contentW: Dp, centerGutter: Dp,
     graphSelected: Boolean, onGraphSelection: (PropId) -> Unit
 ) {
     val dens = LocalDensity.current.density
@@ -460,15 +470,17 @@ private fun PropertyTimelineRow(
         Row(Modifier.width(LEFT_W).fillMaxHeight().padding(start = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(id.label, color = if (editor.selectedProp == id) KColors.Text else KColors.Muted, fontSize = 10.sp, modifier = Modifier.weight(1f).clickable { editor.selectProp(id) }, maxLines = 1)
             Box(
-                Modifier.width(62.dp).height(28.dp)
-                    .pointerInput(layer.id, id) {
+                Modifier.width(68.dp).height(28.dp).then(
+                    if (editor.settings.afterEffectsScrubbing) Modifier.pointerInput(layer.id, id) {
                         detectHorizontalDragGestures(onDragStart = { editor.beginEdit() }) { change, dx ->
                             change.consume()
                             val current = editor.layers.firstOrNull { it.id == layer.id }?.p(id)?.valueAt(editor.time) ?: prop.valueAt(editor.time)
                             editor.setPropValue(layer.id, id, current + dx / dens * id.scrubStep * editor.settings.scrubMultiplier)
                         }
-                    }, contentAlignment = Alignment.Center
-            ) { Text(id.format(prop.valueAt(editor.time)), color = KColors.Accent, fontSize = 9.sp, maxLines = 1) }
+                    } else Modifier
+                ).clickable(enabled = !editor.settings.afterEffectsScrubbing) { editor.selectProp(id) },
+                contentAlignment = Alignment.Center
+            ) { Text(id.format(prop.valueAt(editor.time)), color = KColors.Accent, fontSize = 10.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, maxLines = 1) }
             Box(Modifier.size(24.dp).clickable { editor.toggleStopwatch(layer.id, id) }, contentAlignment = Alignment.Center) {
                 KIcon(IconKind.STOPWATCH, if (prop.animated) KColors.Accent else KColors.Dim, Modifier.size(14.dp))
             }
@@ -485,8 +497,8 @@ private fun PropertyTimelineRow(
                 .pointerInput(layer.id, id, pps) {
                     detectTapGestures { o ->
                         val keysNow = latestKeys
-                        val nearest = keysNow.indices.minByOrNull { i -> abs(keysNow[i].t * pps * dens - o.x) }
-                        if (nearest != null && abs(keysNow[nearest].t * pps * dens - o.x) < 22.dp.toPx()) editor.selectKey(id, nearest, keysNow[nearest].t)
+                        val nearest = keysNow.indices.minByOrNull { i -> abs(centerGutter.toPx() + keysNow[i].t * pps * dens - o.x) }
+                        if (nearest != null && abs(centerGutter.toPx() + keysNow[nearest].t * pps * dens - o.x) < 22.dp.toPx()) editor.selectKey(id, nearest, keysNow[nearest].t)
                         else editor.selectProp(id)
                     }
                 }
@@ -503,13 +515,13 @@ private fun PropertyTimelineRow(
                         onDragEnd = { dragIndex = -1 }, onDragCancel = { dragIndex = -1 }
                     ) { change, _ ->
                         change.consume()
-                        if (dragIndex in latestKeys.indices) editor.moveKeyTime(layer.id, id, dragIndex, (change.position.x / dens / pps).coerceIn(0f, editor.duration))
+                        if (dragIndex in latestKeys.indices) editor.moveKeyTime(layer.id, id, dragIndex, ((change.position.x / dens - centerGutter.value) / pps).coerceIn(0f, editor.duration))
                     }
                 }) {
                 val cy = size.height / 2f
                 val r = 5.dp.toPx()
                 prop.keys.forEachIndexed { i, key ->
-                    val x = key.t * pps * dens
+                    val x = centerGutter.toPx() + key.t * pps * dens
                     val diamond = Path().apply { moveTo(x, cy-r); lineTo(x+r, cy); lineTo(x, cy+r); lineTo(x-r, cy); close() }
                     drawPath(diamond, if (editor.selectedProp == id && editor.selectedKey == i) Color.White else KColors.Accent)
                 }

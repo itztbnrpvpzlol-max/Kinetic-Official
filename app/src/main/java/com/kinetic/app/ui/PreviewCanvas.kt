@@ -2,6 +2,10 @@ package com.kinetic.app.ui
 
 import android.graphics.Bitmap
 import android.graphics.DashPathEffect
+import android.graphics.ColorMatrix
+import android.graphics.ColorMatrixColorFilter
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffXfermode
 import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.Typeface
@@ -9,6 +13,7 @@ import android.net.Uri
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateMapOf
@@ -28,7 +33,7 @@ import com.kinetic.app.model.layerMatrix
 import android.graphics.Path as AndroidPath
 
 @Composable
-fun PreviewCanvas(editor: EditorState, modifier: Modifier = Modifier) {
+fun CpuPreviewCanvas(editor: EditorState, modifier: Modifier = Modifier) {
     val ctx = LocalContext.current
     val bitmaps = remember { mutableStateMapOf<String, Bitmap>() }
 
@@ -38,14 +43,19 @@ fun PreviewCanvas(editor: EditorState, modifier: Modifier = Modifier) {
         val uri = l.uri
         if (uri != null && (l.type == LayerType.IMAGE || l.type == LayerType.VIDEO)) {
             val active = l.activeAt(t)
-            val src = (t - l.start + l.srcOffset).coerceAtLeast(0f)
+            val src = ((t - l.start).coerceAtLeast(0f) * l.speed + l.srcOffset).coerceAtLeast(0f)
             // Decode video preview frames at a bounded rate. Scrubbing and playback
             // share the same bucket size so toggling transport doesn't invalidate cache.
-            val bucket = if (!active) -1 else if (l.type == LayerType.VIDEO) (src * 6f).toInt() else 0
+            val bucket = if (!active) -1 else if (l.type == LayerType.VIDEO) (src * 12f).toInt() else 0
             key(l.id) {
+                DisposableEffect(l.id) {
+                    onDispose { bitmaps.remove(l.id) }
+                }
                 LaunchedEffect(uri, bucket) {
                     if (bucket >= 0) {
-                        MediaLoader.bitmapFor(ctx, Uri.parse(uri), l.type, src, 6, 640)?.let { bitmaps[l.id] = it }
+                        MediaLoader.bitmapFor(ctx, Uri.parse(uri), l.type, src, 12, 640)?.let { bitmaps[l.id] = it }
+                    } else {
+                        bitmaps.remove(l.id)
                     }
                 }
             }
@@ -84,6 +94,14 @@ fun PreviewCanvas(editor: EditorState, modifier: Modifier = Modifier) {
                 val alpha = (l.p(PropId.OPACITY).valueAt(time) * 2.55f).toInt().coerceIn(0, 255)
                 nc.save()
                 nc.concat(layerMatrix(l, time, byId))
+                if (l.maskEnabled) nc.clipRect(0f, 0f, l.width * 0.8f, l.height * 0.8f)
+                paint.xfermode = when (l.blendMode) {
+                    "Multiply" -> PorterDuffXfermode(PorterDuff.Mode.MULTIPLY)
+                    "Screen" -> PorterDuffXfermode(PorterDuff.Mode.SCREEN)
+                    "Add" -> PorterDuffXfermode(PorterDuff.Mode.ADD)
+                    else -> null
+                }
+                paint.colorFilter = if ("Grayscale" in l.effects) ColorMatrixColorFilter(ColorMatrix().apply { setSaturation(0f) }) else null
                 when (l.type) {
                     LayerType.IMAGE, LayerType.VIDEO -> {
                         val bmp = bitmaps[l.id]
@@ -101,10 +119,21 @@ fun PreviewCanvas(editor: EditorState, modifier: Modifier = Modifier) {
                     }
                     LayerType.TEXT -> {
                         textPaint.color = l.color; textPaint.alpha = alpha
+                        textPaint.xfermode = when (l.blendMode) {
+                            "Multiply" -> PorterDuffXfermode(PorterDuff.Mode.MULTIPLY)
+                            "Screen" -> PorterDuffXfermode(PorterDuff.Mode.SCREEN)
+                            "Add" -> PorterDuffXfermode(PorterDuff.Mode.ADD)
+                            else -> null
+                        }
+                        textPaint.colorFilter = if ("Grayscale" in l.effects) ColorMatrixColorFilter(ColorMatrix().apply { setSaturation(0f) }) else null
                         nc.drawText(l.text, l.width / 2f, l.height / 2f + 40f, textPaint)
                     }
                     else -> Unit
                 }
+                paint.xfermode = null
+                paint.colorFilter = null
+                textPaint.xfermode = null
+                textPaint.colorFilter = null
                 nc.restore()
             }
             nc.restore()

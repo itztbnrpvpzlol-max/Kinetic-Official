@@ -3,6 +3,7 @@ package com.kinetic.app.model
 import android.graphics.Matrix
 import java.util.Locale
 import java.util.UUID
+import com.kinetic.app.engine.NativeRenderEngine
 import kotlin.math.abs
 import kotlin.math.pow
 
@@ -55,11 +56,27 @@ private fun bez(s: Float, a: Float, b: Float): Float {
 }
 
 fun cubicProgress(u: Float, x1: Float, y1: Float, x2: Float, y2: Float): Float {
+    val progress = u.coerceIn(0f, 1f)
+    // Use the native evaluator for the live preview path when the C++ library
+    // is available; retain the exact Kotlin fallback for unsupported ABIs.
+    if (NativeRenderEngine.available) {
+        return runCatching {
+            NativeRenderEngine.nativeCubicProgress(progress, x1, y1, x2, y2)
+        }.getOrElse {
+            var lo = 0f
+            var hi = 1f
+            repeat(24) {
+                val mid = (lo + hi) / 2f
+                if (bez(mid, x1, x2) < progress) lo = mid else hi = mid
+            }
+            bez((lo + hi) / 2f, y1, y2)
+        }
+    }
     var lo = 0f
     var hi = 1f
     repeat(24) {
         val mid = (lo + hi) / 2f
-        if (bez(mid, x1, x2) < u) lo = mid else hi = mid
+        if (bez(mid, x1, x2) < progress) lo = mid else hi = mid
     }
     return bez((lo + hi) / 2f, y1, y2)
 }
@@ -140,7 +157,11 @@ data class Layer(
     val color: Int = 0xFF8D8BA3.toInt(),
     val props: Map<PropId, Prop>,
     /** Reserved for later: adjustment layers will hold effects here. Intentionally empty for now. */
-    val effects: List<String> = emptyList()
+    val effects: List<String> = emptyList(),
+    val speed: Float = 1f,
+    val volume: Float = 1f,
+    val maskEnabled: Boolean = false,
+    val blendMode: String = "Normal"
 ) {
     val end: Float get() = start + duration
     fun p(id: PropId): Prop = props.getValue(id)

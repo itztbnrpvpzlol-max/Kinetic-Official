@@ -1,5 +1,6 @@
 package com.kinetic.app.ui
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -25,6 +27,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
@@ -88,8 +91,8 @@ private fun PropRow(editor: EditorState, layer: Layer, id: PropId) {
             Modifier.size(34.dp).clickable { editor.toggleStopwatch(layer.id, id) },
             contentAlignment = Alignment.Center
         ) { KIcon(IconKind.STOPWATCH, if (p.animated) KColors.Accent else KColors.Dim) }
-        Text(id.label, color = KColors.Text, fontSize = 13.sp, modifier = Modifier.weight(1f), maxLines = 1)
-        ScrubValue(editor, layer, id, value)
+        Text(id.label, color = KColors.Text, fontSize = 14.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold, modifier = Modifier.weight(1f), maxLines = 1)
+        if (editor.settings.afterEffectsScrubbing) ScrubValue(editor, layer, id, value) else PropertySlider(editor, layer, id, value)
         Box(
             Modifier.size(30.dp).clickable(enabled = p.animated) { editor.jumpKey(layer.id, id, -1) },
             contentAlignment = Alignment.Center
@@ -110,29 +113,46 @@ private fun PropRow(editor: EditorState, layer: Layer, id: PropId) {
     }
 }
 
+
+@Composable
+private fun PropertySlider(editor: EditorState, layer: Layer, id: PropId, value: Float) {
+    val range = when (id) {
+        PropId.OPACITY -> 0f..100f
+        PropId.ROTATION -> -360f..360f
+        PropId.SCALE_X, PropId.SCALE_Y -> 0f..300f
+        else -> -1000f..1000f
+    }
+    var editing by remember(layer.id, id) { mutableStateOf(false) }
+    Column(Modifier.width(116.dp).padding(horizontal = 3.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(id.format(value), color = KColors.Accent, fontSize = 10.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, maxLines = 1)
+        Canvas(Modifier.fillMaxWidth().height(7.dp)) {
+            val gap = size.width / 24f
+            for (i in 0..24) drawLine(KColors.Muted.copy(alpha = if (i % 4 == 0) 0.9f else 0.45f), Offset(i * gap, 1f), Offset(i * gap, if (i % 4 == 0) 7f else 5f), 1.dp.toPx())
+        }
+        Slider(value = value.coerceIn(range), onValueChange = {
+            if (!editing) { editor.beginEdit(); editing = true }
+            editor.setPropValue(layer.id, id, it)
+        }, onValueChangeFinished = { editing = false }, valueRange = range)
+    }
+}
+
 /** After Effects style scrubby value: drag left/right to change, tap to type. */
 @Composable
 private fun ScrubValue(editor: EditorState, layer: Layer, id: PropId, value: Float) {
     val dens = LocalDensity.current.density
     var typing by remember { mutableStateOf(false) }
     Box(
-        Modifier
-            .width(94.dp)
-            .height(30.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(KColors.Surface2)
-            .pointerInput(layer.id, id) {
+        Modifier.width(104.dp).height(32.dp).clip(RoundedCornerShape(8.dp)).background(KColors.Surface2)
+            .then(if (editor.settings.afterEffectsScrubbing) Modifier.pointerInput(layer.id, id) {
                 detectHorizontalDragGestures(onDragStart = { editor.beginEdit() }) { change, dx ->
                     change.consume()
                     val cur = editor.layers.firstOrNull { it.id == layer.id }?.p(id)?.valueAt(editor.time)
-                    if (cur != null) {
-                        editor.setPropValue(layer.id, id, cur + dx / dens * id.scrubStep * editor.settings.scrubMultiplier)
-                    }
+                    if (cur != null) editor.setPropValue(layer.id, id, cur + dx / dens * id.scrubStep * editor.settings.scrubMultiplier)
                 }
-            }
+            } else Modifier)
             .pointerInput(layer.id, id) { detectTapGestures { typing = true } },
         contentAlignment = Alignment.Center
-    ) { Text(id.format(value), color = KColors.Accent, fontSize = 12.sp, maxLines = 1) }
+    ) { Text(id.format(value), color = KColors.Accent, fontSize = 13.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, maxLines = 1) }
 
     if (typing) {
         TextInputDialog(
