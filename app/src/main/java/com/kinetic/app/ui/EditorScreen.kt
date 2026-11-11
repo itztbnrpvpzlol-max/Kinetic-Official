@@ -10,6 +10,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -373,14 +374,19 @@ private fun FloatingEditingDock(active: String, hasSelection: Boolean, onSelect:
             .height(68.dp),
         contentAlignment = Alignment.CenterStart
     ) {
-        Row(
-            Modifier.fillMaxWidth().padding(end = 32.dp)
-                .clip(shape).background(KColors.Surface)
-                .border(1.dp, KColors.Line, shape)
-                .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 6.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+            val itemWidth = if (hasSelection) 68.dp else 62.dp
+            // Size the capsule to its actual tool set. When a layer is selected,
+            // the longer tool set grows only as far as the space before the FAB.
+            val dockWidth = (itemWidth * tools.size + 12.dp).coerceAtMost(maxWidth - 32.dp)
+            Row(
+                Modifier.width(dockWidth).padding(end = 0.dp)
+                    .clip(shape).background(KColors.Surface)
+                    .border(1.dp, KColors.Line, shape)
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 6.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
             tools.forEach { (label, icon) ->
                 Column(
                     Modifier.width(if (hasSelection) 68.dp else 62.dp)
@@ -393,6 +399,7 @@ private fun FloatingEditingDock(active: String, hasSelection: Boolean, onSelect:
                     Text(label, color = if (active == label) KColors.Accent else KColors.Muted,
                         fontSize = 8.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
+            }
             }
         }
         Box(
