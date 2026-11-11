@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feature/native-render-audio-overhaul
+      - migration/files-only
   workflow_dispatch:
 
 permissions:
