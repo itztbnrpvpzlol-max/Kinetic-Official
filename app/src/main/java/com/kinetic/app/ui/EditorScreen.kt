@@ -365,38 +365,45 @@ private fun FloatingEditingDock(active: String, hasSelection: Boolean, onSelect:
         )
     }
     val shape = RoundedCornerShape(30.dp)
-    Row(
+    // The import action floats over the dock's right edge instead of taking up
+    // a slot inside the scrolling tool row. The dock ends at the FAB's center,
+    // so there is no unused capsule area beyond the plus button.
+    Box(
         Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp)
-            .clip(shape).background(KColors.Surface)
-            .border(1.dp, KColors.Line, shape)
-            .horizontalScroll(rememberScrollState())
-            .padding(horizontal = 6.dp, vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .height(68.dp),
+        contentAlignment = Alignment.CenterStart
     ) {
-        tools.forEach { (label, icon) ->
-            Column(
-                Modifier.width(if (hasSelection) 68.dp else 62.dp)
-                    .height(48.dp).clip(RoundedCornerShape(10.dp))
-                    .clickable { onSelect(label) }.padding(vertical = 3.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
-            ) {
-                KIcon(icon, if (active == label) KColors.Accent else KColors.Muted, Modifier.size(20.dp))
-                Text(label, color = if (active == label) KColors.Accent else KColors.Muted,
-                    fontSize = 8.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Row(
+            Modifier.fillMaxWidth().padding(end = 32.dp)
+                .clip(shape).background(KColors.Surface)
+                .border(1.dp, KColors.Line, shape)
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 6.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            tools.forEach { (label, icon) ->
+                Column(
+                    Modifier.width(if (hasSelection) 68.dp else 62.dp)
+                        .height(48.dp).clip(RoundedCornerShape(10.dp))
+                        .clickable { onSelect(label) }.padding(vertical = 3.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    KIcon(icon, if (active == label) KColors.Accent else KColors.Muted, Modifier.size(20.dp))
+                    Text(label, color = if (active == label) KColors.Accent else KColors.Muted,
+                        fontSize = 8.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
             }
         }
-        Box(Modifier.width(1.dp).height(34.dp).background(KColors.Line))
-        Column(
-            Modifier.padding(start = 8.dp, end = 2.dp).width(50.dp).height(48.dp)
-                .clip(CircleShape).clickable { onSelect("Import") },
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
+        Box(
+            Modifier.align(Alignment.CenterEnd)
+                .size(64.dp).clip(CircleShape)
+                .background(KColors.Fab)
+                .border(1.dp, KColors.Line, CircleShape)
+                .clickable { onSelect("Import") },
+            contentAlignment = Alignment.Center
         ) {
-            Box(Modifier.size(34.dp).clip(CircleShape).background(KColors.Fab), contentAlignment = Alignment.Center) {
-                KIcon(IconKind.PLUS, KColors.Text, Modifier.size(22.dp))
-            }
-            Text("Import", color = KColors.Muted, fontSize = 8.sp)
+            KIcon(IconKind.PLUS, KColors.Text, Modifier.size(30.dp))
         }
     }
 }
