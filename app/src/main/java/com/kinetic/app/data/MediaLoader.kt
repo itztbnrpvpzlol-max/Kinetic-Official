@@ -16,13 +16,21 @@ import java.util.concurrent.ConcurrentHashMap
 object MediaLoader {
     class Info(val length: Float?, val width: Int, val height: Int)
 
-    private val cache = object : LruCache<String, Bitmap>(128 * 1024 * 1024) {
+    // Bitmap memory is expensive on mobile. Keep the preview cache proportional
+    // to the app heap instead of allowing a user preference to consume hundreds
+    // of megabytes and trigger GC pauses or process-level memory pressure.
+    private val cacheBudgetMb = (Runtime.getRuntime().maxMemory() / (1024L * 1024L) / 8L)
+        .toInt().coerceIn(16, 128)
+    private val cache = object : LruCache<String, Bitmap>(cacheBudgetMb * 1024 * 1024) {
         override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount
     }
     private val retrievers = ConcurrentHashMap<String, MediaMetadataRetriever>()
     private val retrieverLocks = ConcurrentHashMap<String, Any>()
 
-    fun configureCache(memoryMb: Int) { cache.resize(memoryMb.coerceIn(32, 512) * 1024 * 1024) }
+    fun configureCache(memoryMb: Int) {
+        val safeMb = memoryMb.coerceIn(16, 512).coerceAtMost(cacheBudgetMb)
+        cache.resize(safeMb * 1024 * 1024)
+    }
 
     fun releaseAll() {
         retrievers.forEach { (key, retriever) ->
