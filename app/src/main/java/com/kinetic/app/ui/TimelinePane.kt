@@ -117,14 +117,18 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
     var graphSelection by remember { mutableStateOf<Pair<String, PropId>?>(null) }
     val leftPx = with(density) { LEFT_W.toPx() }
     val contentSec = max(editor.duration, editor.layers.maxOfOrNull { it.end } ?: 0f)
-    // Half-viewport gutters allow time zero and the end to align with the fixed playhead.
-    val centerGutter = ((paneW - leftPx).coerceAtLeast(0f) / dens / 2f).dp
-    val contentW = centerGutter + (contentSec * pps).dp + centerGutter + 48.dp
+    // Place timeline time zero at the screen center, directly below the Preview play button.
+    // The timeline's scroll viewport begins after the fixed layer-name column.
+    val centerGutter = ((paneW / 2f - leftPx).coerceAtLeast(0f) / dens).dp
+    // Preserve enough trailing space for the end of the timeline to reach the fixed center playhead.
+    val contentW = centerGutter + (contentSec * pps).dp + centerGutter + LEFT_W + 48.dp
 
     // Center the playhead under the preview transport's play control.
     LaunchedEffect(editor.time, pps, paneW) {
         if (paneW > leftPx) {
-            val target = centerGutter.value * dens + editor.time * pps * dens
+            // The gutter already offsets time zero to the screen-center playhead, so only
+            // the current time contributes to the horizontal scroll offset.
+            val target = editor.time * pps * dens
             hScroll.scrollTo(target.coerceAtLeast(0f).toInt())
         }
     }
@@ -182,7 +186,9 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
         }
         // playhead
         Canvas(Modifier.fillMaxSize()) {
-            val x = leftPx + (paneW - leftPx) / 2f
+            // Keep the playhead aligned with the center Preview play/pause control,
+            // not the center of the timeline viewport (which excludes the layer column).
+            val x = paneW / 2f
             if (x >= leftPx - 1f && x <= size.width) {
                 drawLine(Color.White, Offset(x, 14.dp.toPx()), Offset(x, size.height), 2.dp.toPx())
                 val tri = Path().apply {
