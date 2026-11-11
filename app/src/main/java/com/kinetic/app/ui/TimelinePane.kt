@@ -126,10 +126,12 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
     // Center the playhead under the preview transport's play control.
     LaunchedEffect(editor.time, pps, paneW) {
         if (paneW > leftPx) {
-            // The gutter already offsets time zero to the screen-center playhead, so only
-            // the current time contributes to the horizontal scroll offset.
-            val target = editor.time * pps * dens
-            hScroll.scrollTo(target.coerceAtLeast(0f).toInt())
+            // Keep the playhead centered with a non-suspending delta update.
+            // scrollTo() on every transport frame repeatedly enters the scroll
+            // mutation pipeline and can compete with gestures and layout.
+            val target = (editor.time * pps * dens).coerceAtLeast(0f)
+            val delta = target - hScroll.value.toFloat()
+            if (kotlin.math.abs(delta) > 0.5f) hScroll.dispatchRawDelta(delta)
         }
     }
 
@@ -351,7 +353,7 @@ private fun Clip(editor: EditorState, layer: Layer, pps: Float, selected: Boolea
     val thumb by produceState<Bitmap?>(null, layer.uri) {
         val u = layer.uri
         value = if (u != null && (layer.type == LayerType.IMAGE || layer.type == LayerType.VIDEO)) {
-            MediaLoader.bitmapFor(ctx, Uri.parse(u), layer.type, 0f)
+            MediaLoader.bitmapFor(ctx, Uri.parse(u), layer.type, 0f, 5, 320)
         } else null
     }
     val img = remember(thumb) { thumb?.asImageBitmap() }
@@ -425,17 +427,28 @@ private fun Clip(editor: EditorState, layer: Layer, pps: Float, selected: Boolea
 
 @Composable
 private fun Waveform(seed: String) {
-    Canvas(Modifier.fillMaxSize().padding(horizontal = 4.dp)) {
+    // The current waveform is a lightweight placeholder, so cap its geometry.
+    // A long clip at high zoom must not create thousands of draw operations on
+    // every timeline invalidation.
+    val peaks = remember(seed) {
         val rnd = Random(seed.hashCode())
-        val gap = 5.dp.toPx()
-        var x = 0f
-        while (x < size.width) {
-            val hh = size.height * (0.2f + rnd.nextFloat() * 0.6f)
+        FloatArray(240) { 0.2f + rnd.nextFloat() * 0.6f }
+    }
+    Canvas(Modifier.fillMaxSize().padding(horizontal = 4.dp)) {
+        if (size.width <= 0f) return@Canvas
+        val desiredGap = 5.dp.toPx()
+        val count = kotlin.math.ceil(size.width / desiredGap).toInt().coerceIn(1, peaks.size)
+        val step = size.width / count
+        val stroke = 2.dp.toPx()
+        repeat(count) { index ->
+            val x = (index + 0.5f) * step
+            val hh = size.height * peaks[index]
             drawLine(
-                Color(0xFF6D4DFF), Offset(x, (size.height - hh) / 2f), Offset(x, (size.height + hh) / 2f),
-                strokeWidth = 2.dp.toPx()
+                Color(0xFF6D4DFF),
+                Offset(x, (size.height - hh) / 2f),
+                Offset(x, (size.height + hh) / 2f),
+                strokeWidth = stroke
             )
-            x += gap
         }
     }
 }
