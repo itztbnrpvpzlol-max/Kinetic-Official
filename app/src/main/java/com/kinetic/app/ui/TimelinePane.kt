@@ -117,7 +117,7 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
     var graphSelection by remember { mutableStateOf<Pair<String, PropId>?>(null) }
     val leftPx = with(density) { LEFT_W.toPx() }
     val contentSec = max(editor.duration, editor.layers.maxOfOrNull { it.end } ?: 0f)
-        // Place timeline time zero at the screen center, directly below the Preview play button.
+    // Place timeline time zero at the screen center, directly below the Preview play button.
     // The timeline's scroll viewport begins after the fixed layer-name column.
     val centerGutter = ((paneW / 2f - leftPx).coerceAtLeast(0f) / dens).dp
     // Preserve enough trailing space for the end of the timeline to reach the fixed center playhead.
