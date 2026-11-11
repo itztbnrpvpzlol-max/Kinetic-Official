@@ -35,6 +35,23 @@ jobs:
         with:
           gradle-version: '8.7'
 
+      - name: Install Android NDK and CMake
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDKMANAGER="${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager"
+          for attempt in 1 2 3; do
+            rm -rf "${ANDROID_HOME}/ndk/26.1.10909125"
+            if yes | "${SDKMANAGER}" --install "ndk;26.1.10909125" "cmake;3.22.1"; then
+              break
+            fi
+            if [ "${attempt}" -eq 3 ]; then
+              echo "Android NDK installation failed after 3 attempts."
+              exit 1
+            fi
+            sleep 10
+          done
+
       - name: Build debug APK
         run: gradle assembleDebug --no-daemon
 
