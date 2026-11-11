@@ -38,11 +38,15 @@ jobs:
       - name: Install Android NDK and CMake
         shell: bash
         run: |
-          set -eu
+          set -euo pipefail
           SDKMANAGER="${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager"
+          # sdkmanager exits after accepting the licenses, which closes the
+          # input pipe. Keep that expected SIGPIPE from failing the step while
+          # still propagating sdkmanager's actual exit status.
           for attempt in 1 2 3; do
             rm -rf "${ANDROID_HOME}/ndk/26.1.10909125"
-            if yes | "${SDKMANAGER}" --install "ndk;26.1.10909125" "cmake;3.22.1"; then
+            if { yes || true; } | "${SDKMANAGER}" --install "ndk;26.1.10909125" "cmake;3.22.1"; then
+              test -x "${ANDROID_HOME}/ndk/26.1.10909125/ndk-build"
               break
             fi
             if [ "${attempt}" -eq 3 ]; then
