@@ -85,7 +85,7 @@ object MediaLoader {
         }
         retrievers.clear()
         retrieverLocks.clear()
-        waveformCache.clear()
+        waveformCache.evictAll()
     }
 
     fun displayName(ctx: Context, uri: Uri): String {
