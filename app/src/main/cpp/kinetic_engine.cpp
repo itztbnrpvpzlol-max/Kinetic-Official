@@ -580,7 +580,7 @@ Java_com_kinetic_app_engine_NativeRenderEngine_nativeGlDrawComposition(
         } else {
             if (!gTextureProgram) continue;
             glUseProgram(gTextureProgram);
-            glBufferData(GL_ARRAY_BUFFER, sizeof(quad), quad, GL_STREAM_DRAW);
+            glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(quad), quad);
             glEnableVertexAttribArray(static_cast<GLuint>(gTexturePosition));
             glVertexAttribPointer(static_cast<GLuint>(gTexturePosition), 2, GL_FLOAT, GL_FALSE,
                                   4 * sizeof(float), reinterpret_cast<const void*>(0));
