@@ -133,15 +133,20 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
         val proxy = if (scale < 0.99f) {
             runCatching { PreviewProxyStore.getOrCreate(ctx, source, targetHeight) }.getOrNull()
         } else null
-        // Warm fifteen low-resolution source frames BEFORE inserting the clip.
-        // The bounded LRU admits the full window on a 2 GB / 4-core device.
+        // Warm the same source URI, time buckets and resolution used by the
+        // bitmap fallback renderer. The decoder-backed primary video path
+        // remains SurfaceTexture based and does not copy frames into bitmaps.
+        val activeVideoCount = editor.layers.count {
+            it.visible && it.type == LayerType.VIDEO
+        } + 1
+        val frameEdge = 480
         MediaLoader.prefetchUpcomingVideoFrames(
             ctx,
-            proxy ?: source,
+            source,
             firstFrameTimeSec = 0f,
-            frameCount = 15,
+            frameCount = MediaLoader.recommendedPrefetchFrameCount(activeVideoCount, frameEdge),
             sampleFps = 12,
-            maxEdge = 240,
+            maxEdge = frameEdge,
             sourceStepSec = 1f / 12f
         )
     }
@@ -230,11 +235,16 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
         if (!editor.playing) return@LaunchedEffect
         while (editor.playing) {
             val playhead = editor.time
-            val maxLayers = if (MediaWorkers.isConstrainedDevice) 1 else 2
             val activeVideos = editor.layers.filter {
                 it.visible && it.type == LayerType.VIDEO && it.uri != null && it.activeAt(playhead)
-            }.take(maxLayers)
-            for (layer in activeVideos) {
+            }
+            // The first N layers use direct MediaCodec Surface output. Only
+            // bitmap-fallback layers need the RAM source-frame look-ahead.
+            val cacheLayers = activeVideos
+                .drop(MediaWorkers.maxConcurrentVideoDecoders)
+                .take(2)
+            val frameEdge = 480
+            for (layer in cacheLayers) {
                 val sourceSpeed = layer.speed.coerceIn(0.1f, 4f)
                 val sourceTime = (
                     (playhead - layer.start).coerceAtLeast(0f) * sourceSpeed + layer.srcOffset
@@ -260,9 +270,9 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                     ctx,
                     Uri.parse(layer.uri!!),
                     firstUpcomingUs / 1_000_000f,
-                    frameCount = MediaLoader.recommendedPrefetchFrameCount(activeVideos.size),
+                    frameCount = MediaLoader.recommendedPrefetchFrameCount(cacheLayers.size, frameEdge),
                     sampleFps = 12,
-                    maxEdge = 240,
+                    maxEdge = frameEdge,
                     sourceStepSec = sourceStepSec
                 )
             }
