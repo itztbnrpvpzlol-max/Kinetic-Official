@@ -108,6 +108,23 @@ fun PreviewCanvas(
     }
     val readyKey = editor.cachedFrames[frameIndex]
     val frameReady = editor.settings.autoPreviewCache && readyKey == frameKey
+
+    // Keep a few upcoming rendered frames warm in RAM so disk-backed cache
+    // playback does not need to decode every JPEG at the exact presentation time.
+    LaunchedEffect(editor.playing) {
+        if (!editor.playing) return@LaunchedEffect
+        while (editor.playing) {
+            val current = (editor.time * editor.fps).toInt().coerceAtLeast(0)
+            val count = kotlin.math.ceil(editor.duration * editor.fps).toInt().coerceAtLeast(1)
+            for (offset in 1..3) {
+                val next = (current + offset) % count
+                val nextKey = editor.cachedFrames[next] ?: continue
+                CompositionFrameCache.loadFrame(context, nextKey)
+            }
+            kotlinx.coroutines.delay(24)
+        }
+    }
+
     val cachedFrame by androidx.compose.runtime.produceState<Bitmap?>(
         initialValue = null, frameKey, frameReady
     ) {
