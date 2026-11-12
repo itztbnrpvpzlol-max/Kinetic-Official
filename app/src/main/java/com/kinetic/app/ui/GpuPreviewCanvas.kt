@@ -46,6 +46,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import com.kinetic.app.data.CompositionFrameCache
 import com.kinetic.app.data.MediaLoader
+import com.kinetic.app.data.MediaWorkers
 import com.kinetic.app.model.COMP_H
 import com.kinetic.app.model.COMP_W
 import com.kinetic.app.model.EditorState
@@ -99,15 +100,18 @@ fun PreviewCanvas(
     val outputHeight = (COMP_H * qualityScale).toInt().coerceAtLeast(135)
     val frameIndex = (editor.time * editor.fps).toInt().coerceAtLeast(0)
     val frameTime = frameIndex / editor.fps.toFloat()
-    val frameKey = remember(
-        editor.projectId, editor.layers, frameIndex, editor.fps, outputWidth, outputHeight
+    val frameKey by androidx.compose.runtime.produceState<String?>(
+        initialValue = null, editor.projectId, editor.layers, frameIndex,
+        editor.fps, outputWidth, outputHeight
     ) {
-        CompositionFrameCache.frameKey(
-            editor.projectId, editor.layers, frameTime, editor.fps, outputWidth, outputHeight
-        )
+        value = kotlinx.coroutines.withContext(MediaWorkers.cpuDispatcher) {
+            CompositionFrameCache.frameKey(
+                editor.projectId, editor.layers, frameTime, editor.fps, outputWidth, outputHeight
+            )
+        }
     }
     val readyKey = editor.cachedFrames[frameIndex]
-    val frameReady = readyKey == frameKey
+    val frameReady = frameKey != null && readyKey == frameKey
 
     // Keep a few upcoming rendered frames warm in RAM so disk-backed cache
     // playback does not need to decode every JPEG at the exact presentation time.
@@ -128,7 +132,8 @@ fun PreviewCanvas(
     val cachedFrame by androidx.compose.runtime.produceState<Bitmap?>(
         initialValue = null, frameKey, frameReady
     ) {
-        value = if (frameReady) CompositionFrameCache.loadFrame(context, frameKey) else null
+        val key = frameKey
+        value = if (frameReady && key != null) CompositionFrameCache.loadFrame(context, key) else null
     }
 
     if (cachedFrame != null) {
