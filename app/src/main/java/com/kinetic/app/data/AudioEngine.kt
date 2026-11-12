@@ -116,8 +116,12 @@ class AudioEngine(context: Context) {
         @Volatile private var lastSeekMs = 0L
         @Volatile private var lastSyncMs = 0L
         @Volatile private var sampleRate = 48_000
+        @Volatile private var channelCount = 2
+        @Volatile private var bytesPerSample = 2
         @Volatile private var appliedSpeed = Float.NaN
         @Volatile private var startHeadFrames = 0L
+        @Volatile private var trackStarted = false
+        @Volatile private var dropBeforeUs = -1L
         @Volatile private var track: AudioTrack? = null
         private val worker = Thread(::decodeLoop, "KineticAudioClip").apply {
             priority = Thread.NORM_PRIORITY + 1
@@ -135,11 +139,15 @@ class AudioEngine(context: Context) {
             } else {
                 val head = currentTrack.playbackHeadPosition.toLong() and 0xffffffffL
                 val elapsedFrames = (head - startHeadFrames).coerceAtLeast(0L)
-                val actualMs = lastSeekMs +
-                    (elapsedFrames * 1000.0 / sampleRate * requestedSpeed).toLong()
-                if (abs(positionMs - actualMs) > DRIFT_CORRECTION_MS &&
-                    now - lastSyncMs >= CORRECTION_COOLDOWN_MS) {
-                    pendingSeekMs = positionMs
+                if (trackStarted) {
+                    // playbackHeadPosition is already measured in source PCM frames;
+                    // applying playback speed again would double-scale the clock.
+                    val actualMs = lastSeekMs +
+                        (elapsedFrames * 1000.0 / sampleRate).toLong()
+                    if (abs(positionMs - actualMs) > DRIFT_CORRECTION_MS &&
+                        now - lastSyncMs >= CORRECTION_COOLDOWN_MS) {
+                        pendingSeekMs = positionMs
+                    }
                 }
             }
             lastSyncMs = now
@@ -181,6 +189,8 @@ class AudioEngine(context: Context) {
                     if (seek >= 0L) {
                         pendingSeekMs = -1L
                         runCatching { track?.pause(); track?.flush() }
+                        trackStarted = false
+                        dropBeforeUs = seek * 1_000L
                         extractor.seekTo(seek * 1000L, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
                         codec.flush()
                         inputEos = false
@@ -198,18 +208,20 @@ class AudioEngine(context: Context) {
                     }
 
                     val audioTrack = track
-                    if (audioTrack != null && !outputEos) {
+                    if (audioTrack != null && trackStarted && !outputEos) {
                         if (!appliedSpeed.isFinite() || abs(appliedSpeed - requestedSpeed) > 0.001f) {
                             runCatching {
                                 audioTrack.playbackParams = audioTrack.playbackParams.setSpeed(requestedSpeed)
                                 appliedSpeed = requestedSpeed
                             }
                         }
+                        // Resume an already-started track after pause. A newly
+                        // created or flushed track waits until PCM is queued.
                         if (audioTrack.playState != AudioTrack.PLAYSTATE_PLAYING) {
                             runCatching {
                                 audioTrack.setVolume(requestedVolume.coerceIn(0f, 1f))
-                                audioTrack.play()
                                 startHeadFrames = audioTrack.playbackHeadPosition.toLong() and 0xffffffffL
+                                audioTrack.play()
                             }
                         }
                     }
@@ -243,7 +255,7 @@ class AudioEngine(context: Context) {
                                 if (output != null) {
                                     output.position(info.offset)
                                     output.limit(info.offset + info.size)
-                                    writePcm(output, info.size)
+                                    writePcm(output, info.size, info.presentationTimeUs)
                                 }
                             }
                             codec.releaseOutputBuffer(outputIndex, false)
@@ -293,7 +305,12 @@ class AudioEngine(context: Context) {
             val channelMask = if (channelCount == 1) AudioFormat.CHANNEL_OUT_MONO else AudioFormat.CHANNEL_OUT_STEREO
             val minBuffer = AudioTrack.getMinBufferSize(rate, channelMask, encoding)
                 .takeIf { it > 0 } ?: (rate / 5 * channelCount * 2)
-            val bytesPerSample = if (encoding == AudioFormat.ENCODING_PCM_FLOAT) 4 else 2
+            channelCount = channelCount
+            bytesPerSample = when (encoding) {
+                AudioFormat.ENCODING_PCM_FLOAT -> 4
+                AudioFormat.ENCODING_PCM_8BIT -> 1
+                else -> 2
+            }
             // Respect the platform minimum without forcing a 200 ms queue.
             val targetBytes = rate / 10 * channelCount * bytesPerSample
             val bufferBytes = max(minBuffer, targetBytes)
@@ -317,21 +334,46 @@ class AudioEngine(context: Context) {
             track = created
             appliedSpeed = Float.NaN
             startHeadFrames = 0L
-            if (wantsPlayback) runCatching {
-                created.playbackParams = created.playbackParams.setSpeed(requestedSpeed)
-                appliedSpeed = requestedSpeed
-                created.play()
-            }
+            trackStarted = false
+            // Do not start an empty AudioTrack. Queue the first decoded PCM
+            // block first, otherwise startup underrun adds audible delay.
         }
 
-        private fun writePcm(buffer: ByteBuffer, size: Int) {
+        private fun writePcm(buffer: ByteBuffer, size: Int, presentationTimeUs: Long) {
             val output = track ?: return
             var remaining = size
+
+            // MediaExtractor seeks to the previous sync sample. Trim decoded PCM
+            // up to the requested source timestamp so seeks/corrections never
+            // replay audio from before the clip's actual in-point.
+            val targetUs = dropBeforeUs
+            if (targetUs >= 0L) {
+                if (presentationTimeUs < targetUs) {
+                    val deltaUs = targetUs - presentationTimeUs
+                    val framesToSkip = (deltaUs * sampleRate + 999_999L) / 1_000_000L
+                    val bytesToSkip = framesToSkip * channelCount * bytesPerSample
+                    if (bytesToSkip >= size) return
+                    val skip = bytesToSkip.toInt().coerceAtLeast(0)
+                    buffer.position((buffer.position() + skip).coerceAtMost(buffer.limit()))
+                    remaining -= skip
+                }
+                dropBeforeUs = -1L
+            }
+
             while (remaining > 0 && !closed && wantsPlayback) {
                 output.setVolume(requestedVolume.coerceIn(0f, 1f))
                 val written = output.write(buffer, remaining, AudioTrack.WRITE_NON_BLOCKING)
                 if (written > 0) {
                     remaining -= written
+                    if (!trackStarted && wantsPlayback) {
+                        runCatching {
+                            output.playbackParams = output.playbackParams.setSpeed(requestedSpeed)
+                            appliedSpeed = requestedSpeed
+                        }
+                        startHeadFrames = output.playbackHeadPosition.toLong() and 0xffffffffL
+                        output.play()
+                        trackStarted = true
+                    }
                 } else {
                     synchronized(lock) {
                         if (!closed && wantsPlayback && pendingSeekMs < 0L) lock.wait(2L)
@@ -342,8 +384,8 @@ class AudioEngine(context: Context) {
     }
 
     companion object {
-        private const val DRIFT_CORRECTION_MS = 90L
-        private const val CORRECTION_COOLDOWN_MS = 250L
+        private const val DRIFT_CORRECTION_MS = 30L
+        private const val CORRECTION_COOLDOWN_MS = 120L
         private const val IDLE_PLAYER_RELEASE_MS = 2_500L
     }
 }
