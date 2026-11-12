@@ -77,7 +77,8 @@ private data class GpuLayer(
 private data class GpuScene(
     val layers: List<GpuLayer>,
     val selected: GpuLayer?,
-    val background: Int = 0xFF000000.toInt()
+    val background: Int = 0xFF000000.toInt(),
+    val cacheAllowed: Boolean = true
 )
 
 private fun supportsGles3(context: Context): Boolean = runCatching {
@@ -309,7 +310,7 @@ private fun GpuCompositionPreviewCanvas(
             false, false, "Normal"
         )
     }
-    val scene = GpuScene(renderLayers, selectedLayer)
+    val scene = GpuScene(renderLayers, selectedLayer, cacheAllowed = !editor.playing)
     val gpuFailed = remember { androidx.compose.runtime.mutableStateOf(false) }
 
     // Low RAM is not a reason to disable the GPU. KRE uses a lower preview
@@ -565,6 +566,7 @@ private class CompositionGlRenderer(
         hash = mixFingerprint(hash, viewportWidth.toLong())
         hash = mixFingerprint(hash, viewportHeight.toLong())
         hash = mixFingerprint(hash, current.background.toLong())
+        hash = mixFingerprint(hash, if (current.cacheAllowed) 1L else 0L)
         for (layer in current.layers) {
             hash = mixFingerprint(hash, layer.id.hashCode().toLong())
             hash = mixFingerprint(hash, System.identityHashCode(layer.bitmap).toLong())
@@ -595,7 +597,12 @@ private class CompositionGlRenderer(
     /** A single bounded GPU composition slot; resized or invalidated with the EGL surface. */
     private fun ensureCompositeTarget(width: Int, height: Int): Boolean {
         // Bound the extra GPU allocation on 2 GB devices and unusual large surfaces.
-        if (width <= 0 || height <= 0 || width.toLong() * height.toLong() * 4L > 16L * 1024L * 1024L) {
+        val cacheBudgetBytes = if (MediaWorkers.isConstrainedDevice) {
+            8L * 1024L * 1024L
+        } else {
+            16L * 1024L * 1024L
+        }
+        if (width <= 0 || height <= 0 || width.toLong() * height.toLong() * 4L > cacheBudgetBytes) {
             releaseCompositeTarget()
             return false
         }
@@ -725,7 +732,10 @@ private class CompositionGlRenderer(
             val current = scene
             val videoSignature = refreshVideoFrames()
             val fingerprint = sceneFingerprint(current, videoSignature)
-            val cacheReady = ensureCompositeTarget(viewportWidth, viewportHeight)
+            // Never add an offscreen pass to active playback. The composition
+            // cache is used for paused redraws and released when playback starts.
+            if (!current.cacheAllowed && compositeFramebuffer != 0) releaseCompositeTarget()
+            val cacheReady = current.cacheAllowed && ensureCompositeTarget(viewportWidth, viewportHeight)
             if (cacheReady && fingerprint == cachedCompositionFingerprint) {
                 presentCompositeTarget()
                 return
