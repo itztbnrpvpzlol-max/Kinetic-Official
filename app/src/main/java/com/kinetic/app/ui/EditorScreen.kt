@@ -132,19 +132,27 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
     }
     LaunchedEffect(editor.layers.map { it.id to it.uri }) { audio.prepare(editor.layers) }
 
+    val cachePriorityFrame = if (editor.playing) -1 else (editor.time * editor.fps).toInt()
     LaunchedEffect(
         editor.settings.autoPreviewCache,
         editor.settings.frameCacheDiskMb,
         editor.settings.previewQualityIndex,
         editor.playing,
+        cachePriorityFrame,
         editor.layers,
         editor.duration,
         editor.fps,
         editor.projectId
     ) {
         if (editor.playing) return@LaunchedEffect
+        if (!editor.settings.autoPreviewCache) {
+            editor.clearCachedFrameMarks()
+            return@LaunchedEffect
+        }
+        // Debounce rapid scrubbing so the worker starts from the final playhead
+        // position instead of repeatedly restarting during a drag.
+        delay(80)
         editor.clearCachedFrameMarks()
-        if (!editor.settings.autoPreviewCache) return@LaunchedEffect
 
         val snapshot = editor.layers.toList()
         val visualCount = snapshot.count {
@@ -171,11 +179,11 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
             if (CompositionFrameCache.isCached(ctx, key)) {
                 editor.markFrameCached(frameIndex, key)
             } else {
-                if (!CompositionFrameCache.hasCapacity(ctx, editor.settings.frameCacheDiskMb)) break
+                if (!CompositionFrameCache.hasCapacity(ctx, editor.settings.frameCacheDiskMb)) continue
                 val renderedKey = CompositionFrameCache.renderAndStore(
                     ctx, editor.projectId, snapshot, frameTime, editor.fps,
                     frameWidth, frameHeight, editor.settings.frameCacheDiskMb
-                ) ?: break
+                ) ?: continue
                 editor.markFrameCached(frameIndex, renderedKey)
             }
             if (offset % 2 == 0) delay(1)
