@@ -351,7 +351,12 @@ class FfmpegVideoPlayer(
         sourceDescriptor = null
         val player = AndroidVideoPlayer(appContext, sourceUri)
         fallback = player
+        state = 0
         player.attachSurface(outputSurface)
+        player.setSpeed(speed)
+        player.updatePositionHint(pendingSeekMs)
+        player.seekTo(pendingSeekMs)
+        if (lastPlaying) player.play() else player.pause()
     }
 
     companion object {
