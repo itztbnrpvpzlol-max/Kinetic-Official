@@ -137,7 +137,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
         // bitmap fallback renderer. The decoder-backed primary video path
         // remains SurfaceTexture based and does not copy frames into bitmaps.
         val activeVideoCount = editor.layers.count {
-            it.visible && it.type == LayerType.VIDEO
+            it.visible && it.type == LayerType.VIDEO && it.activeAt(editor.time)
         } + 1
         val frameEdge = 448
         MediaLoader.prefetchUpcomingVideoFrames(
