@@ -25,7 +25,6 @@ import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.platform.LocalContext
 import com.kinetic.app.data.MediaLoader
-import com.kinetic.app.data.PreviewProxyStore
 import com.kinetic.app.model.COMP_H
 import com.kinetic.app.model.COMP_W
 import com.kinetic.app.model.EditorState
@@ -58,19 +57,9 @@ fun CpuPreviewCanvas(editor: EditorState, modifier: Modifier = Modifier) {
                 // previous decode finishes; never publish that stale result
                 // after the playhead has already advanced.
                 val latestBucket = rememberUpdatedState(bucket)
-                val playbackSource = remember(uri, editor.playing) {
-                    val original = Uri.parse(uri)
-                    if (editor.playing && l.type == LayerType.VIDEO) {
-                        PreviewProxyStore.findExisting(
-                            ctx,
-                            original,
-                            PreviewProxyStore.PLAYBACK_PROXY_HEIGHT,
-                            PreviewProxyStore.PLAYBACK_PROXY_BITRATE
-                        ) ?: original
-                    } else original
-                }
-                val frameEdge = if (editor.playing && l.type == LayerType.VIDEO) 360 else 640
-                LaunchedEffect(uri, playbackSource, bucket, editor.playing) {
+                val playbackSource = Uri.parse(uri)
+                val frameEdge = if (editor.playing && l.type == LayerType.VIDEO) 480 else 640
+                LaunchedEffect(uri, bucket, editor.playing) {
                     if (bucket >= 0) {
                         val frame = MediaLoader.bitmapFor(
                             ctx, playbackSource, l.type, src, 12, frameEdge,
@@ -99,13 +88,7 @@ fun CpuPreviewCanvas(editor: EditorState, modifier: Modifier = Modifier) {
                     it.end > playhead && it.start <= playhead + 0.5f
             }
             for (layer in upcomingVideos) {
-                val original = Uri.parse(layer.uri!!)
-                val source = PreviewProxyStore.findExisting(
-                    ctx,
-                    original,
-                    PreviewProxyStore.PLAYBACK_PROXY_HEIGHT,
-                    PreviewProxyStore.PLAYBACK_PROXY_BITRATE
-                ) ?: original
+                val source = Uri.parse(layer.uri!!)
                 val speed = layer.speed.coerceIn(0.1f, 4f)
                 // Warm clips just before their in-point too, so a layer
                 // transition cannot stall waiting for its very first frame.
@@ -119,7 +102,7 @@ fun CpuPreviewCanvas(editor: EditorState, modifier: Modifier = Modifier) {
                     sourceTime,
                     frameCount = 3,
                     sampleFps = 12,
-                    maxEdge = 360,
+                    maxEdge = 480,
                     sourceStepSec = speed / 12f
                 )
             }
