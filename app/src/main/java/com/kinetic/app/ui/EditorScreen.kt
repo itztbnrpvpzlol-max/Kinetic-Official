@@ -242,20 +242,20 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                     val sourceEndLimit = if (layer.srcLength.isFinite()) {
                         (layer.srcLength - 0.05f).coerceAtLeast(layer.srcOffset)
                     } else Float.POSITIVE_INFINITY
-                    val beforeAvailable = ((centerSourceTime - layer.srcOffset) * 12f)
+                    val beforeAvailable = ((centerSourceTime - layer.srcOffset) * MediaLoader.CPU_PREVIEW_SAMPLE_FPS.toFloat())
                         .toInt().coerceAtLeast(0)
                     val afterAvailable = if (sourceEndLimit.isFinite()) {
-                        ((sourceEndLimit - centerSourceTime) * 12f).toInt().coerceAtLeast(0)
-                    } else 12
+                        ((sourceEndLimit - centerSourceTime) * MediaLoader.CPU_PREVIEW_SAMPLE_FPS.toFloat()).toInt().coerceAtLeast(0)
+                    } else MediaLoader.CPU_PREVIEW_SAMPLE_FPS
                     val beforeFrames = minOf(2, beforeAvailable)
                     val afterFrames = minOf(
                         (framesPerLayer - beforeFrames - 1).coerceAtLeast(0),
                         afterAvailable
                     )
                     val totalFrames = beforeFrames + afterFrames + 1
-                    val sourceStart = (centerSourceTime - beforeFrames / 12f)
+                    val sourceStart = (centerSourceTime - beforeFrames / MediaLoader.CPU_PREVIEW_SAMPLE_FPS.toFloat())
                         .coerceAtLeast(layer.srcOffset)
-                    val sourceEnd = (centerSourceTime + afterFrames / 12f)
+                    val sourceEnd = (centerSourceTime + afterFrames / MediaLoader.CPU_PREVIEW_SAMPLE_FPS.toFloat())
                         .coerceAtMost(sourceEndLimit)
                     val windowStart = (
                         layer.start + (sourceStart - layer.srcOffset) / speed
@@ -277,7 +277,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                         centerTimeSec = centerSourceTime,
                         beforeFrames = beforeFrames,
                         afterFrames = afterFrames,
-                        sampleFps = 12,
+                        sampleFps = MediaLoader.CPU_PREVIEW_SAMPLE_FPS,
                         maxEdge = 320,
                         minimumTimeSec = layer.srcOffset,
                         maximumTimeSec = sourceEndLimit
