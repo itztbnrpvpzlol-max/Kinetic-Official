@@ -17,6 +17,7 @@ import com.kinetic.app.model.LayerType
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
 import java.io.File
 import java.io.FileOutputStream
 import java.security.MessageDigest
@@ -37,6 +38,7 @@ object MediaLoader {
     private val retrievers = ConcurrentHashMap<String, MediaMetadataRetriever>()
     private val retrieverLocks = ConcurrentHashMap<String, Any>()
     private val waveformCache = ConcurrentHashMap<String, FloatArray>()
+    private val sourceProxyWrites = AtomicInteger()
 
     fun configureCache(memoryMb: Int) {
         val safeMb = memoryMb.coerceIn(16, 512).coerceAtMost(cacheBudgetMb)
@@ -118,6 +120,11 @@ object MediaLoader {
                         FileOutputStream(diskFile).use { output ->
                             val format = if (type == LayerType.IMAGE) Bitmap.CompressFormat.PNG else Bitmap.CompressFormat.JPEG
                             bmp.compress(format, 86, output)
+                        }
+                        // Keep source proxy frames bounded; the OS may also evict
+                        // this cache directory when device storage gets tight.
+                        if (sourceProxyWrites.incrementAndGet() % 32 == 0) {
+                            trimPreviewDiskCache(ctx)
                         }
                     }
                 }
