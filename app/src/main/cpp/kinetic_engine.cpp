@@ -290,7 +290,7 @@ void drawNativeTexture(GLuint program, GLint positionHandle, GLint uvHandle,
     if (!gVertexBuffer || !gVertexArrayObject) return;
     glBindVertexArray(gVertexArrayObject);
     glBindBuffer(GL_ARRAY_BUFFER, gVertexBuffer);
-    glBufferData(GL_ARRAY_BUFFER, 16 * sizeof(jfloat), vertices, GL_STREAM_DRAW);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, 16 * sizeof(jfloat), vertices);
     glUseProgram(program);
     glEnableVertexAttribArray(static_cast<GLuint>(positionHandle));
     glVertexAttribPointer(static_cast<GLuint>(positionHandle), 2, GL_FLOAT, GL_FALSE,
@@ -334,6 +334,12 @@ Java_com_kinetic_app_engine_NativeRenderEngine_nativeGlInit(JNIEnv*, jobject) {
         return JNI_FALSE;
     }
     glBindVertexArray(gVertexArrayObject);
+    // Allocate the streaming vertex store once. Per-layer draws update only
+    // its small fixed-size range instead of reallocating a GL buffer each time.
+    glBindBuffer(GL_ARRAY_BUFFER, gVertexBuffer);
+    glBufferData(GL_ARRAY_BUFFER, 16 * sizeof(float), nullptr, GL_STREAM_DRAW);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindVertexArray(0);
 
     // KRE uses GLSL ES 3.00 exclusively; no ES 2 shader fallback is
     // silently accepted after requesting an ES 3.x context.
@@ -444,7 +450,7 @@ Java_com_kinetic_app_engine_NativeRenderEngine_nativeGlDrawExternalTexture(
     }
     glBindVertexArray(gVertexArrayObject);
     glBindBuffer(GL_ARRAY_BUFFER, gVertexBuffer);
-    glBufferData(GL_ARRAY_BUFFER, 16 * sizeof(jfloat), data, GL_STREAM_DRAW);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, 16 * sizeof(jfloat), data);
     glUseProgram(gExternalProgram);
     glEnableVertexAttribArray(static_cast<GLuint>(gExternalPosition));
     glVertexAttribPointer(static_cast<GLuint>(gExternalPosition), 2, GL_FLOAT, GL_FALSE,
@@ -552,7 +558,7 @@ Java_com_kinetic_app_engine_NativeRenderEngine_nativeGlDrawComposition(
         if (external) {
             if (!gExternalProgram) continue;
             glUseProgram(gExternalProgram);
-            glBufferData(GL_ARRAY_BUFFER, sizeof(quad), quad, GL_STREAM_DRAW);
+            glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(quad), quad);
             glEnableVertexAttribArray(static_cast<GLuint>(gExternalPosition));
             glVertexAttribPointer(static_cast<GLuint>(gExternalPosition), 2, GL_FLOAT, GL_FALSE,
                                   4 * sizeof(float), reinterpret_cast<const void*>(0));
@@ -619,7 +625,7 @@ Java_com_kinetic_app_engine_NativeRenderEngine_nativeGlDrawSelection(
     }
     glBindVertexArray(gVertexArrayObject);
     glBindBuffer(GL_ARRAY_BUFFER, gVertexBuffer);
-    glBufferData(GL_ARRAY_BUFFER, 8 * sizeof(jfloat), data, GL_STREAM_DRAW);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, 8 * sizeof(jfloat), data);
     glUseProgram(gSolidProgram);
     glEnableVertexAttribArray(static_cast<GLuint>(gSolidPosition));
     glVertexAttribPointer(static_cast<GLuint>(gSolidPosition), 2, GL_FLOAT, GL_FALSE, 0,
