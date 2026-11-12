@@ -536,8 +536,8 @@ private fun GpuCompositionPreviewCanvas(
         stale.forEach { textTextures.remove(it) }
     }
 
-    // Simple video layers use Media3/MediaCodec and TextureView. Layers that
-    // require bitmap-only masks/effects/blends retain the compatibility renderer.
+    // Video layers use Media3/MediaCodec Surface outputs and are composited
+    // alongside stills, text and shapes in the same OpenGL draw order.
     for (layer in editor.layers) {
         val uri = layer.uri
         val needsBitmap = layer.type == LayerType.IMAGE ||
