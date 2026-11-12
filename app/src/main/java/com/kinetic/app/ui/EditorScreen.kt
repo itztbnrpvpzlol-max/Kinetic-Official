@@ -479,12 +479,11 @@ private fun FloatingEditingDock(active: String, hasSelection: Boolean, onSelect:
     }
     val shape = RoundedCornerShape(32.dp)
     Box(
-        Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp)
-            .height(80.dp),
+        Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
         contentAlignment = Alignment.Center
     ) {
         Row(
-            Modifier.fillMaxWidth().height(72.dp)
+            Modifier.widthIn(max = 720.dp).fillMaxWidth().height(72.dp)
                 .clip(shape)
                 .background(KColors.Row)
                 .border(1.dp, KColors.Line, shape)
@@ -498,7 +497,7 @@ private fun FloatingEditingDock(active: String, hasSelection: Boolean, onSelect:
             ) {
                 tools.forEach { (label, icon) ->
                     Column(
-                        Modifier.width(if (hasSelection) 72.dp else 68.dp)
+                        Modifier.width(72.dp)
                             .height(54.dp).clip(RoundedCornerShape(11.dp))
                             .clickable { onSelect(label) }
                             .padding(vertical = 4.dp),
