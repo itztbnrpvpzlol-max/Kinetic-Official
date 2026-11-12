@@ -24,6 +24,15 @@ object MediaWorkers {
         (heapMb / 8).coerceIn(32, 128)
     }
 
+    // Hardware decoders are scarce system resources, not a thread pool.
+    // Keep one on low-RAM/four-core phones; raise concurrency only with
+    // substantially more CPU and heap headroom.
+    val maxConcurrentVideoDecoders: Int = when {
+        isConstrainedDevice -> 1
+        cpuCores >= 8 && heapMb >= 512 -> 4
+        else -> 2
+    }
+
     val workerCount: Int = if (isConstrainedDevice) 1 else (cpuCores - 2).coerceIn(2, 4)
     private val cacheWorkerCount: Int = if (isConstrainedDevice) 1
         else if (cpuCores >= 8 && heapMb >= 512) 2 else 1
