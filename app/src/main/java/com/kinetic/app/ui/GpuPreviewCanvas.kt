@@ -44,6 +44,10 @@ import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionParameters
 import androidx.media3.exoplayer.ExoPlayer
 import android.view.TextureView
+import android.graphics.SurfaceTexture
+import android.view.Surface
+import android.opengl.GLES11Ext
+import java.util.concurrent.ConcurrentHashMap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import com.kinetic.app.data.CompositionFrameCache
@@ -71,7 +75,8 @@ private data class GpuLayer(
     val opacity: Float,
     val mask: Boolean,
     val grayscale: Boolean,
-    val blend: String
+    val blend: String,
+    val isVideo: Boolean = false
 )
 
 private data class GpuScene(
@@ -452,17 +457,18 @@ private fun DirectVideoPreviewCanvas(
 }
 
 @Composable
-private fun TextureVideoLayer(
+private fun GpuVideoPlayerLayer(
     editor: EditorState,
     layer: com.kinetic.app.model.Layer,
     player: ExoPlayer,
-    fitScale: Float
+    surfaceView: GpuPreviewSurfaceView
 ) {
     val uri = layer.uri ?: return
     var videoReady by remember(player) {
         androidx.compose.runtime.mutableStateOf(player.playbackState == Player.STATE_READY)
     }
-    DisposableEffect(player, layer.id) {
+    DisposableEffect(player, surfaceView, layer.id) {
+        surfaceView.attachVideo(layer.id, player)
         val listener = object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
                 videoReady = playbackState == Player.STATE_READY
@@ -472,13 +478,14 @@ private fun TextureVideoLayer(
             }
         }
         player.addListener(listener)
-        onDispose { player.removeListener(listener) }
+        onDispose {
+            player.removeListener(listener)
+            surfaceView.detachVideo(layer.id, player)
+        }
     }
-
     val sourceTime = ((editor.time - layer.start).coerceAtLeast(0f) * layer.speed + layer.srcOffset)
         .coerceAtLeast(0f)
     val sourcePositionMs = (sourceTime * 1000f).toLong()
-
     LaunchedEffect(layer.id, uri, layer.speed, player) {
         player.pause()
         player.setMediaItem(MediaItem.fromUri(Uri.parse(uri)))
@@ -486,58 +493,25 @@ private fun TextureVideoLayer(
         player.prepare()
         player.seekTo(sourcePositionMs)
     }
-
     LaunchedEffect(editor.playing, videoReady, layer.id, layer.speed, player) {
         if (editor.playing && videoReady) {
             player.setPlaybackSpeed(layer.speed.coerceIn(0.1f, 4f))
             player.seekTo(sourcePositionMs)
             player.play()
-        } else {
-            player.pause()
-        }
+        } else player.pause()
     }
-
     val previousTimelineTime = remember(layer.id) {
         androidx.compose.runtime.mutableFloatStateOf(editor.time)
     }
     LaunchedEffect(editor.time, editor.playing, layer.id, player) {
         if (editor.playing) {
-            if (editor.time + 0.05f < previousTimelineTime.floatValue) {
-                player.seekTo(sourcePositionMs)
-            }
+            if (editor.time + 0.05f < previousTimelineTime.floatValue) player.seekTo(sourcePositionMs)
         } else {
             kotlinx.coroutines.delay(24)
             player.seekTo(sourcePositionMs)
         }
         previousTimelineTime.floatValue = editor.time
     }
-
-    val left = (layer.p(PropId.POS_X).valueAt(editor.time) -
-        layer.p(PropId.ANCHOR_X).valueAt(editor.time)) * fitScale
-    val top = (layer.p(PropId.POS_Y).valueAt(editor.time) -
-        layer.p(PropId.ANCHOR_Y).valueAt(editor.time)) * fitScale
-    val width = (layer.width * fitScale).coerceAtLeast(1f)
-    val height = (layer.height * fitScale).coerceAtLeast(1f)
-    val scaleX = layer.p(PropId.SCALE_X).valueAt(editor.time) / 100f
-    val scaleY = layer.p(PropId.SCALE_Y).valueAt(editor.time) / 100f
-    val rotation = layer.p(PropId.ROTATION).valueAt(editor.time)
-    val opacity = (layer.p(PropId.OPACITY).valueAt(editor.time) / 100f).coerceIn(0f, 1f)
-
-    AndroidView(
-        factory = { viewContext ->
-            TextureView(viewContext).also { player.setVideoTextureView(it) }
-        },
-        modifier = Modifier
-            .offset(x = left.dp, y = top.dp)
-            .size(width.dp, height.dp)
-            .graphicsLayer {
-                this.scaleX = scaleX
-                this.scaleY = scaleY
-                rotationZ = rotation
-                alpha = opacity
-            },
-        update = { }
-    )
 }
 
 @Composable
@@ -595,8 +569,15 @@ private fun GpuCompositionPreviewCanvas(
     val renderLayers = ArrayList<GpuLayer>()
     for (layer in editor.layers.asReversed()) {
         if (!layer.visible || !layer.activeAt(editor.time) || layer.type == LayerType.AUDIO ||
-            layer.type == LayerType.NULL || layer.type == LayerType.ADJUSTMENT ||
-            (layer.type == LayerType.VIDEO && layer.id in textureVideoIds)) continue
+            layer.type == LayerType.NULL || layer.type == LayerType.ADJUSTMENT) continue
+        if (layer.type == LayerType.VIDEO && layer.id in textureVideoIds) {
+            val opacity = (layer.p(PropId.OPACITY).valueAt(editor.time) / 100f).coerceIn(0f, 1f)
+            renderLayers += GpuLayer(
+                layer.id, null, Matrix(layerMatrix(layer, editor.time, byId)),
+                layer.width, layer.height, opacity, false, false, layer.blendMode, true
+            )
+            continue
+        }
         val bitmap = when (layer.type) {
             LayerType.IMAGE, LayerType.VIDEO -> frames[layer.id]
             LayerType.TEXT, LayerType.SHAPE -> {
@@ -660,10 +641,9 @@ private fun GpuCompositionPreviewCanvas(
                     modifier = Modifier.fillMaxSize(),
                     update = { it.submit(scene) }
                 )
-                // TextureView layers are hardware-decoded video surfaces. They
-                // are drawn above the still-image GLES pass; the full shader
-                // interleaving compositor can be added without changing decoding.
-                videoLayers.asReversed().forEach { layer ->
+                // Video decoders output directly into SurfaceTexture-backed
+                // external GL textures and share the same ordered scene pass.
+                videoLayers.forEach { layer ->
                     key(layer.id) {
                         val uri = layer.uri ?: return@key
                         val maxW = (COMP_W * qualityScale).toInt().coerceAtLeast(240)
@@ -675,14 +655,12 @@ private fun GpuCompositionPreviewCanvas(
                                     .setMaxVideoSize(maxW, maxH)
                                     .build()
                                 repeatMode = Player.REPEAT_MODE_OFF
-                                setMediaItem(MediaItem.fromUri(Uri.parse(uri)))
-                                prepare()
                             }
                         }
                         DisposableEffect(player) {
                             onDispose { player.release() }
                         }
-                        TextureVideoLayer(editor, layer, player, fitScale)
+                        GpuVideoPlayerLayer(editor, layer, player, view)
                     }
                 }
             }
@@ -694,7 +672,15 @@ private fun GpuCompositionPreviewCanvas(
 }
 
 private class GpuPreviewSurfaceView(context: Context, onGpuFailure: () -> Unit) : GLSurfaceView(context) {
-    private val gpuRenderer = CompositionGlRenderer(onGpuFailure)
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private val attachedPlayers = ConcurrentHashMap<String, ExoPlayer>()
+    private val gpuRenderer = CompositionGlRenderer(
+        onGpuFailure = onGpuFailure,
+        onVideoSurfaceAvailable = { id, surface ->
+            mainHandler.post { attachedPlayers[id]?.setVideoSurface(surface) }
+        },
+        onFrameAvailable = { requestRender() }
+    )
     init {
         setEGLContextClientVersion(2)
         setPreserveEGLContextOnPause(true)
@@ -702,21 +688,36 @@ private class GpuPreviewSurfaceView(context: Context, onGpuFailure: () -> Unit) 
         renderMode = RENDERMODE_WHEN_DIRTY
         setBackgroundColor(android.graphics.Color.BLACK)
     }
-
     fun submit(scene: GpuScene) {
         gpuRenderer.submit(scene)
+        queueEvent { gpuRenderer.updateVideoLayers(scene.layers.filter { it.isVideo }.map { it.id }.toSet()) }
         requestRender()
     }
-
+    fun attachVideo(id: String, player: ExoPlayer) {
+        attachedPlayers[id] = player
+        queueEvent { gpuRenderer.ensureVideoOutput(id) }
+    }
+    fun detachVideo(id: String, player: ExoPlayer) {
+        attachedPlayers.remove(id, player)
+        mainHandler.post { player.clearVideoSurface() }
+        queueEvent { gpuRenderer.releaseVideoOutput(id) }
+    }
     fun releaseRenderer() {
+        attachedPlayers.values.forEach { player -> mainHandler.post { player.clearVideoSurface() } }
+        attachedPlayers.clear()
         queueEvent { gpuRenderer.release() }
     }
 }
 
-private class CompositionGlRenderer(private val onGpuFailure: () -> Unit) : GLSurfaceView.Renderer {
+private class CompositionGlRenderer(
+    private val onGpuFailure: () -> Unit,
+    private val onVideoSurfaceAvailable: (String, Surface) -> Unit,
+    private val onFrameAvailable: () -> Unit
+) : GLSurfaceView.Renderer {
     @Volatile private var scene = GpuScene(emptyList(), null)
     private var program = 0
     private var solidProgram = 0
+    private var externalProgram = 0
     private var positionHandle = 0
     private var uvHandle = 0
     private var samplerHandle = 0
@@ -724,6 +725,12 @@ private class CompositionGlRenderer(private val onGpuFailure: () -> Unit) : GLSu
     private var grayHandle = 0
     private var solidPositionHandle = 0
     private var solidColorHandle = 0
+    private var externalPositionHandle = 0
+    private var externalUvHandle = 0
+    private var externalSamplerHandle = 0
+    private var externalAlphaHandle = 0
+    private var externalMatrixHandle = 0
+    private val videoOutputs = HashMap<String, VideoOutput>()
     private val textures = HashMap<String, TextureEntry>()
     private var viewportWidth = 1
     private var viewportHeight = 1
@@ -731,19 +738,63 @@ private class CompositionGlRenderer(private val onGpuFailure: () -> Unit) : GLSu
     private val solidVertices = ByteBuffer.allocateDirect(8 * 4).order(ByteOrder.nativeOrder()).asFloatBuffer()
 
     private data class TextureEntry(val id: Int, val bitmap: Bitmap)
-
+    private data class VideoOutput(
+        val textureId: Int,
+        val texture: SurfaceTexture,
+        val surface: Surface,
+        val transform: FloatArray = FloatArray(16)
+    )
     fun submit(next: GpuScene) { scene = next }
+    fun updateVideoLayers(ids: Set<String>) {
+        videoOutputs.keys.filter { it !in ids }.toList().forEach(::releaseVideoOutput)
+        ids.forEach(::ensureVideoOutput)
+    }
+    fun ensureVideoOutput(id: String) {
+        if (videoOutputs.containsKey(id) || program == 0) return
+        val names = IntArray(1)
+        GLES20.glGenTextures(1, names, 0)
+        if (names[0] == 0) return
+        GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, names[0])
+        GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
+        GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
+        val texture = SurfaceTexture(names[0])
+        texture.setOnFrameAvailableListener { onFrameAvailable() }
+        val surface = Surface(texture)
+        videoOutputs[id] = VideoOutput(names[0], texture, surface)
+        onVideoSurfaceAvailable(id, surface)
+    }
+    fun releaseVideoOutput(id: String) {
+        val output = videoOutputs.remove(id) ?: return
+        runCatching { output.surface.release() }
+        runCatching { output.texture.setOnFrameAvailableListener(null) }
+        runCatching { output.texture.release() }
+        GLES20.glDeleteTextures(1, intArrayOf(output.textureId), 0)
+    }
+    private fun refreshVideoFrames() {
+        videoOutputs.values.forEach { output ->
+            runCatching {
+                output.texture.updateTexImage()
+                output.texture.getTransformMatrix(output.transform)
+            }
+        }
+    }
 
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
         GLES20.glClearColor(0.02f, 0.02f, 0.04f, 1f)
         GLES20.glDisable(GLES20.GL_DEPTH_TEST)
         // A recreated EGL context invalidates every texture/program from the old context.
         textures.clear()
+        videoOutputs.values.forEach { output -> runCatching { output.surface.release(); output.texture.release() } }
+        videoOutputs.clear()
         program = 0
         solidProgram = 0
+        externalProgram = 0
         try {
             program = linkProgram(VERTEX_SHADER, TEXTURE_SHADER)
             solidProgram = linkProgram(VERTEX_SHADER, SOLID_SHADER)
+            externalProgram = linkProgram(VERTEX_SHADER, EXTERNAL_TEXTURE_SHADER)
             positionHandle = GLES20.glGetAttribLocation(program, "aPosition")
             uvHandle = GLES20.glGetAttribLocation(program, "aTexCoord")
             samplerHandle = GLES20.glGetUniformLocation(program, "uTexture")
@@ -751,11 +802,18 @@ private class CompositionGlRenderer(private val onGpuFailure: () -> Unit) : GLSu
             grayHandle = GLES20.glGetUniformLocation(program, "uGray")
             solidPositionHandle = GLES20.glGetAttribLocation(solidProgram, "aPosition")
             solidColorHandle = GLES20.glGetUniformLocation(solidProgram, "uColor")
+            externalPositionHandle = GLES20.glGetAttribLocation(externalProgram, "aPosition")
+            externalUvHandle = GLES20.glGetAttribLocation(externalProgram, "aTexCoord")
+            externalSamplerHandle = GLES20.glGetUniformLocation(externalProgram, "uTexture")
+            externalAlphaHandle = GLES20.glGetUniformLocation(externalProgram, "uAlpha")
+            externalMatrixHandle = GLES20.glGetUniformLocation(externalProgram, "uTexMatrix")
         } catch (_: Throwable) {
             program = 0
             solidProgram = 0
+            externalProgram = 0
             Handler(Looper.getMainLooper()).post { onGpuFailure() }
         }
+        if (program != 0) scene.layers.filter { it.isVideo }.forEach { ensureVideoOutput(it.id) }
     }
 
     override fun onSurfaceChanged(gl: GL10?, width: Int, height: Int) {
@@ -768,7 +826,8 @@ private class CompositionGlRenderer(private val onGpuFailure: () -> Unit) : GLSu
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
         if (program == 0) return
         val current = scene
-        val activeTextureIds = current.layers.mapTo(HashSet<String>()) { it.id }
+        refreshVideoFrames()
+        val activeTextureIds = current.layers.filterNot { it.isVideo }.mapTo(HashSet<String>()) { it.id }
         val staleIds = textures.keys.filter { it !in activeTextureIds }
         staleIds.forEach { id -> textures.remove(id)?.let { GLES20.glDeleteTextures(1, intArrayOf(it.id), 0) } }
         val scale = minOf(viewportWidth / COMP_W, viewportHeight / COMP_H)
@@ -779,6 +838,10 @@ private class CompositionGlRenderer(private val onGpuFailure: () -> Unit) : GLSu
     }
 
     private fun drawLayer(layer: GpuLayer, scale: Float, ox: Float, oy: Float) {
+        if (layer.isVideo) {
+            drawVideoLayer(layer, scale, ox, oy)
+            return
+        }
         val bitmap = layer.bitmap ?: return
         if (bitmap.isRecycled || layer.opacity <= 0f) return
         val texture = textureFor(layer.id, bitmap) ?: return
@@ -817,6 +880,43 @@ private class CompositionGlRenderer(private val onGpuFailure: () -> Unit) : GLSu
         GLES20.glDisable(GLES20.GL_BLEND)
         GLES20.glDisableVertexAttribArray(positionHandle)
         GLES20.glDisableVertexAttribArray(uvHandle)
+    }
+
+    private fun drawVideoLayer(layer: GpuLayer, scale: Float, ox: Float, oy: Float) {
+        val output = videoOutputs[layer.id] ?: return
+        if (layer.opacity <= 0f || externalProgram == 0) return
+        val points = floatArrayOf(0f, 0f, 0f, layer.height, layer.width, 0f, layer.width, layer.height)
+        layer.matrix.mapPoints(points)
+        val data = floatArrayOf(
+            ndcX(points[0], scale, ox), ndcY(points[1], scale, oy), 0f, 0f,
+            ndcX(points[2], scale, ox), ndcY(points[3], scale, oy), 0f, 1f,
+            ndcX(points[4], scale, ox), ndcY(points[5], scale, oy), 1f, 0f,
+            ndcX(points[6], scale, ox), ndcY(points[7], scale, oy), 1f, 1f
+        )
+        vertices.clear(); vertices.put(data); vertices.position(0)
+        GLES20.glUseProgram(externalProgram)
+        vertices.position(0)
+        GLES20.glEnableVertexAttribArray(externalPositionHandle)
+        GLES20.glVertexAttribPointer(externalPositionHandle, 2, GLES20.GL_FLOAT, false, 16, vertices)
+        vertices.position(2)
+        GLES20.glEnableVertexAttribArray(externalUvHandle)
+        GLES20.glVertexAttribPointer(externalUvHandle, 2, GLES20.GL_FLOAT, false, 16, vertices)
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+        GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, output.textureId)
+        GLES20.glUniform1i(externalSamplerHandle, 0)
+        GLES20.glUniform1f(externalAlphaHandle, layer.opacity)
+        GLES20.glUniformMatrix4fv(externalMatrixHandle, 1, false, output.transform, 0)
+        when (layer.blend) {
+            "Multiply" -> GLES20.glBlendFunc(GLES20.GL_DST_COLOR, GLES20.GL_ONE_MINUS_SRC_ALPHA)
+            "Screen" -> GLES20.glBlendFunc(GLES20.GL_ONE, GLES20.GL_ONE_MINUS_SRC_COLOR)
+            "Add" -> GLES20.glBlendFunc(GLES20.GL_ONE, GLES20.GL_ONE)
+            else -> GLES20.glBlendFunc(GLES20.GL_ONE, GLES20.GL_ONE_MINUS_SRC_ALPHA)
+        }
+        GLES20.glEnable(GLES20.GL_BLEND)
+        GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
+        GLES20.glDisable(GLES20.GL_BLEND)
+        GLES20.glDisableVertexAttribArray(externalPositionHandle)
+        GLES20.glDisableVertexAttribArray(externalUvHandle)
     }
 
     private fun textureFor(layerId: String, bitmap: Bitmap): Int? {
@@ -859,13 +959,15 @@ private class CompositionGlRenderer(private val onGpuFailure: () -> Unit) : GLSu
     private fun ndcY(y: Float, scale: Float, oy: Float) = 1f - ((oy + y * scale) / viewportHeight) * 2f
 
     fun release() {
+        videoOutputs.keys.toList().forEach(::releaseVideoOutput)
         if (textures.isNotEmpty()) {
             GLES20.glDeleteTextures(textures.size, textures.values.map { it.id }.toIntArray(), 0)
             textures.clear()
         }
         if (program != 0) GLES20.glDeleteProgram(program)
         if (solidProgram != 0) GLES20.glDeleteProgram(solidProgram)
-        program = 0; solidProgram = 0
+        if (externalProgram != 0) GLES20.glDeleteProgram(externalProgram)
+        program = 0; solidProgram = 0; externalProgram = 0
     }
 
     private fun linkProgram(vertex: String, fragment: String): Int {
@@ -894,5 +996,6 @@ private class CompositionGlRenderer(private val onGpuFailure: () -> Unit) : GLSu
         private const val VERTEX_SHADER = "attribute vec2 aPosition; attribute vec2 aTexCoord; varying vec2 vTexCoord; void main(){ gl_Position=vec4(aPosition,0.0,1.0); vTexCoord=aTexCoord; }"
         private const val TEXTURE_SHADER = "precision mediump float; uniform sampler2D uTexture; uniform float uAlpha; uniform float uGray; varying vec2 vTexCoord; void main(){ vec4 c=texture2D(uTexture,vTexCoord); if(uGray>0.5){ float y=dot(c.rgb,vec3(0.299,0.587,0.114)); c.rgb=vec3(y); } gl_FragColor=vec4(c.rgb*uAlpha,c.a*uAlpha); }"
         private const val SOLID_SHADER = "precision mediump float; uniform vec4 uColor; void main(){ gl_FragColor=uColor; }"
+        private const val EXTERNAL_TEXTURE_SHADER = "#extension GL_OES_EGL_image_external : require\\nprecision mediump float; uniform samplerExternalOES uTexture; uniform float uAlpha; uniform mat4 uTexMatrix; varying vec2 vTexCoord; void main(){ vec2 uv=(uTexMatrix*vec4(vTexCoord,0.0,1.0)).xy; vec4 c=texture2D(uTexture,uv); gl_FragColor=vec4(c.rgb*uAlpha,c.a*uAlpha); }"
     }
 }
