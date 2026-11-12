@@ -36,6 +36,7 @@ class FfmpegVideoPlayer(
     private var masterGeneration = Long.MIN_VALUE
     private var lastSyncNs = 0L
     private var lastCorrectionNs = 0L
+    private var lastDiagnosticsNs = 0L
     private var lastPlaying = false
 
     @Synchronized
@@ -157,9 +158,27 @@ class FfmpegVideoPlayer(
             val actualSeconds = instance.getPropertyDouble("time-pos")
             val expectedSeconds = expectedSourceUs / 1_000_000.0
             val generationChanged = masterGeneration != generation
-            val drifted = actualSeconds != null && abs(actualSeconds - expectedSeconds) > 0.18
+            val driftSeconds = actualSeconds?.let { it - expectedSeconds }
+            val drifted = driftSeconds != null && abs(driftSeconds) > 0.18
             val correctionReady = nowNs - lastCorrectionNs >= 300_000_000L
+
+            // Report the decoder actually selected by libmpv, not merely the
+            // requested "auto-safe" setting. This makes software fallback and
+            // frame-rate regressions visible in device logs.
+            if (nowNs - lastDiagnosticsNs >= 1_000_000_000L) {
+                lastDiagnosticsNs = nowNs
+                val activeHwdec = runCatching { instance.getPropertyString("hwdec-current") }
+                    .getOrNull() ?: "pending"
+                val codecName = runCatching { instance.getPropertyString("video-codec-name") }
+                    .getOrNull() ?: "unknown"
+                val decodedFps = runCatching { instance.getPropertyDouble("estimated-vf-fps") }
+                    .getOrNull()
+                val driftMs = driftSeconds?.let { (it * 1_000.0).toLong() } ?: 0L
+                Log.i(TAG, "decoder=$activeHwdec codec=$codecName fps=$decodedFps driftMs=$driftMs")
+            }
+
             if ((generationChanged || (playing && drifted && correctionReady)) && loaded) {
+                Log.w(TAG, "Correcting preview clock drift: ${driftSeconds?.times(1_000.0)?.toLong() ?: 0L}ms")
                 seekMpv((expectedSourceUs / 1_000L).coerceAtLeast(0L))
                 lastCorrectionNs = nowNs
             }
