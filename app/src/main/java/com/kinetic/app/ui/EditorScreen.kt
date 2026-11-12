@@ -79,7 +79,6 @@ import com.kinetic.app.data.AudioEngine
 import com.kinetic.app.data.MediaLoader
 import com.kinetic.app.data.MediaWorkers
 import com.kinetic.app.data.PreviewDiagnostics
-import com.kinetic.app.data.TimelineRamCache
 import com.kinetic.app.data.ProjectStore
 import com.kinetic.app.model.COMP_H
 import com.kinetic.app.model.COMP_W
@@ -182,113 +181,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
     }
     LaunchedEffect(editor.layers.map { it.id to it.uri }) { audio.prepare(editor.layers) }
 
-    // Keep a bounded working set around the paused playhead. A full-clip
-    // sequential scan only reports historical work and lets the LRU evict
-    // useful frames; this window tracks frames that are resident right now.
-    val ramCacheSignature = editor.layers.map {
-        val fingerprint = it.uri?.let { raw ->
-            MediaLoader.mediaCacheFingerprint(Uri.parse(raw))
-        }
-        "${it.id}|${fingerprint}|${it.start}|${it.duration}|${it.srcOffset}|${it.speed}|${it.type}"
-    }
-    LaunchedEffect(ramCacheSignature, editor.playing, TimelineRamCache.generation) {
-        val activityManager = ctx.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
-        val memoryInfo = ActivityManager.MemoryInfo()
-        runCatching { activityManager?.getMemoryInfo(memoryInfo) }
-        val usesCpuPreview = activityManager?.isLowRamDevice == true ||
-            memoryInfo.totalMem < 3L * 1024L * 1024L * 1024L ||
-            MediaWorkers.isConstrainedDevice
-        if (!usesCpuPreview) {
-            TimelineRamCache.clear()
-            return@LaunchedEffect
-        }
-
-        val videoLayers = editor.layers.filter {
-            it.type == LayerType.VIDEO && it.uri != null
-        }
-        if (videoLayers.isEmpty()) {
-            TimelineRamCache.clear()
-            return@LaunchedEffect
-        }
-        val layerIds = videoLayers.map { it.id }.toSet()
-        TimelineRamCache.retain(layerIds)
-
-        // The live decoder owns the retriever while playing. On pause, debounce
-        // scrubbing and rebuild a small playhead-centred window in the idle worker.
-        if (editor.playing) return@LaunchedEffect
-
-        snapshotFlow { (editor.time * 4f).toInt() }
-            .distinctUntilChanged()
-            .collectLatest { halfSecondBucket ->
-                delay(220L)
-                val playhead = (halfSecondBucket / 4f).coerceAtLeast(0f)
-                val activeLayers = videoLayers.filter { layer ->
-                    playhead >= layer.start && playhead < layer.end
-                }
-                videoLayers.filterNot { it in activeLayers }.forEach {
-                    TimelineRamCache.clearWindow(it.id)
-                }
-
-                val framesPerLayer = MediaLoader
-                    .recommendedPrefetchFrameCount(activeLayers.size.coerceAtLeast(1), 320)
-                    .coerceIn(4, 8)
-                for (layer in activeLayers) {
-                    val rawUri = layer.uri ?: continue
-                    val source = Uri.parse(rawUri)
-                    val speed = layer.speed.coerceIn(0.1f, 4f)
-                    val centerSourceTime = (
-                        (playhead - layer.start).coerceAtLeast(0f) * speed + layer.srcOffset
-                    ).coerceAtLeast(0f)
-                    val sourceEndLimit = if (layer.srcLength.isFinite()) {
-                        (layer.srcLength - 0.05f).coerceAtLeast(layer.srcOffset)
-                    } else Float.POSITIVE_INFINITY
-                    val beforeAvailable = ((centerSourceTime - layer.srcOffset) * MediaLoader.CPU_PREVIEW_SAMPLE_FPS.toFloat())
-                        .toInt().coerceAtLeast(0)
-                    val afterAvailable = if (sourceEndLimit.isFinite()) {
-                        ((sourceEndLimit - centerSourceTime) * MediaLoader.CPU_PREVIEW_SAMPLE_FPS.toFloat()).toInt().coerceAtLeast(0)
-                    } else MediaLoader.CPU_PREVIEW_SAMPLE_FPS
-                    val beforeFrames = minOf(2, beforeAvailable)
-                    val afterFrames = minOf(
-                        (framesPerLayer - beforeFrames - 1).coerceAtLeast(0),
-                        afterAvailable
-                    )
-                    val totalFrames = beforeFrames + afterFrames + 1
-                    val sourceStart = (centerSourceTime - beforeFrames / MediaLoader.CPU_PREVIEW_SAMPLE_FPS.toFloat())
-                        .coerceAtLeast(layer.srcOffset)
-                    val sourceEnd = (centerSourceTime + afterFrames / MediaLoader.CPU_PREVIEW_SAMPLE_FPS.toFloat())
-                        .coerceAtMost(sourceEndLimit)
-                    val windowStart = (
-                        layer.start + (sourceStart - layer.srcOffset) / speed
-                    ).coerceIn(layer.start, layer.end)
-                    val windowEnd = (
-                        layer.start + (sourceEnd - layer.srcOffset) / speed
-                    ).coerceIn(windowStart, layer.end)
-                    val signature = listOf(
-                        MediaLoader.mediaCacheFingerprint(source),
-                        layer.start, layer.duration, layer.srcOffset, layer.speed, layer.type
-                    ).joinToString("|")
-
-                    TimelineRamCache.setWindow(
-                        layer.id, signature, windowStart, windowEnd, 0, totalFrames
-                    )
-                    val readyFrames = MediaLoader.prefetchVideoFrameWindow(
-                        ctx = ctx,
-                        uri = source,
-                        centerTimeSec = centerSourceTime,
-                        beforeFrames = beforeFrames,
-                        afterFrames = afterFrames,
-                        sampleFps = MediaLoader.CPU_PREVIEW_SAMPLE_FPS,
-                        maxEdge = 320,
-                        minimumTimeSec = layer.srcOffset,
-                        maximumTimeSec = sourceEndLimit
-                    )
-                    TimelineRamCache.setWindow(
-                        layer.id, signature, windowStart, windowEnd,
-                        readyFrames, totalFrames
-                    )
-                }
-            }
-    }
+    // Preview frames are prepared once during media import and read from disk.
 
     LaunchedEffect(editor.layers, editor.duration, editor.resolution, editor.projectName) {
         delay(400)
@@ -353,6 +246,16 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                 val info = withContext(MediaWorkers.cpuDispatcher) { MediaLoader.probe(ctx, cachedUri, type) }
                 val name = MediaLoader.displayName(ctx, u)
                 editor.addMedia(type, name, cachedUri.toString(), info.width, info.height, info.length)
+                if (type == LayerType.VIDEO && (info.length ?: 0f) > 0f) {
+                    Toast.makeText(ctx, "Building full preview cache…", Toast.LENGTH_SHORT).show()
+                    runCatching {
+                        MediaLoader.cacheVideoPreviewFrames(ctx, cachedUri, info.length ?: 0f) { }
+                    }.onSuccess {
+                        Toast.makeText(ctx, "Preview cache ready", Toast.LENGTH_SHORT).show()
+                    }.onFailure {
+                        Toast.makeText(ctx, "Preview cache incomplete; decoding on demand", Toast.LENGTH_SHORT).show()
+                    }
+                }
             }
         }
     }
@@ -452,6 +355,19 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                             if (info.height > 0) info.height else item.height,
                             if (item.type == LayerType.IMAGE) null else item.duration,
                             trimIn, trimOut)
+                        if (item.type == LayerType.VIDEO) {
+                            Toast.makeText(ctx, "Building full preview cache…", Toast.LENGTH_SHORT).show()
+                            runCatching {
+                                MediaLoader.cacheVideoPreviewFrames(
+                                    ctx, cachedUri, (trimOut - trimIn).coerceAtLeast(0.05f),
+                                    startOffsetSec = trimIn
+                                ) { }
+                            }.onSuccess {
+                                Toast.makeText(ctx, "Preview cache ready", Toast.LENGTH_SHORT).show()
+                            }.onFailure {
+                                Toast.makeText(ctx, "Preview cache incomplete; decoding on demand", Toast.LENGTH_SHORT).show()
+                            }
+                        }
                     }
                 }
             )
@@ -801,12 +717,12 @@ private fun PreviewDiagnosticsBadge(playing: Boolean, modifier: Modifier = Modif
     if (playing) {
         val previewLabel = when {
             snapshot.cpuDrawFps > 0f -> {
-                "CPU ${snapshot.cpuDrawFps.toInt()}fps · draw ${"%.1f".format(snapshot.cpuDrawMs)}ms · dec ${"%.1f".format(snapshot.cpuDecodeMs)}ms · q ${"%.1f".format(snapshot.cpuQueueMs)}ms · RAM ${snapshot.cpuRamHitPercent}%"
+                "CPU ${snapshot.cpuDrawFps.toInt()}fps · draw ${"%.1f".format(snapshot.cpuDrawMs)}ms · dec ${"%.1f".format(snapshot.cpuDecodeMs)}ms · q ${"%.1f".format(snapshot.cpuQueueMs)}ms · RAM hit ${snapshot.cpuRamHitPercent}%"
             }
             snapshot.glFps > 0f -> {
                 "GL ${snapshot.glFps.toInt()}fps · submit ${"%.1f".format(snapshot.glSubmitMs)}ms"
             }
-            else -> "Preview warming"
+            else -> "CPU preview starting"
         }
         Text(
             "$previewLabel · dropped ${snapshot.droppedVideoFrames}",

@@ -26,6 +26,7 @@ import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.platform.LocalContext
 import com.kinetic.app.data.MediaLoader
+import com.kinetic.app.data.MediaWorkers
 import com.kinetic.app.data.PreviewDiagnostics
 import com.kinetic.app.model.COMP_H
 import com.kinetic.app.model.COMP_W
@@ -91,7 +92,10 @@ fun CpuPreviewCanvas(editor: EditorState, modifier: Modifier = Modifier) {
                 val bucket = if (layer.type == LayerType.VIDEO) {
                     (sourceTime * MediaLoader.CPU_PREVIEW_SAMPLE_FPS.toFloat()).toInt()
                 } else 0
-                val frameEdge = if (playing && layer.type == LayerType.VIDEO) 320 else 640
+                val frameEdge = if (
+                    layer.type == LayerType.VIDEO &&
+                    (playing || MediaWorkers.isConstrainedDevice)
+                ) 320 else 640
                 val requestKey = bucket to frameEdge
                 if (lastRequests[layer.id] == requestKey) {
                     val retryAt = retryAfterNs[layer.id]
@@ -143,49 +147,8 @@ fun CpuPreviewCanvas(editor: EditorState, modifier: Modifier = Modifier) {
         }
     }
 
-    // Decode one frame ahead on the lower-priority cache worker while the
-    // foreground worker handles the frame currently shown. Each worker has its
-    // own retriever, avoiding native retriever races and unbounded request queues.
-    LaunchedEffect(mediaLayerSignature, previewClock) {
-        val prefetchedBuckets = mutableMapOf<String, Int>()
-        val fps = MediaLoader.CPU_PREVIEW_SAMPLE_FPS
-        while (true) {
-            val timelineTime = previewClock.timeSec
-            if (!previewClock.playing) {
-                prefetchedBuckets.clear()
-                delay(60L)
-                continue
-            }
-            for (layer in mediaLayers) {
-                val rawUri = layer.uri ?: continue
-                if (layer.type != LayerType.VIDEO || !layer.visible || !layer.activeAt(timelineTime)) {
-                    prefetchedBuckets.remove(layer.id)
-                    continue
-                }
-                val sourceTime = (
-                    (timelineTime - layer.start).coerceAtLeast(0f) * layer.speed +
-                        layer.srcOffset
-                ).coerceAtLeast(0f)
-                val nextBucket = (sourceTime * fps.toFloat()).toInt() + 1
-                if (prefetchedBuckets[layer.id] == nextBucket) continue
-                prefetchedBuckets[layer.id] = nextBucket
-                MediaLoader.prefetchUpcomingVideoFrames(
-                    ctx = ctx,
-                    uri = Uri.parse(rawUri),
-                    firstFrameTimeSec = nextBucket / fps.toFloat(),
-                    frameCount = 1,
-                    sampleFps = fps,
-                    maxEdge = 320,
-                    sourceStepSec = 1f / fps.toFloat()
-                )
-            }
-            delay(12L)
-        }
-    }
+    // No runtime warmup: imported video frames are read from the persistent disk cache.
 
-    // The RAM cache warmer is owned by EditorScreen and fills only the current
-    // playhead working set while paused. Playback requests use the same keys.
-    
     val layerSnapshot = editor.layers
     val layerLookup = remember(layerSnapshot) { layerSnapshot.associateBy { it.id } }
     val destinationRects = remember(layerSnapshot) {

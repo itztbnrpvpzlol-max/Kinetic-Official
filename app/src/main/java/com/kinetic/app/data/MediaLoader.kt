@@ -10,7 +10,11 @@ import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.os.SystemClock
 import android.graphics.BitmapFactory
+import android.graphics.ImageFormat
+import android.graphics.Rect
+import android.graphics.YuvImage
 import android.media.MediaMetadataRetriever
+import android.media.Image
 import android.net.Uri
 import android.provider.OpenableColumns
 import android.util.LruCache
@@ -23,8 +27,10 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.LinkedHashMap
 import java.io.File
 import java.io.FileOutputStream
+import java.io.ByteArrayOutputStream
 import java.security.MessageDigest
 import kotlin.math.abs
+import kotlin.math.ceil
 import kotlin.math.max
 
 object MediaLoader {
@@ -227,7 +233,8 @@ object MediaLoader {
         sampleFps: Int = 5,
         maxEdge: Int = 960,
         persistToDisk: Boolean = true,
-        lowPriorityPrefetch: Boolean = false
+        lowPriorityPrefetch: Boolean = false,
+        retainInRam: Boolean = true
     ): Bitmap? {
         val requestNs = System.nanoTime()
         return withContext(if (lowPriorityPrefetch) MediaWorkers.cacheDispatcher else MediaWorkers.previewDispatcher) {
@@ -237,7 +244,7 @@ object MediaLoader {
             val key = if (type == LayerType.IMAGE) "$sourceKey@image@$maxEdge" else "$sourceKey@$sampleFps@$maxEdge@$bucket"
             synchronized(key.intern()) {
                 val diskFile = if (persistToDisk) previewFrameFile(ctx, key, type) else null
-                val hit = cache.get(key)
+                val hit = if (retainInRam) cache.get(key) else null
                 if (hit != null) {
                     // A frame first decoded by RAM-only prefetch must still become
                     // durable once the foreground preview actually requests it.
@@ -273,7 +280,7 @@ object MediaLoader {
                 }
 
                 if (bmp != null) {
-                    cache.put(key, bmp)
+                    if (retainInRam) cache.put(key, bmp)
                     if (diskFile != null && diskBitmap == null) {
                         writePreviewFrame(diskFile, bmp, type)
                     }
@@ -412,9 +419,12 @@ object MediaLoader {
     }
 
     /**
-     * Fill a low-resolution, persistent frame cache in the background. This is
-     * deliberately independent from playback: the editor never waits for it.
-     * A maximum of 240 samples per clip bounds storage and decoder work.
+     * Build the complete playback frame cache during import.
+     *
+     * MediaCodec decodes the source sequentially (instead of seeking with
+     * MediaMetadataRetriever for every frame). Only sampled 20fps frames are
+     * converted to small JPEGs and written to app-private storage. Import
+     * frames never enter the RAM LRU.
      */
     suspend fun cacheVideoPreviewFrames(
         ctx: Context,
@@ -424,24 +434,215 @@ object MediaLoader {
         playbackSpeed: Float = 1f,
         onProgress: suspend (Float) -> Unit
     ) = withContext(MediaWorkers.cacheDispatcher) {
-        val duration = durationSec.coerceAtLeast(0.1f)
-        // Cache a uniform sample across the whole clip, not just its first
-        // four minutes. The 240-frame ceiling bounds disk use and decode work.
-        val sampleCount = (duration * 2f).toInt().coerceIn(1, 240)
-        val intervalSec = duration / sampleCount.toFloat()
-        // TimelinePane requests the same 2 fps buckets for its four clip-strip
-        // thumbnails, so these prebuilt samples are reusable by the timeline.
-        val sampleFps = 2
+        val duration = durationSec.coerceAtLeast(0.05f)
+        val start = startOffsetSec.coerceAtLeast(0f)
         val speed = playbackSpeed.coerceIn(0.1f, 4f)
-        for (index in 0 until sampleCount) {
-            currentCoroutineContext().ensureActive()
-            bitmapFor(
-                ctx, uri, LayerType.VIDEO,
-                startOffsetSec + index * intervalSec * speed,
-                sampleFps, 240, persistToDisk = true, lowPriorityPrefetch = true
-            )
-            onProgress((index + 1).toFloat() / sampleCount)
+        val fps = CPU_PREVIEW_SAMPLE_FPS
+        val sampleCount = ceil(duration * fps).toInt().coerceIn(1, 1_000_000)
+        val maxEdge = 320
+        val sourceKey = mediaCacheIdentity(uri)
+
+        var completed = 0
+        val sequential = runCatching {
+            cacheVideoFramesSequentially(
+                ctx, uri, sourceKey, start, duration, speed, fps, maxEdge
+            ) { count ->
+                completed = count
+                onProgress((count.toFloat() / sampleCount).coerceIn(0f, 1f))
+            }
+        }.getOrElse { error ->
+            if (error is kotlinx.coroutines.CancellationException) throw error
+            0
         }
+
+        // Some vendor decoders do not expose YUV output images. Fill only the
+        // missing buckets with the compatibility retriever path in that case.
+        if (sequential < sampleCount) {
+            for (index in 0 until sampleCount) {
+                currentCoroutineContext().ensureActive()
+                val sourceTime = start + (index / fps.toFloat()) * speed
+                if (sourceTime >= start + duration * speed) break
+                val bucket = (sourceTime * fps.toFloat()).toInt()
+                val key = "$sourceKey@$fps@$maxEdge@$bucket"
+                val file = previewFrameFile(ctx, key, LayerType.VIDEO)
+                if (!file.isFile) {
+                    bitmapFor(
+                        ctx, uri, LayerType.VIDEO, sourceTime,
+                        sampleFps = fps, maxEdge = maxEdge,
+                        persistToDisk = true, lowPriorityPrefetch = true,
+                        retainInRam = false
+                    )?.recycle()
+                }
+                completed++
+                if (index % 4 == 0 || index == sampleCount - 1) {
+                    onProgress((completed.toFloat() / sampleCount).coerceIn(0f, 1f))
+                }
+            }
+        }
+        onProgress(1f)
+    }
+
+    private suspend fun cacheVideoFramesSequentially(
+        ctx: Context,
+        uri: Uri,
+        sourceKey: String,
+        startSec: Float,
+        durationSec: Float,
+        speed: Float,
+        fps: Int,
+        maxEdge: Int,
+        onProgressCount: suspend (Int) -> Unit
+    ): Int {
+        val extractor = MediaExtractor()
+        var decoder: MediaCodec? = null
+        var cached = 0
+        try {
+            extractor.setDataSource(ctx, uri, null)
+            val track = (0 until extractor.trackCount).firstOrNull { index ->
+                extractor.getTrackFormat(index).getString(MediaFormat.KEY_MIME)?.startsWith("video/") == true
+            } ?: return 0
+            val format = extractor.getTrackFormat(track)
+            val mime = format.getString(MediaFormat.KEY_MIME) ?: return 0
+            val rotation = if (format.containsKey(MediaFormat.KEY_ROTATION))
+                format.getInteger(MediaFormat.KEY_ROTATION) else 0
+            val startUs = (startSec * 1_000_000f).toLong().coerceAtLeast(0L)
+            val endUs = ((startSec + durationSec * speed) * 1_000_000f).toLong()
+            extractor.selectTrack(track)
+            extractor.seekTo(startUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
+
+            decoder = MediaCodec.createDecoderByType(mime)
+            decoder.configure(format, null, null, 0)
+            decoder.start()
+
+            val sampleCount = ceil(durationSec * fps).toInt().coerceIn(1, 1_000_000)
+            var nextIndex = 0
+            var inputDone = false
+            var outputDone = false
+            val info = MediaCodec.BufferInfo()
+            val deadline = SystemClock.elapsedRealtime() +
+                (durationSec * 2_000L).toLong().coerceAtLeast(120_000L)
+
+            while (!outputDone && SystemClock.elapsedRealtime() < deadline) {
+                currentCoroutineContext().ensureActive()
+                if (!inputDone) {
+                    val inputIndex = decoder.dequeueInputBuffer(10_000L)
+                    if (inputIndex >= 0) {
+                        val input = decoder.getInputBuffer(inputIndex)
+                        if (input == null) {
+                            decoder.queueInputBuffer(inputIndex, 0, 0, 0L, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                            inputDone = true
+                        } else {
+                            input.clear()
+                            val size = extractor.readSampleData(input, 0)
+                            val pts = extractor.sampleTime
+                            if (size < 0 || pts < 0L || pts > endUs) {
+                                decoder.queueInputBuffer(inputIndex, 0, 0, 0L, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                                inputDone = true
+                            } else {
+                                decoder.queueInputBuffer(inputIndex, 0, size, pts, 0)
+                                extractor.advance()
+                            }
+                        }
+                    }
+                }
+
+                when (val outputIndex = decoder.dequeueOutputBuffer(info, 10_000L)) {
+                    MediaCodec.INFO_OUTPUT_FORMAT_CHANGED,
+                    MediaCodec.INFO_TRY_AGAIN_LATER,
+                    MediaCodec.INFO_OUTPUT_BUFFERS_CHANGED -> Unit
+                    else -> if (outputIndex >= 0) {
+                        if (info.size > 0 && info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG == 0) {
+                            val presentationSec = info.presentationTimeUs / 1_000_000f
+                            val image = runCatching { decoder.getOutputImage(outputIndex) }.getOrNull()
+                            if (image != null) {
+                                try {
+                                    while (nextIndex < sampleCount) {
+                                        val targetSec = startSec + (nextIndex / fps.toFloat()) * speed
+                                        if (targetSec >= startSec + durationSec * speed) break
+                                        if (presentationSec + (0.5f / fps) < targetSec) break
+                                        val bucket = (targetSec * fps.toFloat()).toInt()
+                                        val key = "$sourceKey@$fps@$maxEdge@$bucket"
+                                        val file = previewFrameFile(ctx, key, LayerType.VIDEO)
+                                        if (!file.isFile && cacheImageFrame(image, file, rotation, maxEdge)) {
+                                            cached++
+                                            if (cached % 8 == 0) onProgressCount(cached)
+                                        }
+                                        nextIndex++
+                                    }
+                                } finally {
+                                    image.close()
+                                }
+                            }
+                        }
+                        if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) outputDone = true
+                        decoder.releaseOutputBuffer(outputIndex, false)
+                    }
+                }
+                if (nextIndex >= sampleCount) break
+            }
+            if (SystemClock.elapsedRealtime() >= deadline) error("Sequential frame cache timed out")
+            return cached
+        } finally {
+            runCatching { decoder?.stop() }
+            runCatching { decoder?.release() }
+            runCatching { extractor.release() }
+        }
+    }
+
+    private fun cacheImageFrame(image: Image, file: File, rotation: Int, maxEdge: Int): Boolean {
+        val crop = image.cropRect
+        val width = crop.width()
+        val height = crop.height()
+        if (width <= 0 || height <= 0) return false
+        val planes = image.planes
+        if (planes.size < 3) return false
+        val nv21 = ByteArray(width * height * 3 / 2)
+        val yPlane = planes[0]
+        val uPlane = planes[1]
+        val vPlane = planes[2]
+        val yBuffer = yPlane.buffer
+        val uBuffer = uPlane.buffer
+        val vBuffer = vPlane.buffer
+        var output = 0
+        for (row in 0 until height) {
+            val rowStart = (crop.top + row) * yPlane.rowStride + crop.left * yPlane.pixelStride
+            for (column in 0 until width) {
+                nv21[output++] = yBuffer.get(rowStart + column * yPlane.pixelStride)
+            }
+        }
+        for (row in 0 until height / 2) {
+            val uRow = (crop.top / 2 + row) * uPlane.rowStride + (crop.left / 2) * uPlane.pixelStride
+            val vRow = (crop.top / 2 + row) * vPlane.rowStride + (crop.left / 2) * vPlane.pixelStride
+            for (column in 0 until width / 2) {
+                nv21[output++] = vBuffer.get(vRow + column * vPlane.pixelStride)
+                nv21[output++] = uBuffer.get(uRow + column * uPlane.pixelStride)
+            }
+        }
+        val bytes = ByteArrayOutputStream()
+        if (!YuvImage(nv21, ImageFormat.NV21, width, height, null)
+                .compressToJpeg(Rect(0, 0, width, height), 84, bytes)) return false
+        var bitmap = BitmapFactory.decodeByteArray(bytes.toByteArray(), 0, bytes.size()) ?: return false
+        if (rotation % 360 != 0) {
+            val matrix = android.graphics.Matrix().apply { postRotate(rotation.toFloat()) }
+            val rotated = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+            if (rotated !== bitmap) bitmap.recycle()
+            bitmap = rotated
+        }
+        val longest = maxOf(bitmap.width, bitmap.height)
+        if (longest > maxEdge) {
+            val scale = maxEdge.toFloat() / longest
+            val scaled = Bitmap.createScaledBitmap(
+                bitmap,
+                (bitmap.width * scale).toInt().coerceAtLeast(1),
+                (bitmap.height * scale).toInt().coerceAtLeast(1),
+                true
+            )
+            if (scaled !== bitmap) bitmap.recycle()
+            bitmap = scaled
+        }
+        writePreviewFrame(file, bitmap, LayerType.VIDEO)
+        bitmap.recycle()
+        return file.isFile
     }
 
     /**
