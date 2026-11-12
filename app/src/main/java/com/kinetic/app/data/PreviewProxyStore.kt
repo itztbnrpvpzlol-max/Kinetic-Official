@@ -8,6 +8,8 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.common.MimeTypes
 import androidx.media3.transformer.EditedMediaItem
+import androidx.media3.transformer.DefaultEncoderFactory
+import androidx.media3.transformer.VideoEncoderSettings
 import androidx.media3.transformer.Effects
 import androidx.media3.transformer.ExportException
 import androidx.media3.transformer.ExportResult
@@ -32,29 +34,42 @@ import kotlin.coroutines.resume
  */
 @OptIn(UnstableApi::class)
 object PreviewProxyStore {
+    const val PLAYBACK_PROXY_HEIGHT = 360
+    const val PLAYBACK_PROXY_BITRATE = 3_000_000
     private const val MAX_CACHE_BYTES = 256L * 1024L * 1024L
     private const val TRIM_TO_BYTES = 192L * 1024L * 1024L
     private val buildMutex = Mutex()
     private val failedKeys = ConcurrentHashMap.newKeySet<String>()
     private val mainHandler = Handler(Looper.getMainLooper())
 
-    fun findExisting(context: Context, source: Uri, targetHeight: Int): Uri? {
-        val key = cacheKey(source, targetHeight)
+    fun findExisting(
+        context: Context,
+        source: Uri,
+        targetHeight: Int = PLAYBACK_PROXY_HEIGHT,
+        targetBitrate: Int = bitrateForHeight(targetHeight)
+    ): Uri? {
+        val key = cacheKey(source, targetHeight, targetBitrate)
         val file = proxyFile(context, key)
         return file.takeIf { it.isFile && it.length() > 1024L }?.also {
             it.setLastModified(System.currentTimeMillis())
         }?.let(Uri::fromFile)
     }
 
-    suspend fun getOrCreate(context: Context, source: Uri, targetHeight: Int): Uri? {
+    suspend fun getOrCreate(
+        context: Context,
+        source: Uri,
+        targetHeight: Int = PLAYBACK_PROXY_HEIGHT,
+        targetBitrate: Int = bitrateForHeight(targetHeight)
+    ): Uri? {
         val appContext = context.applicationContext
         val safeHeight = targetHeight.coerceIn(240, 1080)
-        findExisting(appContext, source, safeHeight)?.let { return it }
-        val key = cacheKey(source, safeHeight)
+        val safeBitrate = targetBitrate.coerceIn(750_000, 12_000_000)
+        findExisting(appContext, source, safeHeight, safeBitrate)?.let { return it }
+        val key = cacheKey(source, safeHeight, safeBitrate)
         if (key in failedKeys) return null
 
         return buildMutex.withLock {
-            findExisting(appContext, source, safeHeight)?.let { return@withLock it }
+            findExisting(appContext, source, safeHeight, safeBitrate)?.let { return@withLock it }
             if (key in failedKeys) return@withLock null
 
             val directory = File(appContext.cacheDir, "kinetic-preview-proxies").apply { mkdirs() }
@@ -63,7 +78,7 @@ object PreviewProxyStore {
             temporary.delete()
 
             val completed = try {
-                transform(appContext, source, safeHeight, temporary)
+                transform(appContext, source, safeHeight, safeBitrate, temporary)
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 temporary.delete()
                 throw cancelled
@@ -104,6 +119,7 @@ object PreviewProxyStore {
         context: Context,
         source: Uri,
         targetHeight: Int,
+        targetBitrate: Int,
         output: File
     ): Boolean = withContext(Dispatchers.Main.immediate) {
         suspendCancellableCoroutine { continuation ->
@@ -125,7 +141,15 @@ object PreviewProxyStore {
                     }
                 }
 
+                val encoderFactory = DefaultEncoderFactory.Builder(context)
+                    .setRequestedVideoEncoderSettings(
+                        VideoEncoderSettings.Builder()
+                            .setBitrate(targetBitrate)
+                            .build()
+                    )
+                    .build()
                 val activeTransformer = Transformer.Builder(context)
+                    .setEncoderFactory(encoderFactory)
                     .setVideoMimeType(MimeTypes.VIDEO_H264)
                     .addListener(listener)
                     .build()
@@ -150,7 +174,9 @@ object PreviewProxyStore {
         }
     }
 
-    private fun cacheKey(source: Uri, targetHeight: Int): String {
+    private fun bitrateForHeight(height: Int): Int = if (height <= 360) 3_000_000 else 6_000_000
+
+    private fun cacheKey(source: Uri, targetHeight: Int, targetBitrate: Int): String {
         val sourceFile = source.path?.let(::File)
         val fingerprint = buildString {
             append(source.toString())
@@ -159,7 +185,8 @@ object PreviewProxyStore {
                 append('|').append(sourceFile.lastModified())
             }
             append("|h=").append(targetHeight)
-            append("|v=1")
+            append("|b=").append(targetBitrate)
+            append("|v=2")
         }
         return MessageDigest.getInstance("SHA-256")
             .digest(fingerprint.toByteArray())
