@@ -225,13 +225,19 @@ object MediaLoader {
         startOffsetSec: Float = 0f,
         playbackSpeed: Float = 1f,
         onProgress: suspend (Float) -> Unit
-    ) = withContext(MediaWorkers.cpuDispatcher) {
+    ) = withContext(MediaWorkers.cacheDispatcher) {
         val duration = durationSec.coerceAtLeast(0.1f)
+        // Import cache is deliberately bounded to 240 low-resolution samples.
+        // Samples are persisted and admitted to RAM only within the LRU budget.
         val sampleFps = if (duration <= 120f) 2 else 1
         val sampleCount = (duration * sampleFps).toInt().coerceIn(1, 240)
         trimPreviewDiskCache(ctx)
         for (index in 0 until sampleCount) {
-            bitmapFor(ctx, uri, LayerType.VIDEO, startOffsetSec + index / sampleFps.toFloat() * playbackSpeed.coerceIn(0.1f, 4f), sampleFps, 240)
+            bitmapFor(
+                ctx, uri, LayerType.VIDEO,
+                startOffsetSec + index / sampleFps.toFloat() * playbackSpeed.coerceIn(0.1f, 4f),
+                sampleFps, 240, persistToDisk = true, lowPriorityPrefetch = true
+            )
             onProgress((index + 1).toFloat() / sampleCount)
         }
     }
