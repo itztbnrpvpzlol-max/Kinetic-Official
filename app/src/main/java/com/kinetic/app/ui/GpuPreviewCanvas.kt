@@ -208,6 +208,20 @@ private fun LivePreviewCanvas(
     }
 }
 
+private fun applyPlaybackDecodeLimit(player: ExoPlayer, playing: Boolean) {
+    // During transport, ask Media3 for a 360p-class stream/track and cap its
+    // selected bitrate. This affects preview decoding only, never source media.
+    val maxHeight = if (playing) 360 else Int.MAX_VALUE
+    val maxWidth = if (playing) {
+        (COMP_W.toFloat() * 360f / COMP_H.toFloat()).toInt().coerceAtLeast(240)
+    } else Int.MAX_VALUE
+    val maxBitrate = if (playing) 8_000_000 else Int.MAX_VALUE
+    player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+        .setMaxVideoSize(maxWidth, maxHeight)
+        .setMaxVideoBitrate(maxBitrate)
+        .build()
+}
+
 internal fun resolvePreviewScale(context: Context, qualityIndex: Int, activeLayers: Int): Float {
     if (qualityIndex == 1) return 1f
     if (qualityIndex == 2) return 0.5f
@@ -286,6 +300,7 @@ private fun HardwareVideoLayer(
     canStartPlayback: Boolean,
     onReadyChanged: (String, Boolean) -> Unit
 ) {
+    LaunchedEffect(editor.playing, player) { applyPlaybackDecodeLimit(player, editor.playing) }
     var videoReady by remember(player) { androidx.compose.runtime.mutableStateOf(player.playbackState == Player.STATE_READY) }
     DisposableEffect(player, layer.id) {
         val listener = object : Player.Listener {
@@ -380,6 +395,7 @@ private fun DirectVideoPreviewCanvas(
             repeatMode = Player.REPEAT_MODE_OFF
         }
     }
+    LaunchedEffect(editor.playing, player) { applyPlaybackDecodeLimit(player, editor.playing) }
     var videoReady by remember(player) { androidx.compose.runtime.mutableStateOf(player.playbackState == Player.STATE_READY) }
     DisposableEffect(player) {
         val listener = object : Player.Listener {
@@ -464,6 +480,7 @@ private fun GpuVideoPlayerLayer(
     surfaceView: GpuPreviewSurfaceView
 ) {
     val uri = layer.uri ?: return
+    LaunchedEffect(editor.playing, player) { applyPlaybackDecodeLimit(player, editor.playing) }
     var videoReady by remember(player) {
         androidx.compose.runtime.mutableStateOf(player.playbackState == Player.STATE_READY)
     }
