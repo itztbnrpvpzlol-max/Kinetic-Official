@@ -10,6 +10,7 @@ import android.media.MediaFormat
 import android.net.Uri
 import android.os.Build
 import android.os.SystemClock
+import android.util.Log
 import kotlin.math.ceil
 import kotlin.math.max
 
@@ -35,6 +36,10 @@ internal class SequentialVideoFrameDecoder {
     )
 
     private var session: Session? = null
+
+    companion object {
+        private const val TAG = "KineticSequentialDecoder"
+    }
     @Volatile private var fallbackIdentity: String? = null
 
     fun shouldUseRetrieverFallback(identity: String): Boolean = fallbackIdentity == identity
@@ -46,20 +51,42 @@ internal class SequentialVideoFrameDecoder {
         if (fallbackIdentity != null && fallbackIdentity != identity) fallbackIdentity = null
         try {
             var active = session
-            val needsSeek = active == null ||
-                active.identity != identity ||
-                (active.lastRequestedUs >= 0L && target + 20_000L < active.lastRequestedUs) ||
-                (active.lastOutputUs >= 0L && target - active.lastOutputUs > 5_000_000L) ||
-                active.outputEnded
-            if (needsSeek) {
+            val needsNewSource = active == null || active.identity != identity
+            if (needsNewSource) {
                 closeSession()
                 active = openSession(context, uri, identity, target)
                 session = active
+            } else {
+                val current = checkNotNull(active)
+                val needsSeek = (current.lastRequestedUs >= 0L && target + 20_000L < current.lastRequestedUs) ||
+                    (current.lastOutputUs >= 0L && target - current.lastOutputUs > 5_000_000L) ||
+                    current.outputEnded
+                if (needsSeek) {
+                    // Reuse the configured codec. In synchronous mode flush()
+                    // returns it to the executing state; recreating the codec
+                    // for every backward scrub adds avoidable startup latency.
+                    val reused = try {
+                        current.extractor.seekTo(target, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
+                        current.codec.flush()
+                        current.inputEnded = false
+                        current.outputEnded = false
+                        current.lastOutputUs = -1L
+                        current.lastRequestedUs = -1L
+                        current
+                    } catch (error: Exception) {
+                        Log.w(TAG, "Codec flush failed; rebuilding decoder session", error)
+                        closeSession()
+                        openSession(context, uri, identity, target)
+                    }
+                    active = reused
+                    session = reused
+                }
             }
             val decoder = active ?: return null
             decoder.lastRequestedUs = target
             return decodeUntil(decoder, target, maxEdge)
-        } catch (_: Throwable) {
+        } catch (error: Exception) {
+            Log.w(TAG, "Sequential MediaCodec decode failed; enabling retriever fallback", error)
             fallbackIdentity = identity
             closeSession()
             return null
@@ -109,48 +136,78 @@ internal class SequentialVideoFrameDecoder {
                 }
         }.getOrDefault(emptyList())
 
-        val hardware = candidates.firstOrNull { info ->
-            if (Build.VERSION.SDK_INT >= 29) {
-                info.isHardwareAccelerated && !info.isSoftwareOnly
+        val width = runCatching { format.getInteger(MediaFormat.KEY_WIDTH) }.getOrDefault(0)
+        val height = runCatching { format.getInteger(MediaFormat.KEY_HEIGHT) }.getOrDefault(0)
+        val frameRate = runCatching { format.getInteger(MediaFormat.KEY_FRAME_RATE) }
+            .getOrDefault(0).coerceAtLeast(0)
+
+        // MediaCodecList is already ordered by the device preferred codec order.
+        // Try every suitable hardware decoder rather than abandoning hardware
+        // after the first codec rejects this clip profile or dimensions.
+        for (info in candidates) {
+            val hardware = if (Build.VERSION.SDK_INT >= 29) {
+                runCatching { info.isHardwareAccelerated && !info.isSoftwareOnly }.getOrDefault(false)
             } else {
                 val name = info.name.lowercase()
                 !name.contains("google") && !name.contains("android") && !name.contains("software")
             }
-        }
+            if (!hardware) continue
 
-        if (hardware != null) {
-            var candidate: MediaCodec? = null
-            try {
-                candidate = MediaCodec.createByCodecName(hardware.name)
-                // Android 11+ exposes an optional decoder low-latency hint.
-                // Vendor codecs may ignore or reject it, so the normal path
-                // remains available immediately when configuration fails.
-                if (Build.VERSION.SDK_INT >= 30) {
-                    runCatching { format.setInteger("low-latency", 1) }
+            val capabilities = runCatching { info.getCapabilitiesForType(mime) }.getOrNull()
+            if (capabilities != null) {
+                val formatSupported = runCatching { capabilities.isFormatSupported(format) }.getOrDefault(true)
+                if (!formatSupported) continue
+                val video = capabilities.videoCapabilities
+                if (video != null && width > 0 && height > 0) {
+                    val sizeSupported = runCatching { video.isSizeSupported(width, height) }.getOrDefault(true)
+                    if (!sizeSupported) continue
+                    if (frameRate > 0) {
+                        val rateSupported = runCatching {
+                            video.areSizeAndRateSupported(width, height, frameRate.toDouble())
+                        }.getOrDefault(true)
+                        if (!rateSupported) continue
+                    }
                 }
-                candidate.configure(format, null, null, 0)
-                candidate.start()
-                return candidate
-            } catch (_: Throwable) {
-                runCatching { candidate?.stop() }
-                runCatching { candidate?.release() }
-                if (Build.VERSION.SDK_INT >= 30) {
-                    runCatching { format.setInteger("low-latency", 0) }
+            }
+
+            // Some vendor codecs reject the optional low-latency hint. Retry
+            // the same hardware decoder without the hint before moving on.
+            val latencyAttempts = if (Build.VERSION.SDK_INT >= 30) listOf(true, false) else listOf(false)
+            for (lowLatency in latencyAttempts) {
+                var candidate: MediaCodec? = null
+                try {
+                    if (Build.VERSION.SDK_INT >= 30) {
+                        format.setInteger("low-latency", if (lowLatency) 1 else 0)
+                    }
+                    candidate = MediaCodec.createByCodecName(info.name)
+                    candidate.configure(format, null, null, 0)
+                    candidate.start()
+                    Log.i(TAG, "Selected hardware decoder ${info.name}; lowLatency=$lowLatency")
+                    return candidate
+                } catch (error: Exception) {
+                    Log.w(TAG, "Hardware decoder ${info.name} rejected; lowLatency=$lowLatency", error)
+                    runCatching { candidate?.stop() }
+                    runCatching { candidate?.release() }
                 }
             }
         }
 
+        if (Build.VERSION.SDK_INT >= 30) {
+            runCatching { format.setInteger("low-latency", 0) }
+        }
         val fallback = MediaCodec.createDecoderByType(mime)
         try {
             fallback.configure(format, null, null, 0)
             fallback.start()
+            Log.i(TAG, "Selected platform fallback decoder ${fallback.name}")
             return fallback
-        } catch (error: Throwable) {
+        } catch (error: Exception) {
             runCatching { fallback.stop() }
             runCatching { fallback.release() }
             throw error
         }
     }
+
     private fun decodeUntil(session: Session, targetUs: Long, maxEdge: Int): Bitmap? {
         val codec = session.codec
         val extractor = session.extractor
