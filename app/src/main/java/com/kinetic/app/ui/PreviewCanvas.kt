@@ -58,7 +58,7 @@ fun CpuPreviewCanvas(editor: EditorState, modifier: Modifier = Modifier) {
                 // after the playhead has already advanced.
                 val latestBucket = rememberUpdatedState(bucket)
                 val playbackSource = Uri.parse(uri)
-                val frameEdge = if (editor.playing && l.type == LayerType.VIDEO) 480 else 640
+                val frameEdge = if (editor.playing && l.type == LayerType.VIDEO) 320 else 640
                 LaunchedEffect(uri, bucket, editor.playing) {
                     if (bucket >= 0) {
                         val frame = MediaLoader.bitmapFor(
@@ -76,40 +76,10 @@ fun CpuPreviewCanvas(editor: EditorState, modifier: Modifier = Modifier) {
         }
     }
 
-    // Keep the same 360p/12fps buckets used by the CPU preview one step ahead
-    // of the playhead. If the next bucket is missing, the transport can wait
-    // instead of displaying a stale frame while the decoder falls behind.
-    LaunchedEffect(editor.playing, editor.layers.map { listOf(it.id, it.uri, it.visible, it.type) }) {
-        if (!editor.playing) return@LaunchedEffect
-        while (editor.playing) {
-            val playhead = editor.time
-            val upcomingVideos = editor.layers.filter {
-                it.visible && it.type == LayerType.VIDEO && it.uri != null &&
-                    it.end > playhead && it.start <= playhead + 0.5f
-            }
-            for (layer in upcomingVideos) {
-                val source = Uri.parse(layer.uri!!)
-                val speed = layer.speed.coerceIn(0.1f, 4f)
-                // Warm clips just before their in-point too, so a layer
-                // transition cannot stall waiting for its very first frame.
-                val sampleTimelineTime = maxOf(playhead, layer.start)
-                val sourceTime = (
-                    (sampleTimelineTime - layer.start).coerceAtLeast(0f) * speed + layer.srcOffset
-                ).coerceAtLeast(0f)
-                MediaLoader.prefetchUpcomingVideoFrames(
-                    ctx,
-                    source,
-                    sourceTime,
-                    frameCount = 3,
-                    sampleFps = 12,
-                    maxEdge = 480,
-                    sourceStepSec = speed / 12f
-                )
-            }
-            kotlinx.coroutines.delay(90L)
-        }
-    }
-
+    // EditorScreen owns the shared RAM timeline warmer. This canvas requests
+    // the same 12fps/320px keys so cached frames are reused without a second
+    // competing prefetch loop.
+    
     val paint = remember { Paint(Paint.ANTI_ALIAS_FLAG).apply { isFilterBitmap = true } }
     val textPaint = remember {
         Paint(Paint.ANTI_ALIAS_FLAG).apply {
