@@ -139,7 +139,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
         val activeVideoCount = editor.layers.count {
             it.visible && it.type == LayerType.VIDEO
         } + 1
-        val frameEdge = 480
+        val frameEdge = 448
         MediaLoader.prefetchUpcomingVideoFrames(
             ctx,
             source,
