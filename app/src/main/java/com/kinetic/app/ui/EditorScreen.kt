@@ -300,22 +300,25 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
             playback.play()
             PreviewDiagnostics.resetSession()
 
-            var publishedFrame = (editor.time * editor.fps).toInt()
+            // Keep the native clock and audio at full precision, but cap Compose
+            // playhead publication at 30 Hz. Publishing 60-120 UI states per
+            // second needlessly recomposes the editor and timeline on low-RAM
+            // phones; video output is scheduled directly from the native clock.
+            val uiFps = editor.fps.coerceIn(1, 30)
+            var publishedFrame = (editor.time * uiFps).toInt()
             var lastAudioSyncMs = 0L
             audio.sync(editor.layers, editor.time, true)
 
-            // Native steady_clock is authoritative; Kotlin only publishes UI
-            // frame changes and periodically forwards the latest audio position.
             while (editor.playing && playback.isPlaying()) {
-                delay(8L)
+                delay(16L)
                 val transportTime = playback.positionSeconds()
                     .coerceIn(0f, editor.duration.coerceAtLeast(0f))
-                val timelineFps = editor.fps.coerceIn(1, 240)
-                val nextFrame = playback.positionFrame(timelineFps.toFloat()).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+                val nextFrame = playback.positionFrame(uiFps.toFloat())
+                    .coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
                 if (nextFrame != publishedFrame) {
-                    // Publish frame-accurate timeline ticks to Compose while keeping
-                    // the unquantized native clock for audio synchronization.
-                    editor.time = (nextFrame / timelineFps.toFloat()).coerceAtMost(editor.duration)
+                    // UI animation is capped at 30 fps; the native master clock
+                    // remains unquantized for video scheduling and audio sync.
+                    editor.time = (nextFrame / uiFps.toFloat()).coerceAtMost(editor.duration)
                     publishedFrame = nextFrame
                 }
 
