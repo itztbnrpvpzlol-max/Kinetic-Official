@@ -182,7 +182,7 @@ fun CpuPreviewCanvas(editor: EditorState, modifier: Modifier = Modifier) {
             nc.drawColor(android.graphics.Color.BLACK)
 
             for (l in layers.asReversed()) {
-                if (!l.visible || !l.activeAt(time)) continue
+                if (!l.visible || !l.activeAt(time) || l.type == LayerType.AUDIO) continue
                 val alpha = (l.p(PropId.OPACITY).valueAt(time) * 2.55f).toInt().coerceIn(0, 255)
                 nc.save()
                 val layerMatrix = layerMatrices.getOrPut(l.id) { Matrix() }
@@ -196,6 +196,7 @@ fun CpuPreviewCanvas(editor: EditorState, modifier: Modifier = Modifier) {
                         val bmp = bitmaps[l.id]
                         paint.alpha = alpha
                         if (bmp != null) {
+                            paint.color = android.graphics.Color.WHITE
                             nc.drawBitmap(bmp, null, destinationRects[l.id] ?: RectF(0f, 0f, l.width, l.height), paint)
                         } else {
                             paint.color = 0xFF24242F.toInt(); paint.alpha = alpha
@@ -228,8 +229,10 @@ fun CpuPreviewCanvas(editor: EditorState, modifier: Modifier = Modifier) {
                 nc.save()
                 nc.translate(ox, oy)
                 nc.scale(s, s)
-                val m = layerMatrices.getOrPut(sel.id) { Matrix() }
-                layerMatrixInto(sel, time, byId, m, matrixScratch)
+                val m = layerMatrices[sel.id] ?: Matrix().also { matrix ->
+                    layerMatrixInto(sel, time, byId, matrix, matrixScratch)
+                    layerMatrices[sel.id] = matrix
+                }
                 val pts = selectionPoints
                 pts[0] = 0f; pts[1] = 0f
                 pts[2] = sel.width; pts[3] = 0f
