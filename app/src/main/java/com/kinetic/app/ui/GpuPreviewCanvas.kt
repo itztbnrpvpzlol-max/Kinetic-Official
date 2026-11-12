@@ -10,6 +10,7 @@ import android.graphics.RectF
 import android.graphics.SurfaceTexture
 import android.graphics.Typeface
 import android.opengl.GLES20
+import android.opengl.GLES30
 import android.opengl.GLSurfaceView
 import android.opengl.GLUtils
 import android.os.Handler
@@ -485,6 +486,12 @@ private class CompositionGlRenderer(
     private val quadScratch = FloatArray(16)
     private val selectionScratch = FloatArray(8)
     private val activeTextureIds = HashSet<String>()
+    private val fingerprintMatrixScratch = FloatArray(9)
+    private var compositeFramebuffer = 0
+    private var compositeTexture = 0
+    private var compositeWidth = 0
+    private var compositeHeight = 0
+    private var cachedCompositionFingerprint = Long.MIN_VALUE
     private var viewportWidth = 1
     private var viewportHeight = 1
     private val vertices = ByteBuffer.allocateDirect(16 * 4).order(ByteOrder.nativeOrder()).asFloatBuffer()
@@ -532,7 +539,8 @@ private class CompositionGlRenderer(
         runCatching { output.texture.release() }
         GLES20.glDeleteTextures(1, intArrayOf(output.textureId), 0)
     }
-    private fun refreshVideoFrames() {
+    private fun refreshVideoFrames(): Long {
+        var signature = -3750763034362895579L
         videoOutputs.forEach { (id, output) ->
             try {
                 output.texture.updateTexImage()
@@ -540,7 +548,118 @@ private class CompositionGlRenderer(
             } catch (error: Throwable) {
                 Log.e("KineticVideo", "updateTexImage failed for layer $id", error)
             }
+            signature = (signature xor output.texture.timestamp) * 1099511628211L
+            signature = (signature xor id.hashCode().toLong()) * 1099511628211L
         }
+        return signature
+    }
+
+    private fun mixFingerprint(hash: Long, value: Long): Long =
+        (hash xor value) * 1099511628211L
+
+    /** Fingerprints every input that can change the composed output. */
+    private fun sceneFingerprint(current: GpuScene, videoSignature: Long): Long {
+        var hash = mixFingerprint(-3750763034362895579L, videoSignature)
+        hash = mixFingerprint(hash, viewportWidth.toLong())
+        hash = mixFingerprint(hash, viewportHeight.toLong())
+        hash = mixFingerprint(hash, current.background.toLong())
+        for (layer in current.layers) {
+            hash = mixFingerprint(hash, layer.id.hashCode().toLong())
+            hash = mixFingerprint(hash, System.identityHashCode(layer.bitmap).toLong())
+            hash = mixFingerprint(hash, java.lang.Float.floatToIntBits(layer.opacity).toLong())
+            hash = mixFingerprint(hash, java.lang.Float.floatToIntBits(layer.width).toLong())
+            hash = mixFingerprint(hash, java.lang.Float.floatToIntBits(layer.height).toLong())
+            hash = mixFingerprint(hash, if (layer.mask) 1L else 0L)
+            hash = mixFingerprint(hash, if (layer.grayscale) 1L else 0L)
+            hash = mixFingerprint(hash, layer.blend.hashCode().toLong())
+            hash = mixFingerprint(hash, if (layer.isVideo) 1L else 0L)
+            layer.matrix.getValues(fingerprintMatrixScratch)
+            for (value in fingerprintMatrixScratch) {
+                hash = mixFingerprint(hash, java.lang.Float.floatToIntBits(value).toLong())
+            }
+        }
+        current.selected?.let { selected ->
+            hash = mixFingerprint(hash, selected.id.hashCode().toLong())
+            hash = mixFingerprint(hash, java.lang.Float.floatToIntBits(selected.width).toLong())
+            hash = mixFingerprint(hash, java.lang.Float.floatToIntBits(selected.height).toLong())
+            selected.matrix.getValues(fingerprintMatrixScratch)
+            for (value in fingerprintMatrixScratch) {
+                hash = mixFingerprint(hash, java.lang.Float.floatToIntBits(value).toLong())
+            }
+        }
+        return hash
+    }
+
+    /** A single bounded GPU composition slot; resized or invalidated with the EGL surface. */
+    private fun ensureCompositeTarget(width: Int, height: Int): Boolean {
+        if (compositeFramebuffer != 0 && compositeTexture != 0 &&
+            compositeWidth == width && compositeHeight == height) return true
+
+        releaseCompositeTarget()
+        val textures = IntArray(1)
+        val framebuffers = IntArray(1)
+        GLES30.glGenTextures(1, textures, 0)
+        GLES30.glGenFramebuffers(1, framebuffers, 0)
+        if (textures[0] == 0 || framebuffers[0] == 0) {
+            if (textures[0] != 0) GLES30.glDeleteTextures(1, textures, 0)
+            if (framebuffers[0] != 0) GLES30.glDeleteFramebuffers(1, framebuffers, 0)
+            return false
+        }
+
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, textures[0])
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_LINEAR)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_LINEAR)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_CLAMP_TO_EDGE)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_T, GLES30.GL_CLAMP_TO_EDGE)
+        GLES30.glTexImage2D(
+            GLES30.GL_TEXTURE_2D, 0, GLES30.GL_RGBA8, width, height, 0,
+            GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, null
+        )
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, framebuffers[0])
+        GLES30.glFramebufferTexture2D(
+            GLES30.GL_FRAMEBUFFER, GLES30.GL_COLOR_ATTACHMENT0,
+            GLES30.GL_TEXTURE_2D, textures[0], 0
+        )
+        val complete = GLES30.glCheckFramebufferStatus(GLES30.GL_FRAMEBUFFER) ==
+            GLES30.GL_FRAMEBUFFER_COMPLETE
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
+        if (!complete) {
+            GLES30.glDeleteFramebuffers(1, framebuffers, 0)
+            GLES30.glDeleteTextures(1, textures, 0)
+            return false
+        }
+        compositeFramebuffer = framebuffers[0]
+        compositeTexture = textures[0]
+        compositeWidth = width
+        compositeHeight = height
+        cachedCompositionFingerprint = Long.MIN_VALUE
+        return true
+    }
+
+    private fun releaseCompositeTarget() {
+        if (compositeFramebuffer != 0) {
+            GLES30.glDeleteFramebuffers(1, intArrayOf(compositeFramebuffer), 0)
+        }
+        if (compositeTexture != 0) {
+            GLES30.glDeleteTextures(1, intArrayOf(compositeTexture), 0)
+        }
+        compositeFramebuffer = 0
+        compositeTexture = 0
+        compositeWidth = 0
+        compositeHeight = 0
+        cachedCompositionFingerprint = Long.MIN_VALUE
+    }
+
+    private fun presentCompositeTarget() {
+        GLES30.glBindFramebuffer(GLES30.GL_READ_FRAMEBUFFER, compositeFramebuffer)
+        GLES30.glBindFramebuffer(GLES30.GL_DRAW_FRAMEBUFFER, 0)
+        GLES30.glBlitFramebuffer(
+            0, 0, compositeWidth, compositeHeight,
+            0, 0, viewportWidth, viewportHeight,
+            GLES30.GL_COLOR_BUFFER_BIT, GLES30.GL_NEAREST
+        )
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
     }
 
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
@@ -548,6 +667,13 @@ private class CompositionGlRenderer(
         GLES20.glDisable(GLES20.GL_DEPTH_TEST)
         // A recreated EGL context invalidates every texture/program from the old context.
         textures.clear()
+        // The previous EGL context is gone; its GL names must not be deleted in
+        // the new context, only forgotten.
+        compositeFramebuffer = 0
+        compositeTexture = 0
+        compositeWidth = 0
+        compositeHeight = 0
+        cachedCompositionFingerprint = Long.MIN_VALUE
         videoOutputs.values.forEach { output -> runCatching { output.surface.release(); output.texture.release() } }
         videoOutputs.clear()
         program = 0
@@ -580,10 +706,22 @@ private class CompositionGlRenderer(
     override fun onDrawFrame(gl: GL10?) {
         val startedNs = System.nanoTime()
         try {
-            GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
             if (program == 0) return
             val current = scene
-            refreshVideoFrames()
+            val videoSignature = refreshVideoFrames()
+            val fingerprint = sceneFingerprint(current, videoSignature)
+            val cacheReady = ensureCompositeTarget(viewportWidth, viewportHeight)
+            if (cacheReady && fingerprint == cachedCompositionFingerprint) {
+                presentCompositeTarget()
+                return
+            }
+            if (cacheReady) {
+                GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, compositeFramebuffer)
+            } else {
+                GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+            }
+            GLES20.glViewport(0, 0, viewportWidth, viewportHeight)
+            GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
             activeTextureIds.clear()
             for (layer in current.layers) if (!layer.isVideo) activeTextureIds.add(layer.id)
             val textureIterator = textures.entries.iterator()
@@ -602,6 +740,10 @@ private class CompositionGlRenderer(
             val offsetY = (viewportHeight - COMP_H * scale) / 2f
             for (layer in current.layers) drawLayer(layer, scale, offsetX, offsetY)
             current.selected?.let { drawSelection(it, scale, offsetX, offsetY) }
+            if (cacheReady) {
+                cachedCompositionFingerprint = fingerprint
+                presentCompositeTarget()
+            }
         } finally {
             PreviewDiagnostics.recordGlFrame(System.nanoTime() - startedNs)
         }
@@ -701,6 +843,7 @@ private class CompositionGlRenderer(
 
     fun release() {
         videoOutputs.keys.toList().forEach(::releaseVideoOutput)
+        releaseCompositeTarget()
         if (textures.isNotEmpty()) {
             GLES20.glDeleteTextures(textures.size, textures.values.map { it.id }.toIntArray(), 0)
             textures.clear()
