@@ -523,9 +523,10 @@ private fun GpuCompositionPreviewCanvas(
     val context = LocalContext.current
     val frames = remember { mutableStateMapOf<String, Bitmap>() }
     val textTextures = remember { mutableMapOf<String, Pair<Int, Bitmap>>() }
+    // All videos in a mixed composition use hardware decode and external OES.
+    // The GL pass applies the same supported mask, grayscale and blend features.
     val videoLayers = editor.layers.filter {
-        it.visible && it.activeAt(editor.time) && it.type == LayerType.VIDEO && it.uri != null &&
-            !it.maskEnabled && it.effects.isEmpty() && it.blendMode == "Normal"
+        it.visible && it.activeAt(editor.time) && it.type == LayerType.VIDEO && it.uri != null
     }
     val textureVideoIds = videoLayers.mapTo(HashSet<String>()) { it.id }
 
@@ -574,7 +575,8 @@ private fun GpuCompositionPreviewCanvas(
             val opacity = (layer.p(PropId.OPACITY).valueAt(editor.time) / 100f).coerceIn(0f, 1f)
             renderLayers += GpuLayer(
                 layer.id, null, Matrix(layerMatrix(layer, editor.time, byId)),
-                layer.width, layer.height, opacity, false, false, layer.blendMode, true
+                layer.width, layer.height, opacity, layer.maskEnabled,
+                "Grayscale" in layer.effects, layer.blendMode, true
             )
             continue
         }
@@ -731,6 +733,7 @@ private class CompositionGlRenderer(
     private var externalUvHandle = 0
     private var externalSamplerHandle = 0
     private var externalAlphaHandle = 0
+    private var externalGrayHandle = 0
     private var externalMatrixHandle = 0
     private val videoOutputs = HashMap<String, VideoOutput>()
     private val textures = HashMap<String, TextureEntry>()
@@ -815,6 +818,7 @@ private class CompositionGlRenderer(
             externalUvHandle = GLES20.glGetAttribLocation(externalProgram, "aTexCoord")
             externalSamplerHandle = GLES20.glGetUniformLocation(externalProgram, "uTexture")
             externalAlphaHandle = GLES20.glGetUniformLocation(externalProgram, "uAlpha")
+            externalGrayHandle = GLES20.glGetUniformLocation(externalProgram, "uGray")
             externalMatrixHandle = GLES20.glGetUniformLocation(externalProgram, "uTexMatrix")
         } catch (_: Throwable) {
             program = 0
@@ -894,13 +898,16 @@ private class CompositionGlRenderer(
     private fun drawVideoLayer(layer: GpuLayer, scale: Float, ox: Float, oy: Float) {
         val output = videoOutputs[layer.id] ?: return
         if (layer.opacity <= 0f || externalProgram == 0) return
-        val points = floatArrayOf(0f, 0f, 0f, layer.height, layer.width, 0f, layer.width, layer.height)
+        val right = if (layer.mask) layer.width * 0.8f else layer.width
+        val bottom = if (layer.mask) layer.height * 0.8f else layer.height
+        val uvMax = if (layer.mask) 0.8f else 1f
+        val points = floatArrayOf(0f, 0f, 0f, bottom, right, 0f, right, bottom)
         layer.matrix.mapPoints(points)
         val data = floatArrayOf(
             ndcX(points[0], scale, ox), ndcY(points[1], scale, oy), 0f, 0f,
-            ndcX(points[2], scale, ox), ndcY(points[3], scale, oy), 0f, 1f,
-            ndcX(points[4], scale, ox), ndcY(points[5], scale, oy), 1f, 0f,
-            ndcX(points[6], scale, ox), ndcY(points[7], scale, oy), 1f, 1f
+            ndcX(points[2], scale, ox), ndcY(points[3], scale, oy), 0f, uvMax,
+            ndcX(points[4], scale, ox), ndcY(points[5], scale, oy), uvMax, 0f,
+            ndcX(points[6], scale, ox), ndcY(points[7], scale, oy), uvMax, uvMax
         )
         vertices.clear(); vertices.put(data); vertices.position(0)
         GLES20.glUseProgram(externalProgram)
@@ -914,6 +921,7 @@ private class CompositionGlRenderer(
         GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, output.textureId)
         GLES20.glUniform1i(externalSamplerHandle, 0)
         GLES20.glUniform1f(externalAlphaHandle, layer.opacity)
+        GLES20.glUniform1f(externalGrayHandle, if (layer.grayscale) 1f else 0f)
         GLES20.glUniformMatrix4fv(externalMatrixHandle, 1, false, output.transform, 0)
         when (layer.blend) {
             "Multiply" -> GLES20.glBlendFunc(GLES20.GL_DST_COLOR, GLES20.GL_ONE_MINUS_SRC_ALPHA)
@@ -1005,6 +1013,6 @@ private class CompositionGlRenderer(
         private const val VERTEX_SHADER = "attribute vec2 aPosition; attribute vec2 aTexCoord; varying vec2 vTexCoord; void main(){ gl_Position=vec4(aPosition,0.0,1.0); vTexCoord=aTexCoord; }"
         private const val TEXTURE_SHADER = "precision mediump float; uniform sampler2D uTexture; uniform float uAlpha; uniform float uGray; varying vec2 vTexCoord; void main(){ vec4 c=texture2D(uTexture,vTexCoord); if(uGray>0.5){ float y=dot(c.rgb,vec3(0.299,0.587,0.114)); c.rgb=vec3(y); } gl_FragColor=vec4(c.rgb*uAlpha,c.a*uAlpha); }"
         private const val SOLID_SHADER = "precision mediump float; uniform vec4 uColor; void main(){ gl_FragColor=uColor; }"
-        private const val EXTERNAL_TEXTURE_SHADER = "#extension GL_OES_EGL_image_external : require\nprecision mediump float; uniform samplerExternalOES uTexture; uniform float uAlpha; uniform mat4 uTexMatrix; varying vec2 vTexCoord; void main(){ vec2 uv=(uTexMatrix*vec4(vTexCoord,0.0,1.0)).xy; vec4 c=texture2D(uTexture,uv); gl_FragColor=vec4(c.rgb*uAlpha,c.a*uAlpha); }"
+        private const val EXTERNAL_TEXTURE_SHADER = "#extension GL_OES_EGL_image_external : require\nprecision mediump float; uniform samplerExternalOES uTexture; uniform float uAlpha; uniform float uGray; uniform mat4 uTexMatrix; varying vec2 vTexCoord; void main(){ vec2 uv=(uTexMatrix*vec4(vTexCoord,0.0,1.0)).xy; vec4 c=texture2D(uTexture,uv); if(uGray>0.5){ float y=dot(c.rgb,vec3(0.299,0.587,0.114)); c.rgb=vec3(y); } gl_FragColor=vec4(c.rgb*uAlpha,c.a*uAlpha); }"
     }
 }
