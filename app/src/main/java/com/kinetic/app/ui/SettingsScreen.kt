@@ -50,6 +50,7 @@ fun SettingsScreen(settings: AppSettings, onBack: () -> Unit) {
             SwitchRow("Loop playback", settings.loop) { settings.updateLoop(it) }
 
             Section("Preview & performance")
+            ChoiceRow("Preview quality", AppSettings.PREVIEW_QUALITIES, settings.previewQualityIndex) { settings.updatePreviewQuality(it) }
             ChoiceRow("Preview memory cache", AppSettings.PREVIEW_MEMORY_MB.map { "$it MB" }, settings.previewMemoryIndex) { settings.updatePreviewMemory(it) }
 
             Section("Properties")

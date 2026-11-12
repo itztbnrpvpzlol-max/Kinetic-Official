@@ -98,6 +98,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
     var previewHeight by remember { mutableFloatStateOf(210f) }
     var dockTool by remember { mutableStateOf("Select") }
     var showToolSheet by remember { mutableStateOf(false) }
+    var preparingPlayback by remember { mutableStateOf(false) }
 
     LaunchedEffect(editor.selectedId) {
         dockTool = if (editor.selectedId == null) "Select" else "Properties"
@@ -105,6 +106,44 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
     }
 
     fun leave() { if (editor.layers.isEmpty()) onExit() else showLeave = true }
+    fun togglePlayback() {
+        if (editor.playing) {
+            editor.playing = false
+            return
+        }
+        if (preparingPlayback) return
+        scope.launch {
+            preparingPlayback = true
+            Toast.makeText(ctx, "Preparing composition cache…", Toast.LENGTH_SHORT).show()
+            try {
+                // Make every source local and seekable before starting transport.
+                // Decode only reusable preview data; never expand whole videos into RAM.
+                val snapshot = editor.layers.filter { it.uri != null }
+                for (layer in snapshot) {
+                    val original = layer.uri ?: continue
+                    val cached = MediaLoader.cacheMedia(ctx, Uri.parse(original))
+                    if (cached.toString() != original) {
+                        editor.updateLayer(layer.id, push = false) { it.copy(uri = cached.toString()) }
+                    }
+                    val current = editor.layers.firstOrNull { it.id == layer.id } ?: continue
+                    when (current.type) {
+                        LayerType.IMAGE -> MediaLoader.bitmapFor(ctx, cached, LayerType.IMAGE, 0f, 1, 720)
+                        LayerType.VIDEO -> {
+                            MediaLoader.bitmapFor(ctx, cached, LayerType.VIDEO, current.srcOffset, 2, 720)
+                            MediaLoader.waveform(ctx, cached, 240)
+                        }
+                        LayerType.AUDIO -> MediaLoader.waveform(ctx, cached, 240)
+                        else -> Unit
+                    }
+                }
+                editor.playing = true
+            } catch (error: Throwable) {
+                Toast.makeText(ctx, "Couldn't prepare media: ${error.message ?: "unknown error"}", Toast.LENGTH_LONG).show()
+            } finally {
+                preparingPlayback = false
+            }
+        }
+    }
     BackHandler { leave() }
     BackHandler(enabled = previewExpanded) { previewExpanded = false }
 
@@ -168,9 +207,10 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
         scope.launch {
             for (u in uris) {
                 runCatching { ctx.contentResolver.takePersistableUriPermission(u, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION) }
-                val info = withContext(Dispatchers.IO) { MediaLoader.probe(ctx, u, type) }
+                val cachedUri = MediaLoader.cacheMedia(ctx, u)
+                val info = withContext(Dispatchers.IO) { MediaLoader.probe(ctx, cachedUri, type) }
                 val name = MediaLoader.displayName(ctx, u)
-                editor.addMedia(type, name, u.toString(), info.width, info.height, info.length)
+                editor.addMedia(type, name, cachedUri.toString(), info.width, info.height, info.length)
             }
         }
     }
@@ -185,16 +225,17 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
         }, onExport = { Toast.makeText(ctx, "Export isn't built yet", Toast.LENGTH_SHORT).show() })
 
         if (previewExpanded) {
-            PreviewCanvas(editor, Modifier.weight(1f).fillMaxWidth())
+            PreviewCanvas(editor, Modifier.weight(1f).fillMaxWidth(), editor.settings.previewQualityIndex)
         } else {
-            PreviewCanvas(editor, Modifier.fillMaxWidth().height(previewHeight.dp))
+            PreviewCanvas(editor, Modifier.fillMaxWidth().height(previewHeight.dp), editor.settings.previewQualityIndex)
             Box(Modifier.fillMaxWidth().height(10.dp).background(KColors.Bg).pointerInput(Unit) {
                 detectVerticalDragGestures { change, drag -> change.consume(); previewHeight = (previewHeight + drag / density).coerceIn(120f, 420f) }
             }, contentAlignment = Alignment.Center) {
                 Box(Modifier.width(44.dp).height(4.dp).clip(CircleShape).background(KColors.Muted))
             }
         }
-        PreviewToolsBar(editor, onAddLayer = { showLayers = true }, onTogglePreview = { previewExpanded = !previewExpanded })
+        PreviewToolsBar(editor, onAddLayer = { showLayers = true }, onTogglePreview = { previewExpanded = !previewExpanded },
+            onPlay = { togglePlayback() }, preparing = preparingPlayback)
         if (!previewExpanded) {
             TimelinePane(editor, Modifier.weight(1f))
             val activeLayer = editor.selected
@@ -249,8 +290,9 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                 onDismiss = { showImport = false },
                 onImport = { item, trimIn, trimOut ->
                     scope.launch {
-                        val info = withContext(Dispatchers.IO) { MediaLoader.probe(ctx, item.uri, item.type) }
-                        editor.addMediaTrimmed(item.type, item.name, item.uri.toString(),
+                        val cachedUri = MediaLoader.cacheMedia(ctx, item.uri)
+                        val info = withContext(Dispatchers.IO) { MediaLoader.probe(ctx, cachedUri, item.type) }
+                        editor.addMediaTrimmed(item.type, item.name, cachedUri.toString(),
                             if (info.width > 0) info.width else item.width,
                             if (info.height > 0) info.height else item.height,
                             if (item.type == LayerType.IMAGE) null else item.duration,
@@ -534,12 +576,13 @@ private fun AlightDock(active: String, onSelect: (String) -> Unit) {
 }
 
 @Composable
-private fun PreviewToolsBar(editor: EditorState, onAddLayer: () -> Unit, onTogglePreview: () -> Unit) {
+private fun PreviewToolsBar(editor: EditorState, onAddLayer: () -> Unit, onTogglePreview: () -> Unit,
+    onPlay: () -> Unit, preparing: Boolean) {
     Row(Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceEvenly) {
         PreviewTool(IconKind.UNDO, editor.canUndo) { editor.undo() }
         PreviewTool(IconKind.REDO, editor.canRedo) { editor.redo() }
         PreviewTool(IconKind.BACK) { editor.playing = false; editor.seek(0f) }
-        PreviewTool(if (editor.playing) IconKind.PAUSE else IconKind.PLAY) { editor.playing = !editor.playing }
+        PreviewTool(if (editor.playing) IconKind.PAUSE else IconKind.PLAY, enabled = !preparing, onClick = onPlay)
         PreviewTool(IconKind.NEXT) { editor.playing = false; editor.seek(editor.duration) }
         PreviewTool(IconKind.PLUS, onClick = onAddLayer)
         PreviewTool(if (editor.playing) IconKind.FIT else IconKind.FULLSCREEN, onClick = onTogglePreview)

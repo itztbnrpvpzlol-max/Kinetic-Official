@@ -412,7 +412,7 @@ private fun Clip(editor: EditorState, layer: Layer, pps: Float, selected: Boolea
                 }
             }
         }
-        if (layer.type == LayerType.AUDIO) Waveform(layer.id)
+        if (layer.type == LayerType.AUDIO) Waveform(layer.id, layer.uri)
         Row(
             Modifier.align(Alignment.CenterStart).padding(start = 12.dp, end = 8.dp),
             verticalAlignment = Alignment.CenterVertically
@@ -447,14 +447,14 @@ private fun Clip(editor: EditorState, layer: Layer, pps: Float, selected: Boolea
 }
 
 @Composable
-private fun Waveform(seed: String) {
-    // The current waveform is a lightweight placeholder, so cap its geometry.
-    // A long clip at high zoom must not create thousands of draw operations on
-    // every timeline invalidation.
-    val peaks = remember(seed) {
-        val rnd = Random(seed.hashCode())
-        FloatArray(240) { 0.2f + rnd.nextFloat() * 0.6f }
+private fun Waveform(seed: String, uri: String?) {
+    val context = LocalContext.current
+    var decodedPeaks by remember(seed, uri) { mutableStateOf<FloatArray?>(null) }
+    LaunchedEffect(uri) {
+        decodedPeaks = if (uri == null) null else MediaLoader.waveform(context, Uri.parse(uri), 240)
     }
+    // Keep drawing bounded while showing actual decoded PCM peaks when available.
+    val peaks = decodedPeaks ?: FloatArray(240) { 0.06f }
     Canvas(Modifier.fillMaxSize().padding(horizontal = 4.dp)) {
         if (size.width <= 0f) return@Canvas
         val desiredGap = 5.dp.toPx()

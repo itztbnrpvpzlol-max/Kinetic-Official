@@ -13,6 +13,8 @@ import android.opengl.GLSurfaceView
 import android.opengl.GLUtils
 import android.os.Handler
 import android.os.Looper
+import android.os.HandlerThread
+import android.os.SystemClock
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -21,10 +23,15 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.size
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.unit.dp
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
@@ -72,15 +79,21 @@ private fun supportsGles2(context: Context): Boolean = runCatching {
 }.getOrDefault(false)
 
 @Composable
-fun PreviewCanvas(editor: EditorState, modifier: Modifier = Modifier) {
+fun PreviewCanvas(editor: EditorState, modifier: Modifier = Modifier, qualityIndex: Int = 0) {
     // The import browser already uses Media3's hardware video decoder. Use the
     // same playback path in the editor for a simple full-frame video composition,
     // rather than decoding still frames with MediaMetadataRetriever at 12 fps.
+    val context = LocalContext.current
     val activeVisualLayers = editor.layers.filter { layer ->
         layer.visible && layer.activeAt(editor.time) &&
             layer.type != LayerType.AUDIO &&
             layer.type != LayerType.NULL &&
             layer.type != LayerType.ADJUSTMENT
+    }
+    val qualityScale = resolvePreviewScale(context, qualityIndex, activeVisualLayers.size)
+    val multiVideo = activeVisualLayers.takeIf { layers ->
+        layers.size > 1 && layers.all { it.type == LayerType.VIDEO &&
+            !it.maskEnabled && it.effects.isEmpty() && it.blendMode == "Normal" }
     }
     val directVideo = activeVisualLayers.singleOrNull()?.takeIf { layer ->
         layer.type == LayerType.VIDEO &&
@@ -98,25 +111,155 @@ fun PreviewCanvas(editor: EditorState, modifier: Modifier = Modifier) {
             kotlin.math.abs(layer.p(PropId.ROTATION).valueAt(editor.time)) < 0.01f
     }
 
-    if (directVideo != null) {
-        DirectVideoPreviewCanvas(editor, directVideo, modifier)
-    } else {
-        GpuCompositionPreviewCanvas(editor, modifier)
+    when {
+        multiVideo != null -> MultiVideoPreviewCanvas(editor, multiVideo, modifier, qualityScale)
+        directVideo != null -> DirectVideoPreviewCanvas(editor, directVideo, modifier, qualityScale)
+        else -> GpuCompositionPreviewCanvas(editor, modifier, qualityScale)
     }
+}
+
+private fun resolvePreviewScale(context: Context, qualityIndex: Int, activeLayers: Int): Float {
+    if (qualityIndex == 1) return 1f
+    if (qualityIndex == 2) return 0.5f
+    if (qualityIndex == 3) return 0.25f
+    val memory = android.app.ActivityManager.MemoryInfo()
+    (context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager)?.getMemoryInfo(memory)
+    val totalGb = memory.totalMem / (1024.0 * 1024.0 * 1024.0)
+    val availableGb = memory.availMem / (1024.0 * 1024.0 * 1024.0)
+    val base = when {
+        totalGb >= 8.0 && availableGb >= 2.0 -> 1f
+        totalGb >= 6.0 && availableGb >= 1.0 -> 0.5f
+        else -> 0.25f
+    }
+    return if (activeLayers >= 3) (base * 0.5f).coerceAtLeast(0.25f) else base
+}
+
+
+@Composable
+private fun MultiVideoPreviewCanvas(
+    editor: EditorState,
+    layers: List<com.kinetic.app.model.Layer>,
+    modifier: Modifier,
+    qualityScale: Float
+) {
+    val context = LocalContext.current
+    val playbackThread = remember(context) { HandlerThread("KineticMultiVideoPreview").apply { start() } }
+    DisposableEffect(playbackThread) {
+        onDispose { playbackThread.quitSafely() }
+    }
+    BoxWithConstraints(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        val fitScale = minOf(maxWidth.value / COMP_W, maxHeight.value / COMP_H)
+        val compositionWidth = (COMP_W * fitScale).dp
+        val compositionHeight = (COMP_H * fitScale).dp
+        Box(Modifier.size(compositionWidth, compositionHeight).background(androidx.compose.ui.graphics.Color.Black)) {
+            // Oldest layers draw first; newer layers remain visually on top.
+            layers.asReversed().forEach { layer ->
+                key(layer.id) {
+                    val uri = layer.uri
+                    if (uri != null) {
+                        val maxW = (COMP_W * qualityScale).toInt().coerceAtLeast(240)
+                        val maxH = (COMP_H * qualityScale).toInt().coerceAtLeast(135)
+                        val player = remember(uri, playbackThread) {
+                            ExoPlayer.Builder(context).setLooper(playbackThread.looper).build().apply {
+                                trackSelectionParameters = TrackSelectionParameters.Builder(context)
+                                    .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, true)
+                                    .setMaxVideoSize(maxW, maxH)
+                                    .build()
+                                repeatMode = Player.REPEAT_MODE_OFF
+                                setMediaItem(MediaItem.fromUri(Uri.parse(uri)))
+                                prepare()
+                            }
+                        }
+                        DisposableEffect(player) {
+                            onDispose { player.release() }
+                        }
+                        HardwareVideoLayer(editor, layer, player, fitScale)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HardwareVideoLayer(
+    editor: EditorState,
+    layer: com.kinetic.app.model.Layer,
+    player: ExoPlayer,
+    fitScale: Float
+) {
+    val sourceTime = ((editor.time - layer.start).coerceAtLeast(0f) * layer.speed + layer.srcOffset)
+        .coerceAtLeast(0f)
+    val sourcePositionMs = (sourceTime * 1000f).toLong()
+    LaunchedEffect(editor.playing, layer.id, layer.speed) {
+        if (editor.playing) {
+            player.seekTo(sourcePositionMs)
+            player.play()
+        } else {
+            player.pause()
+        }
+    }
+    val previousTimelineTime = remember(layer.id) {
+        androidx.compose.runtime.mutableFloatStateOf(editor.time)
+    }
+    LaunchedEffect(editor.time, editor.playing, layer.id) {
+        if (editor.playing) {
+            if (editor.time + 0.05f < previousTimelineTime.floatValue) player.seekTo(sourcePositionMs)
+        } else {
+            kotlinx.coroutines.delay(24)
+            player.seekTo(sourcePositionMs)
+        }
+        previousTimelineTime.floatValue = editor.time
+    }
+
+    val left = (layer.p(PropId.POS_X).valueAt(editor.time) - layer.p(PropId.ANCHOR_X).valueAt(editor.time)) * fitScale
+    val top = (layer.p(PropId.POS_Y).valueAt(editor.time) - layer.p(PropId.ANCHOR_Y).valueAt(editor.time)) * fitScale
+    val width = (layer.width * fitScale).coerceAtLeast(1f)
+    val height = (layer.height * fitScale).coerceAtLeast(1f)
+    val scaleX = layer.p(PropId.SCALE_X).valueAt(editor.time) / 100f
+    val scaleY = layer.p(PropId.SCALE_Y).valueAt(editor.time) / 100f
+    val rotation = layer.p(PropId.ROTATION).valueAt(editor.time)
+    val opacity = (layer.p(PropId.OPACITY).valueAt(editor.time) / 100f).coerceIn(0f, 1f)
+
+    AndroidView(
+        factory = { viewContext ->
+            PlayerView(viewContext).apply {
+                setUseTextureView(true)
+                this.player = player
+                useController = false
+                resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+                setShutterBackgroundColor(android.graphics.Color.BLACK)
+            }
+        },
+        modifier = Modifier
+            .offset(x = left.dp, y = top.dp)
+            .size(width.dp, height.dp)
+            .graphicsLayer {
+                this.scaleX = scaleX
+                this.scaleY = scaleY
+                rotationZ = rotation
+                alpha = opacity
+            },
+        update = { if (it.player !== player) it.player = player }
+    )
 }
 
 @Composable
 private fun DirectVideoPreviewCanvas(
     editor: EditorState,
     layer: com.kinetic.app.model.Layer,
-    modifier: Modifier
+    modifier: Modifier,
+    qualityScale: Float
 ) {
     val context = LocalContext.current
     val uri = layer.uri ?: return
-    val player = remember(context) {
+    val maxWidth = (COMP_W * qualityScale).toInt().coerceAtLeast(240)
+    val maxHeight = (COMP_H * qualityScale).toInt().coerceAtLeast(135)
+    val player = remember(context, qualityScale) {
         ExoPlayer.Builder(context).build().apply {
             trackSelectionParameters = TrackSelectionParameters.Builder(context)
                 .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, true)
+                .setMaxVideoSize(maxWidth, maxHeight)
                 .build()
             repeatMode = Player.REPEAT_MODE_OFF
         }
@@ -147,14 +290,14 @@ private fun DirectVideoPreviewCanvas(
         }
     }
 
-    var previousTimelineTime by remember(layer.id) {
+    val previousTimelineTime = remember(layer.id) {
         androidx.compose.runtime.mutableFloatStateOf(editor.time)
     }
     LaunchedEffect(editor.time, editor.playing, layer.id, layer.speed) {
         if (editor.playing) {
             // A composition loop wraps the timeline clock. Re-align the decoder
             // once at that boundary; otherwise let Media3 own continuous playback.
-            if (editor.time + 0.05f < previousTimelineTime) {
+            if (editor.time + 0.05f < previousTimelineTime.floatValue) {
                 player.seekTo(sourcePositionMs)
             }
         } else {
@@ -163,7 +306,7 @@ private fun DirectVideoPreviewCanvas(
             kotlinx.coroutines.delay(24)
             player.seekTo(sourcePositionMs)
         }
-        previousTimelineTime = editor.time
+        previousTimelineTime.floatValue = editor.time
     }
 
     Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -185,7 +328,7 @@ private fun DirectVideoPreviewCanvas(
 }
 
 @Composable
-private fun GpuCompositionPreviewCanvas(editor: EditorState, modifier: Modifier = Modifier) {
+private fun GpuCompositionPreviewCanvas(editor: EditorState, modifier: Modifier = Modifier, qualityScale: Float) {
     val context = LocalContext.current
     val frames = remember { mutableStateMapOf<String, Bitmap>() }
     val textTextures = remember { mutableMapOf<String, Pair<Int, Bitmap>>() }
@@ -207,7 +350,11 @@ private fun GpuCompositionPreviewCanvas(editor: EditorState, modifier: Modifier 
                 }
                 LaunchedEffect(uri, bucket) {
                     if (bucket >= 0) {
-                        MediaLoader.bitmapFor(context, Uri.parse(uri), layer.type, sourceTime, 12, 640)?.let { frames[layer.id] = it }
+                        MediaLoader.bitmapFor(
+                            context, Uri.parse(uri), layer.type, sourceTime,
+                            if (qualityScale >= 0.75f) 12 else if (qualityScale >= 0.45f) 8 else 5,
+                            (1920f * qualityScale).toInt().coerceIn(240, 1920)
+                        )?.let { frames[layer.id] = it }
                     } else frames.remove(layer.id)
                 }
             }

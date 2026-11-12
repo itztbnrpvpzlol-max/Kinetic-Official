@@ -3,6 +3,11 @@ package com.kinetic.app.data
 import android.content.Context
 import android.os.Build
 import android.graphics.Bitmap
+import android.media.AudioFormat
+import android.media.MediaCodec
+import android.media.MediaExtractor
+import android.media.MediaFormat
+import android.os.SystemClock
 import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
 import android.net.Uri
@@ -12,6 +17,11 @@ import com.kinetic.app.model.LayerType
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.concurrent.ConcurrentHashMap
+import java.io.File
+import java.io.FileOutputStream
+import java.security.MessageDigest
+import kotlin.math.abs
+import kotlin.math.max
 
 object MediaLoader {
     class Info(val length: Float?, val width: Int, val height: Int)
@@ -26,6 +36,7 @@ object MediaLoader {
     }
     private val retrievers = ConcurrentHashMap<String, MediaMetadataRetriever>()
     private val retrieverLocks = ConcurrentHashMap<String, Any>()
+    private val waveformCache = ConcurrentHashMap<String, FloatArray>()
 
     fun configureCache(memoryMb: Int) {
         val safeMb = memoryMb.coerceIn(16, 512).coerceAtMost(cacheBudgetMb)
@@ -91,6 +102,172 @@ object MediaLoader {
             if (bmp != null) cache.put(key, bmp)
             bmp
         }
+
+
+    /**
+     * Copies an imported content URI into app-private storage before it is added
+     * to a project. This removes dependence on temporary document-provider access
+     * and gives the playback pipeline a stable, seekable local source.
+     */
+    suspend fun cacheMedia(ctx: Context, uri: Uri): Uri = withContext(Dispatchers.IO) {
+        if (uri.scheme != "content") return@withContext uri
+        val resolver = ctx.contentResolver
+        var displayName = "media"
+        var expectedSize = -1L
+        runCatching {
+            resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    displayName = cursor.getString(0) ?: "media"
+                    if (!cursor.isNull(1)) expectedSize = cursor.getLong(1)
+                }
+            }
+        }
+        val extension = displayName.substringAfterLast('.', "").lowercase()
+            .takeIf { it.matches(Regex("[a-z0-9]{1,8}")) }?.let { ".$it" } ?: ""
+        val digest = MessageDigest.getInstance("SHA-256")
+            .digest((uri.toString() + "|" + expectedSize).toByteArray())
+            .joinToString("") { "%02x".format(it) }
+        val directory = File(ctx.filesDir, "media-cache").apply { mkdirs() }
+        val destination = File(directory, digest + extension)
+        if (destination.isFile && (expectedSize < 0L || destination.length() == expectedSize)) {
+            return@withContext Uri.fromFile(destination)
+        }
+        val temporary = File(directory, "$digest.part")
+        try {
+            val input = resolver.openInputStream(uri) ?: error("Unable to open imported media")
+            input.use { source ->
+                FileOutputStream(temporary).use { output -> source.copyTo(output, 256 * 1024) }
+            }
+            if (expectedSize >= 0L && temporary.length() != expectedSize) {
+                error("Imported media copy was incomplete")
+            }
+            if (destination.exists()) destination.delete()
+            if (!temporary.renameTo(destination)) {
+                temporary.copyTo(destination, overwrite = true)
+                temporary.delete()
+            }
+            Uri.fromFile(destination)
+        } catch (error: Throwable) {
+            temporary.delete()
+            throw error
+        }
+    }
+
+    /**
+     * Decodes the audio stream to PCM off the UI thread and caches normalized
+     * peak amplitudes. The returned array is small and safe to retain per clip.
+     */
+    suspend fun waveform(ctx: Context, uri: Uri, bins: Int = 240): FloatArray? =
+        withContext(Dispatchers.IO) {
+            val key = uri.toString() + "#waveform#" + bins
+            waveformCache[key]?.clone() ?: decodeWaveform(ctx, uri, bins.coerceIn(32, 1024))?.also {
+                waveformCache[key] = it
+            }?.clone()
+        }
+
+    private fun decodeWaveform(ctx: Context, uri: Uri, bins: Int): FloatArray? {
+        val extractor = MediaExtractor()
+        var decoder: MediaCodec? = null
+        try {
+            extractor.setDataSource(ctx, uri, null)
+            val track = (0 until extractor.trackCount).firstOrNull { index ->
+                extractor.getTrackFormat(index).getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true
+            } ?: return null
+            val inputFormat = extractor.getTrackFormat(track)
+            val mime = inputFormat.getString(MediaFormat.KEY_MIME) ?: return null
+            val durationUs = if (inputFormat.containsKey(MediaFormat.KEY_DURATION))
+                inputFormat.getLong(MediaFormat.KEY_DURATION).coerceAtLeast(1L) else 0L
+            var sampleRate = inputFormat.getInteger(MediaFormat.KEY_SAMPLE_RATE).coerceAtLeast(1)
+            var channels = inputFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT).coerceAtLeast(1)
+            var pcmEncoding = AudioFormat.ENCODING_PCM_16BIT
+            val peaks = FloatArray(bins)
+            var sampleCursor = 0L
+            val samplesPerBin = if (durationUs > 0L)
+                durationUs.toDouble() * sampleRate * channels / 1_000_000.0 / bins else 0.0
+
+            extractor.selectTrack(track)
+            decoder = MediaCodec.createDecoderByType(mime)
+            decoder.configure(inputFormat, null, null, 0)
+            decoder.start()
+            val info = MediaCodec.BufferInfo()
+            var inputDone = false
+            var outputDone = false
+            val deadline = SystemClock.elapsedRealtime() + 120_000L
+
+            while (!outputDone && SystemClock.elapsedRealtime() < deadline) {
+                if (!inputDone) {
+                    val inputIndex = decoder.dequeueInputBuffer(10_000L)
+                    if (inputIndex >= 0) {
+                        val inputBuffer = decoder.getInputBuffer(inputIndex)
+                        if (inputBuffer == null) {
+                            decoder.queueInputBuffer(inputIndex, 0, 0, 0L, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                            inputDone = true
+                        } else {
+                            inputBuffer.clear()
+                            val size = extractor.readSampleData(inputBuffer, 0)
+                            if (size < 0) {
+                                decoder.queueInputBuffer(inputIndex, 0, 0, 0L, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                                inputDone = true
+                            } else {
+                                decoder.queueInputBuffer(inputIndex, 0, size, extractor.sampleTime, 0)
+                                extractor.advance()
+                            }
+                        }
+                    }
+                }
+
+                when (val outputIndex = decoder.dequeueOutputBuffer(info, 10_000L)) {
+                    MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
+                        val outputFormat = decoder.outputFormat
+                        if (outputFormat.containsKey(MediaFormat.KEY_SAMPLE_RATE))
+                            sampleRate = outputFormat.getInteger(MediaFormat.KEY_SAMPLE_RATE).coerceAtLeast(1)
+                        if (outputFormat.containsKey(MediaFormat.KEY_CHANNEL_COUNT))
+                            channels = outputFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT).coerceAtLeast(1)
+                        if (outputFormat.containsKey(MediaFormat.KEY_PCM_ENCODING))
+                            pcmEncoding = outputFormat.getInteger(MediaFormat.KEY_PCM_ENCODING)
+                    }
+                    MediaCodec.INFO_TRY_AGAIN_LATER, MediaCodec.INFO_OUTPUT_BUFFERS_CHANGED -> Unit
+                    else -> if (outputIndex >= 0) {
+                        if (info.size > 0 && info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG == 0) {
+                            decoder.getOutputBuffer(outputIndex)?.let { raw ->
+                                raw.position(info.offset)
+                                raw.limit(info.offset + info.size)
+                                val pcm = raw.slice().order(java.nio.ByteOrder.LITTLE_ENDIAN)
+                                if (pcmEncoding == AudioFormat.ENCODING_PCM_FLOAT) {
+                                    while (pcm.remaining() >= 4) {
+                                        val amplitude = abs(pcm.float).coerceIn(0f, 1f)
+                                        val bin = if (samplesPerBin > 0.0)
+                                            (sampleCursor / samplesPerBin).toInt().coerceIn(0, bins - 1)
+                                        else (sampleCursor % bins.toLong()).toInt()
+                                        peaks[bin] = max(peaks[bin], amplitude)
+                                        sampleCursor++
+                                    }
+                                } else {
+                                    while (pcm.remaining() >= 2) {
+                                        val amplitude = abs(pcm.short.toInt() / 32768f).coerceIn(0f, 1f)
+                                        val bin = if (samplesPerBin > 0.0)
+                                            (sampleCursor / samplesPerBin).toInt().coerceIn(0, bins - 1)
+                                        else (sampleCursor % bins.toLong()).toInt()
+                                        peaks[bin] = max(peaks[bin], amplitude)
+                                        sampleCursor++
+                                    }
+                                }
+                            }
+                        }
+                        if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) outputDone = true
+                        decoder.releaseOutputBuffer(outputIndex, false)
+                    }
+                }
+            }
+            return peaks.takeIf { it.any { peak -> peak > 0f } }
+        } catch (_: Throwable) {
+            return null
+        } finally {
+            runCatching { decoder?.stop() }
+            runCatching { decoder?.release() }
+            runCatching { extractor.release() }
+        }
+    }
 
     private fun decodeImage(ctx: Context, uri: Uri): Bitmap? {
         val b = BitmapFactory.Options().apply { inJustDecodeBounds = true }
