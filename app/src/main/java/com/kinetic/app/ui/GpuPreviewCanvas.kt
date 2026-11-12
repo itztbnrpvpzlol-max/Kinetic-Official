@@ -43,8 +43,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionParameters
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.ui.AspectRatioFrameLayout
-import androidx.media3.ui.PlayerView
+import android.view.TextureView
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import com.kinetic.app.data.CompositionFrameCache
@@ -105,9 +104,11 @@ fun PreviewCanvas(
     val frameTime = frameIndex / editor.fps.toFloat()
     val frameKeys by androidx.compose.runtime.produceState<Pair<String, String>?>(
         initialValue = null, editor.projectId, editor.layers, frameIndex,
-        editor.fps, outputWidth, outputHeight
+        editor.fps, outputWidth, outputHeight, editor.playing
     ) {
-        value = kotlinx.coroutines.withContext(MediaWorkers.cpuDispatcher) {
+        if (editor.playing) {
+            value = null
+        } else value = kotlinx.coroutines.withContext(MediaWorkers.cpuDispatcher) {
             val fullKey = CompositionFrameCache.frameKey(
                 editor.projectId, editor.layers, frameTime, editor.fps,
                 outputWidth, outputHeight
@@ -122,7 +123,7 @@ fun PreviewCanvas(
             fullKey to warmKey
         }
     }
-    val readyKey = editor.cachedFrames[frameIndex]
+    val readyKey = if (editor.playing) null else editor.cachedFrames[frameIndex]
     // Prefer full-quality frames, but use the low-resolution warm frame while
     // its full-quality replacement is still being rendered.
     val frameKey = when {
@@ -132,34 +133,18 @@ fun PreviewCanvas(
     }
     val frameReady = frameKey != null
 
-    // Keep a few upcoming rendered frames warm in RAM so disk-backed cache
-    // playback does not need to decode every JPEG at the exact presentation time.
-    LaunchedEffect(editor.playing) {
-        if (!editor.playing) return@LaunchedEffect
-        while (editor.playing) {
-            val current = (editor.time * editor.fps).toInt().coerceAtLeast(0)
-            val count = kotlin.math.ceil(editor.duration * editor.fps).toInt().coerceAtLeast(1)
-            for (offset in 1..6) {
-                val next = (current + offset) % count
-                val nextKey = editor.cachedFrames[next] ?: continue
-                CompositionFrameCache.loadFrame(context, nextKey)
-            }
-            kotlinx.coroutines.delay(24)
-        }
-    }
-
-    // Do not reset the displayed bitmap to null on every playhead tick.
-    // The previous implementation briefly switched to the live decoder between
-    // cache-frame loads, producing visible flashes/flicker on cached sections.
+    // Composition frames are useful for paused scrubbing, but decoding JPEG
+    // frames on the presentation clock adds variable IO/CPU latency. During
+    // playback always use the live hardware-decoder path instead.
     var loadedCachedFrame by remember { mutableStateOf<Pair<String, Bitmap>?>(null) }
-    LaunchedEffect(frameKey, frameReady) {
-        val key = frameKey
-        if (frameReady && key != null) {
-            val decoded = CompositionFrameCache.loadFrame(context, key)
-            if (decoded != null) loadedCachedFrame = key to decoded
-        }
+    LaunchedEffect(frameKey, editor.playing) {
+        if (editor.playing) return@LaunchedEffect
+        val key = frameKey ?: return@LaunchedEffect
+        val decoded = CompositionFrameCache.loadFrame(context, key)
+        if (decoded != null) loadedCachedFrame = key to decoded
     }
-    val cachedFrame = loadedCachedFrame?.takeIf { it.first == frameKey }?.second
+    val cachedFrame = if (editor.playing) null
+        else loadedCachedFrame?.takeIf { it.first == frameKey }?.second
 
     if (cachedFrame != null) {
         LaunchedEffect(frameKey) { onVideoReady(true) }
@@ -354,12 +339,7 @@ private fun HardwareVideoLayer(
 
     AndroidView(
         factory = { viewContext ->
-            PlayerView(viewContext).apply {
-                this.player = player
-                useController = false
-                resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
-                setShutterBackgroundColor(android.graphics.Color.BLACK)
-            }
+            TextureView(viewContext).also { player.setVideoTextureView(it) }
         },
         modifier = Modifier
             .offset(x = left.dp, y = top.dp)
@@ -370,7 +350,7 @@ private fun HardwareVideoLayer(
                 rotationZ = rotation
                 alpha = opacity
             },
-        update = { if (it.player !== player) it.player = player }
+        update = { player.setVideoTextureView(it) }
     )
 }
 
@@ -461,50 +441,139 @@ private fun DirectVideoPreviewCanvas(
     Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         AndroidView(
             factory = { viewContext ->
-                PlayerView(viewContext).apply {
-                    this.player = player
-                    useController = false
-                    resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
-                    setShutterBackgroundColor(android.graphics.Color.BLACK)
-                }
+                TextureView(viewContext).also { player.setVideoTextureView(it) }
             },
             modifier = Modifier
                 .fillMaxWidth((layer.width / COMP_W).coerceIn(0.01f, 1f))
                 .fillMaxHeight((layer.height / COMP_H).coerceIn(0.01f, 1f)),
-            update = { view -> if (view.player !== player) view.player = player }
+            update = { view -> player.setVideoTextureView(view) }
         )
     }
 }
 
 @Composable
-private fun GpuCompositionPreviewCanvas(editor: EditorState, modifier: Modifier = Modifier, qualityScale: Float) {
+private fun TextureVideoLayer(
+    editor: EditorState,
+    layer: com.kinetic.app.model.Layer,
+    player: ExoPlayer,
+    fitScale: Float
+) {
+    val uri = layer.uri ?: return
+    var videoReady by remember(player) {
+        androidx.compose.runtime.mutableStateOf(player.playbackState == Player.STATE_READY)
+    }
+    DisposableEffect(player, layer.id) {
+        val listener = object : Player.Listener {
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                videoReady = playbackState == Player.STATE_READY
+            }
+            override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                videoReady = false
+            }
+        }
+        player.addListener(listener)
+        onDispose { player.removeListener(listener) }
+    }
+
+    val sourceTime = ((editor.time - layer.start).coerceAtLeast(0f) * layer.speed + layer.srcOffset)
+        .coerceAtLeast(0f)
+    val sourcePositionMs = (sourceTime * 1000f).toLong()
+
+    LaunchedEffect(layer.id, uri, layer.speed, player) {
+        player.pause()
+        player.setMediaItem(MediaItem.fromUri(Uri.parse(uri)))
+        player.setPlaybackSpeed(layer.speed.coerceIn(0.1f, 4f))
+        player.prepare()
+        player.seekTo(sourcePositionMs)
+    }
+
+    LaunchedEffect(editor.playing, videoReady, layer.id, layer.speed, player) {
+        if (editor.playing && videoReady) {
+            player.setPlaybackSpeed(layer.speed.coerceIn(0.1f, 4f))
+            player.seekTo(sourcePositionMs)
+            player.play()
+        } else {
+            player.pause()
+        }
+    }
+
+    val previousTimelineTime = remember(layer.id) {
+        androidx.compose.runtime.mutableFloatStateOf(editor.time)
+    }
+    LaunchedEffect(editor.time, editor.playing, layer.id, player) {
+        if (editor.playing) {
+            if (editor.time + 0.05f < previousTimelineTime.floatValue) {
+                player.seekTo(sourcePositionMs)
+            }
+        } else {
+            kotlinx.coroutines.delay(24)
+            player.seekTo(sourcePositionMs)
+        }
+        previousTimelineTime.floatValue = editor.time
+    }
+
+    val left = (layer.p(PropId.POS_X).valueAt(editor.time) -
+        layer.p(PropId.ANCHOR_X).valueAt(editor.time)) * fitScale
+    val top = (layer.p(PropId.POS_Y).valueAt(editor.time) -
+        layer.p(PropId.ANCHOR_Y).valueAt(editor.time)) * fitScale
+    val width = (layer.width * fitScale).coerceAtLeast(1f)
+    val height = (layer.height * fitScale).coerceAtLeast(1f)
+    val scaleX = layer.p(PropId.SCALE_X).valueAt(editor.time) / 100f
+    val scaleY = layer.p(PropId.SCALE_Y).valueAt(editor.time) / 100f
+    val rotation = layer.p(PropId.ROTATION).valueAt(editor.time)
+    val opacity = (layer.p(PropId.OPACITY).valueAt(editor.time) / 100f).coerceIn(0f, 1f)
+
+    AndroidView(
+        factory = { viewContext ->
+            TextureView(viewContext).also { player.setVideoTextureView(it) }
+        },
+        modifier = Modifier
+            .offset(x = left.dp, y = top.dp)
+            .size(width.dp, height.dp)
+            .graphicsLayer {
+                this.scaleX = scaleX
+                this.scaleY = scaleY
+                rotationZ = rotation
+                alpha = opacity
+            },
+        update = { player.setVideoTextureView(it) }
+    )
+}
+
+@Composable
+private fun GpuCompositionPreviewCanvas(
+    editor: EditorState,
+    modifier: Modifier = Modifier,
+    qualityScale: Float
+) {
     val context = LocalContext.current
     val frames = remember { mutableStateMapOf<String, Bitmap>() }
     val textTextures = remember { mutableMapOf<String, Pair<Int, Bitmap>>() }
+    val videoLayers = editor.layers.filter {
+        it.visible && it.activeAt(editor.time) && it.type == LayerType.VIDEO && it.uri != null
+    }
+
     LaunchedEffect(editor.layers.map { it.id }) {
         val currentIds = editor.layers.mapTo(HashSet<String>()) { it.id }
         val stale = textTextures.keys.filter { it !in currentIds }
-        stale.forEach { id -> textTextures.remove(id) }
+        stale.forEach { textTextures.remove(it) }
     }
 
+    // Video is no longer sampled into 12-fps bitmaps here. It is decoded by
+    // Media3/MediaCodec and presented through TextureView, avoiding repeated
+    // MediaMetadataRetriever work and CPU bitmap uploads during playback.
     for (layer in editor.layers) {
         val uri = layer.uri
-        if (uri != null && (layer.type == LayerType.IMAGE || layer.type == LayerType.VIDEO)) {
-            val active = layer.activeAt(editor.time)
-            val sourceTime = ((editor.time - layer.start).coerceAtLeast(0f) * layer.speed + layer.srcOffset).coerceAtLeast(0f)
-            val bucket = if (!active) -1 else if (layer.type == LayerType.VIDEO) (sourceTime * 12f).toInt() else 0
+        if (uri != null && layer.type == LayerType.IMAGE) {
             key(layer.id) {
                 DisposableEffect(layer.id) {
                     onDispose { frames.remove(layer.id) }
                 }
-                LaunchedEffect(uri, bucket) {
-                    if (bucket >= 0) {
-                        MediaLoader.bitmapFor(
-                            context, Uri.parse(uri), layer.type, sourceTime,
-                            if (qualityScale >= 0.75f) 12 else if (qualityScale >= 0.45f) 8 else 5,
-                            (1920f * qualityScale).toInt().coerceIn(240, 1920)
-                        )?.let { frames[layer.id] = it }
-                    } else frames.remove(layer.id)
+                LaunchedEffect(uri) {
+                    MediaLoader.bitmapFor(
+                        context, Uri.parse(uri), LayerType.IMAGE, 0f, 1,
+                        (1920f * qualityScale).toInt().coerceIn(240, 1920)
+                    )?.let { frames[layer.id] = it }
                 }
             }
         }
@@ -514,9 +583,10 @@ private fun GpuCompositionPreviewCanvas(editor: EditorState, modifier: Modifier 
     val renderLayers = ArrayList<GpuLayer>()
     for (layer in editor.layers.asReversed()) {
         if (!layer.visible || !layer.activeAt(editor.time) || layer.type == LayerType.AUDIO ||
-            layer.type == LayerType.NULL || layer.type == LayerType.ADJUSTMENT) continue
+            layer.type == LayerType.NULL || layer.type == LayerType.ADJUSTMENT ||
+            layer.type == LayerType.VIDEO) continue
         val bitmap = when (layer.type) {
-            LayerType.IMAGE, LayerType.VIDEO -> frames[layer.id]
+            LayerType.IMAGE -> frames[layer.id]
             LayerType.TEXT, LayerType.SHAPE -> {
                 val signature = if (layer.type == LayerType.TEXT)
                     layer.text.hashCode() * 31 + layer.color
@@ -565,11 +635,46 @@ private fun GpuCompositionPreviewCanvas(editor: EditorState, modifier: Modifier 
         CpuPreviewCanvas(editor, modifier)
     } else {
         val view = remember(context) { GpuPreviewSurfaceView(context) { gpuFailed.value = true } }
-        AndroidView(
-            factory = { view },
-            modifier = modifier,
-            update = { it.submit(scene) }
-        )
+        BoxWithConstraints(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            val fitScale = minOf(maxWidth.value / COMP_W, maxHeight.value / COMP_H)
+            val compositionWidth = (COMP_W * fitScale).dp
+            val compositionHeight = (COMP_H * fitScale).dp
+            Box(
+                Modifier.size(compositionWidth, compositionHeight)
+                    .background(androidx.compose.ui.graphics.Color.Black)
+            ) {
+                AndroidView(
+                    factory = { view },
+                    modifier = Modifier.fillMaxSize(),
+                    update = { it.submit(scene) }
+                )
+                // TextureView layers are hardware-decoded video surfaces. They
+                // are drawn above the still-image GLES pass; the full shader
+                // interleaving compositor can be added without changing decoding.
+                videoLayers.asReversed().forEach { layer ->
+                    key(layer.id) {
+                        val uri = layer.uri ?: return@key
+                        val maxW = (COMP_W * qualityScale).toInt().coerceAtLeast(240)
+                        val maxH = (COMP_H * qualityScale).toInt().coerceAtLeast(135)
+                        val player = remember(uri, qualityScale) {
+                            ExoPlayer.Builder(context).build().apply {
+                                trackSelectionParameters = TrackSelectionParameters.Builder(context)
+                                    .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, true)
+                                    .setMaxVideoSize(maxW, maxH)
+                                    .build()
+                                repeatMode = Player.REPEAT_MODE_OFF
+                                setMediaItem(MediaItem.fromUri(Uri.parse(uri)))
+                                prepare()
+                            }
+                        }
+                        DisposableEffect(player) {
+                            onDispose { player.release() }
+                        }
+                        TextureVideoLayer(editor, layer, player, fitScale)
+                    }
+                }
+            }
+        }
         DisposableEffect(view) {
             onDispose { view.releaseRenderer() }
         }
