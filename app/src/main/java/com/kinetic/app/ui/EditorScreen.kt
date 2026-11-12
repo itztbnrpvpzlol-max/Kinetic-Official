@@ -169,10 +169,13 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
         if (!editor.settings.autoPreviewCache) {
             for (frameIndex in 0 until frameCount) {
                 val frameTime = frameIndex / editor.fps.toFloat()
-                val key = CompositionFrameCache.frameKey(
-                    editor.projectId, snapshot, frameTime, editor.fps, frameWidth, frameHeight
-                )
-                if (CompositionFrameCache.isCached(ctx, key)) editor.markFrameCached(frameIndex, key)
+                val key = withContext(MediaWorkers.cpuDispatcher) {
+                    CompositionFrameCache.frameKey(
+                        editor.projectId, snapshot, frameTime, editor.fps, frameWidth, frameHeight
+                    )
+                }
+                val cached = withContext(Dispatchers.IO) { CompositionFrameCache.isCached(ctx, key) }
+                if (cached) editor.markFrameCached(frameIndex, key)
             }
             return@LaunchedEffect
         }
@@ -182,10 +185,13 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
         for (offset in 0 until frameCount) {
             val frameIndex = (startFrame + offset) % frameCount
             val frameTime = frameIndex / editor.fps.toFloat()
-            val key = CompositionFrameCache.frameKey(
-                editor.projectId, snapshot, frameTime, editor.fps, frameWidth, frameHeight
-            )
-            if (CompositionFrameCache.isCached(ctx, key)) {
+            val key = withContext(MediaWorkers.cpuDispatcher) {
+                CompositionFrameCache.frameKey(
+                    editor.projectId, snapshot, frameTime, editor.fps, frameWidth, frameHeight
+                )
+            }
+            val cached = withContext(Dispatchers.IO) { CompositionFrameCache.isCached(ctx, key) }
+            if (cached) {
                 editor.markFrameCached(frameIndex, key)
             } else {
                 if (!CompositionFrameCache.hasCapacity(ctx, editor.settings.frameCacheDiskMb)) continue
