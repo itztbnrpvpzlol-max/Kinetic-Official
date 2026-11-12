@@ -205,7 +205,7 @@ private fun GpuCompositionPreviewCanvas(
     val context = LocalContext.current
     val frames = remember { mutableStateMapOf<String, Bitmap>() }
     val textTextures = remember { mutableMapOf<String, Pair<Int, Bitmap>>() }
-    val failedVideoIds = remember { mutableStateMapOf<String, Boolean>() }
+    val failedVideoSources = remember { mutableStateMapOf<String, String>() }
     // Hardware decoder instances are scarce system resources, not a thread pool.
     // Excess video layers use the existing bitmap preview path rather than
     // exhausting MediaCodec resources.
@@ -214,7 +214,7 @@ private fun GpuCompositionPreviewCanvas(
         it.visible && it.activeAt(editor.time) && it.type == LayerType.VIDEO && it.uri != null
     }
     val videoLayers = activeVideoLayers
-        .filter { failedVideoIds[it.id] != true }
+        .filter { failedVideoSources[it.id] != it.uri }
         .take(decoderLimit)
     val textureVideoIds = videoLayers.mapTo(HashSet<String>()) { it.id }
 
@@ -222,8 +222,8 @@ private fun GpuCompositionPreviewCanvas(
         val currentIds = editor.layers.mapTo(HashSet<String>()) { it.id }
         val stale = textTextures.keys.filter { it !in currentIds }
         stale.forEach { textTextures.remove(it) }
-        failedVideoIds.keys.filter { it !in currentIds }.toList()
-            .forEach { failedVideoIds.remove(it) }
+        failedVideoSources.keys.filter { it !in currentIds }.toList()
+            .forEach { failedVideoSources.remove(it) }
     }
 
     // Video layers use NDK MediaCodec Surface outputs and are composited
@@ -349,7 +349,7 @@ private fun GpuCompositionPreviewCanvas(
                             }
                             GpuVideoPlayerLayer(
                                 editor, layer, player, view,
-                                onDecoderFailed = { failedVideoIds[it] = true }
+                                onDecoderFailed = { failedVideoSources[layer.id] = layer.uri.orEmpty() }
                             )
                         }
                     }
