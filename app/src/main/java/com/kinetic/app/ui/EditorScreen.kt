@@ -264,8 +264,9 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
 
 
     BoxWithConstraints(Modifier.fillMaxSize().background(KColors.Bg)) {
-        val compactHeight = maxHeight < 520.dp
-        val maxPreviewHeight = (maxHeight.value * if (compactHeight) 0.30f else 0.48f).coerceAtLeast(100f)
+        val windowMaxHeight = maxHeight
+        val compactHeight = windowMaxHeight < 520.dp
+        val maxPreviewHeight = (windowMaxHeight.value * if (compactHeight) 0.30f else 0.48f).coerceAtLeast(100f)
         val adaptivePreviewHeight = previewHeight.coerceIn(100f, maxPreviewHeight)
         Column(Modifier.widthIn(max = 1440.dp).fillMaxSize().align(Alignment.Center)
             .statusBarsPadding().navigationBarsPadding()) {
@@ -305,7 +306,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                 if (!compactHeight) {
                     AlightCutBar(editor, activeLayer)
                     ResizeHandle(density) { panelHeight = it }
-                    val adaptivePanelHeight = panelHeight.coerceAtMost((maxHeight.value * 0.38f).coerceAtLeast(130f))
+                    val adaptivePanelHeight = panelHeight.coerceAtMost((windowMaxHeight.value * 0.38f).coerceAtLeast(130f))
                     EditPanel(editor, activeLayer, panelTab, { panelTab = it }, { editor.select(null) },
                         onRename = { renameTarget = activeLayer }, onParent = { parentPicker = true },
                         modifier = Modifier.fillMaxWidth().height(adaptivePanelHeight.dp))
