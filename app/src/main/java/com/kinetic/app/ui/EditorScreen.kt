@@ -78,9 +78,6 @@ import com.kinetic.app.model.LayerType
 import com.kinetic.app.model.PropId
 import com.kinetic.app.model.isDescendantOf
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -102,7 +99,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
     var previewHeight by remember { mutableFloatStateOf(210f) }
     var dockTool by remember { mutableStateOf("Select") }
     var showToolSheet by remember { mutableStateOf(false) }
-    var preparingPlayback by remember { mutableStateOf(false) }
+    var previewVideoReady by remember { mutableStateOf(true) }
 
     LaunchedEffect(editor.selectedId) {
         dockTool = if (editor.selectedId == null) "Select" else "Properties"
@@ -113,61 +110,11 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
     fun togglePlayback() {
         if (editor.playing) {
             editor.playing = false
-            return
-        }
-        if (preparingPlayback) return
-        scope.launch {
-            preparingPlayback = true
-            Toast.makeText(ctx, "Preparing composition cache…", Toast.LENGTH_SHORT).show()
-            try {
-                // Make every source local and seekable before starting transport.
-                // Decode only reusable preview data; never expand whole videos into RAM.
-                val snapshot = editor.layers.filter { it.uri != null }
-                // Stage 1: make all project sources local. File copies are I/O-bound
-                // and remain on Dispatchers.IO, never on the UI thread.
-                val cachedSources = coroutineScope {
-                    snapshot.map { layer ->
-                        async(Dispatchers.IO) {
-                            val original = layer.uri ?: return@async layer.id to null
-                            layer.id to MediaLoader.cacheMedia(ctx, Uri.parse(original))
-                        }
-                    }.awaitAll().toMap()
-                }
-                cachedSources.forEach { (id, cached) ->
-                    if (cached != null) {
-                        val old = editor.layers.firstOrNull { it.id == id }?.uri
-                        if (old != null && old != cached.toString()) {
-                            editor.updateLayer(id, push = false) { it.copy(uri = cached.toString()) }
-                        }
-                    }
-                }
-                // Stage 2: decode reusable thumbnails/waveforms on the bounded
-                // CPU pool. Limit simultaneous decoders to avoid exhausting codec
-                // instances on phones with constrained media hardware.
-                coroutineScope {
-                    snapshot.chunked(2).forEach { batch ->
-                        batch.mapNotNull { layer ->
-                            val cached = cachedSources[layer.id] ?: return@mapNotNull null
-                            async {
-                                when (layer.type) {
-                                    LayerType.IMAGE -> MediaLoader.bitmapFor(ctx, cached, LayerType.IMAGE, 0f, 1, 720)
-                                    LayerType.VIDEO -> {
-                                        MediaLoader.bitmapFor(ctx, cached, LayerType.VIDEO, layer.srcOffset, 2, 720)
-                                        MediaLoader.waveform(ctx, cached, 240)
-                                    }
-                                    LayerType.AUDIO -> MediaLoader.waveform(ctx, cached, 240)
-                                    else -> Unit
-                                }
-                            }
-                        }.awaitAll()
-                    }
-                }
-                editor.playing = true
-            } catch (error: Throwable) {
-                Toast.makeText(ctx, "Couldn't prepare media: ${error.message ?: "unknown error"}", Toast.LENGTH_LONG).show()
-            } finally {
-                preparingPlayback = false
-            }
+        } else {
+            // Preview decoders report readiness. Audio waits for that signal so
+            // it cannot run ahead while the first video frame is still starting.
+            previewVideoReady = false
+            editor.playing = true
         }
     }
     BackHandler { leave() }
@@ -179,12 +126,28 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
     LaunchedEffect(editor.settings.previewMemoryMb) { MediaLoader.configureCache(editor.settings.previewMemoryMb) }
     LaunchedEffect(editor.layers.map { it.id to it.uri }) { audio.prepare(editor.layers) }
 
+    LaunchedEffect(editor.settings.autoPreviewCache, editor.playing, editor.layers.map {
+        "${it.id}|${it.uri}|${it.duration}|${it.srcOffset}|${it.speed}"
+    }) {
+        if (!editor.settings.autoPreviewCache || editor.playing) return@LaunchedEffect
+        for (layer in editor.layers) {
+            if (layer.type != LayerType.VIDEO || layer.uri == null) continue
+            MediaLoader.cacheVideoPreviewFrames(
+                ctx, Uri.parse(layer.uri), layer.duration, layer.srcOffset
+            ) { progress ->
+                withContext(Dispatchers.Main.immediate) {
+                    editor.cacheProgress[layer.id] = progress
+                }
+            }
+        }
+    }
+
     LaunchedEffect(editor.layers, editor.duration, editor.resolution, editor.projectName) {
         delay(400)
         withContext(Dispatchers.IO) { runCatching { projectStore.save(editor) } }
     }
 
-    LaunchedEffect(editor.playing) {
+    LaunchedEffect(editor.playing, previewVideoReady) {
         if (editor.playing) {
             if (editor.time >= editor.duration - 0.01f) editor.time = 0f
             var last = withFrameNanos { it }
@@ -197,7 +160,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
             var audioAccumulator = 0f
             // Start the audio transport immediately; subsequent clock updates are
             // coalesced and applied on AudioEngine's dedicated playback thread.
-            audio.sync(editor.layers, transportTime, true)
+            audio.sync(editor.layers, transportTime, previewVideoReady)
             while (editor.playing) {
                 val now = withFrameNanos { it }
                 val dt = ((now - last) / 1_000_000_000f).coerceIn(0f, 0.1f)
@@ -221,7 +184,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                 }
                 // Audio transport work is deliberately decoupled from the visual frame clock.
                 if (audioAccumulator >= 0.08f || !editor.playing) {
-                    audio.sync(editor.layers, transportTime, editor.playing)
+                    audio.sync(editor.layers, transportTime, editor.playing && previewVideoReady)
                     audioAccumulator = 0f
                 }
             }
@@ -251,9 +214,15 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
         }, onExport = { Toast.makeText(ctx, "Export isn't built yet", Toast.LENGTH_SHORT).show() })
 
         if (previewExpanded) {
-            PreviewCanvas(editor, Modifier.weight(1f).fillMaxWidth(), editor.settings.previewQualityIndex)
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+            PreviewCanvas(editor, Modifier.fillMaxSize(), editor.settings.previewQualityIndex) { previewVideoReady = it }
+            PreviewQualityControl(editor, Modifier.align(Alignment.TopStart).padding(8.dp))
+        }
         } else {
-            PreviewCanvas(editor, Modifier.fillMaxWidth().height(previewHeight.dp), editor.settings.previewQualityIndex)
+            Box(Modifier.fillMaxWidth().height(previewHeight.dp)) {
+                PreviewCanvas(editor, Modifier.fillMaxSize(), editor.settings.previewQualityIndex) { previewVideoReady = it }
+                PreviewQualityControl(editor, Modifier.align(Alignment.TopStart).padding(8.dp))
+            }
             Box(Modifier.fillMaxWidth().height(10.dp).background(KColors.Bg).pointerInput(Unit) {
                 detectVerticalDragGestures { change, drag -> change.consume(); previewHeight = (previewHeight + drag / density).coerceIn(120f, 420f) }
             }, contentAlignment = Alignment.Center) {
@@ -261,8 +230,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
             }
         }
         PreviewToolsBar(editor, onAddLayer = { showLayers = true }, onTogglePreview = { previewExpanded = !previewExpanded },
-            onPlay = { togglePlayback() }, preparing = preparingPlayback,
-            onQuality = { editor.settings.updatePreviewQuality(it) })
+            onPlay = { togglePlayback() })
         if (!previewExpanded) {
             TimelinePane(editor, Modifier.weight(1f))
             val activeLayer = editor.selected
@@ -604,31 +572,43 @@ private fun AlightDock(active: String, onSelect: (String) -> Unit) {
 
 @Composable
 private fun PreviewToolsBar(editor: EditorState, onAddLayer: () -> Unit, onTogglePreview: () -> Unit,
-    onPlay: () -> Unit, preparing: Boolean, onQuality: (Int) -> Unit) {
-    var qualityMenu by remember { mutableStateOf(false) }
+    onPlay: () -> Unit) {
     Row(Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 4.dp).horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
         PreviewTool(IconKind.UNDO, editor.canUndo) { editor.undo() }
         PreviewTool(IconKind.REDO, editor.canRedo) { editor.redo() }
         PreviewTool(IconKind.BACK) { editor.playing = false; editor.seek(0f) }
-        PreviewTool(if (editor.playing) IconKind.PAUSE else IconKind.PLAY, enabled = !preparing, onClick = onPlay)
-        Box {
-            Box(Modifier.size(42.dp).clip(RoundedCornerShape(9.dp)).clickable { qualityMenu = true },
-                contentAlignment = Alignment.Center) {
-                Text(AppSettings.PREVIEW_QUALITIES[editor.settings.previewQualityIndex].uppercase(),
-                    color = KColors.Accent, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-            }
-            DropdownMenu(expanded = qualityMenu, onDismissRequest = { qualityMenu = false }, containerColor = KColors.Surface2) {
-                AppSettings.PREVIEW_QUALITIES.forEachIndexed { index, label ->
-                    DropdownMenuItem(
-                        text = { Text(label, color = if (index == editor.settings.previewQualityIndex) KColors.Accent else KColors.Text) },
-                        onClick = { qualityMenu = false; onQuality(index) }
-                    )
-                }
-            }
-        }
+        PreviewTool(if (editor.playing) IconKind.PAUSE else IconKind.PLAY, onClick = onPlay)
         PreviewTool(IconKind.NEXT) { editor.playing = false; editor.seek(editor.duration) }
         PreviewTool(IconKind.PLUS, onClick = onAddLayer)
         PreviewTool(if (editor.playing) IconKind.FIT else IconKind.FULLSCREEN, onClick = onTogglePreview)
+    }
+}
+
+@Composable
+private fun PreviewQualityControl(editor: EditorState, modifier: Modifier = Modifier) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        Box(
+            modifier.size(54.dp, 30.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(KColors.Row.copy(alpha = 0.92f))
+                .border(1.dp, KColors.Line, RoundedCornerShape(8.dp))
+                .clickable { expanded = true },
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                AppSettings.PREVIEW_QUALITIES[editor.settings.previewQualityIndex].uppercase(),
+                color = KColors.Accent, fontSize = 10.sp, fontWeight = FontWeight.Bold
+            )
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }, containerColor = KColors.Surface2) {
+            AppSettings.PREVIEW_QUALITIES.forEachIndexed { index, label ->
+                DropdownMenuItem(
+                    text = { Text(label, color = if (index == editor.settings.previewQualityIndex) KColors.Accent else KColors.Text) },
+                    onClick = { expanded = false; editor.settings.updatePreviewQuality(index) }
+                )
+            }
+        }
     }
 }
 
