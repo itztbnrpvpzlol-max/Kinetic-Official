@@ -33,8 +33,9 @@ object NativeRenderEngine {
         textureIds: IntArray,
         flags: IntArray,
         params: FloatArray,
-        vertices: FloatArray,
+        layerMatrices: FloatArray,
         textureMatrices: FloatArray,
+        frameMetrics: FloatArray,
         layerCount: Int
     )
     external fun nativeGlDrawExternalTexture(
