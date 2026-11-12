@@ -6,6 +6,9 @@ import android.os.ParcelFileDescriptor
 import android.os.SystemClock
 import android.util.Log
 import android.view.Surface
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 import dev.jdtech.mpv.MPVLib
 import kotlin.math.abs
 import kotlin.math.max
@@ -24,105 +27,128 @@ class FfmpegVideoPlayer(
     private val sourceUri: Uri
 ) {
     private val appContext = context.applicationContext
+    // All libmpv calls are serialized off the UI and GL threads.
+    private val decoderExecutor = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "KineticMpvDecoder").apply { isDaemon = true }
+    }
+    private val pendingClockSync = AtomicReference<ClockSync?>(null)
+    private val clockSyncQueued = AtomicBoolean(false)
     private var mpv: MPVLib? = null
     private var sourceDescriptor: ParcelFileDescriptor? = null
-    private var surface: Surface? = null
-    private var fallback: AndroidVideoPlayer? = null
-    private var released = false
+    @Volatile private var surface: Surface? = null
+    @Volatile private var fallback: AndroidVideoPlayer? = null
+    @Volatile private var released = false
+    @Volatile private var state = 0
+    @Volatile private var pendingSeekMs = 0L
+    @Volatile private var speed = 1f
+    @Volatile private var lastPlaying = false
+    private var attachedSurface: Surface? = null
     private var initialized = false
     private var loaded = false
-    private var pendingSeekMs = 0L
-    private var speed = 1f
     private var masterGeneration = Long.MIN_VALUE
     private var lastSyncNs = 0L
     private var lastCorrectionNs = 0L
     private var lastDiagnosticsNs = 0L
-    private var lastPlaying = false
 
-    @Synchronized
+    private data class ClockSync(
+        val positionUs: Long,
+        val monotonicNs: Long,
+        val masterSpeed: Float,
+        val playing: Boolean,
+        val clipStartUs: Long,
+        val sourceOffsetUs: Long,
+        val clipSpeed: Float,
+        val generation: Long
+    )
+
     fun attachSurface(next: Surface) {
         if (released) return
-        if (fallback != null) {
-            fallback?.attachSurface(next)
-            surface = next
-            return
-        }
-        if (surface === next && initialized) return
         surface = next
-        try {
-            ensureInitialized()
-            val instance = checkNotNull(mpv)
-            instance.attachSurface(next)
-            loadIfNeeded()
-        } catch (error: Throwable) {
-            Log.e(TAG, "libmpv attach failed; switching to MediaCodec fallback", error)
-            activateFallback(next)
+        postToDecoder {
+            if (fallback != null) {
+                fallback?.attachSurface(next)
+                return@postToDecoder
+            }
+            if (attachedSurface === next && initialized) return@postToDecoder
+            try {
+                ensureInitialized()
+                val instance = checkNotNull(mpv)
+                instance.attachSurface(next)
+                attachedSurface = next
+                loadIfNeeded()
+                state = 1
+            } catch (error: Throwable) {
+                Log.e(TAG, "libmpv attach failed; switching to MediaCodec fallback", error)
+                activateFallback(next)
+            }
         }
     }
 
-    @Synchronized
     fun detachSurface() {
-        if (fallback != null) {
-            fallback?.detachSurface()
-            surface = null
-            return
-        }
-        runCatching { mpv?.detachSurface() }
         surface = null
+        postToDecoder {
+            fallback?.detachSurface()
+            if (fallback == null) runCatching { mpv?.detachSurface() }
+            attachedSurface = null
+        }
     }
 
-    @Synchronized
     fun decoderState(): Int {
         if (released) return 2
-        fallback?.let { return it.decoderState() }
-        return if (initialized && loaded) 1 else 0
+        return fallback?.decoderState() ?: state
     }
 
-    @Synchronized
     fun updatePositionHint(targetMs: Long) {
         if (released) return
         pendingSeekMs = targetMs.coerceAtLeast(0L)
-        fallback?.updatePositionHint(targetMs)
+        postToDecoder { fallback?.updatePositionHint(pendingSeekMs) }
     }
 
-    @Synchronized
     fun seekTo(targetMs: Long) {
         if (released) return
         pendingSeekMs = targetMs.coerceAtLeast(0L)
-        fallback?.let { it.seekTo(targetMs); return }
-        if (loaded) seekMpv(pendingSeekMs)
+        postToDecoder {
+            val backup = fallback
+            if (backup != null) backup.seekTo(pendingSeekMs)
+            else if (loaded) seekMpv(pendingSeekMs)
+        }
     }
 
-    @Synchronized
     fun setSpeed(value: Float) {
         if (released) return
         speed = value.coerceIn(0.1f, 4f)
-        fallback?.let { it.setSpeed(speed); return }
-        runCatching { mpv?.setPropertyDouble("speed", speed.toDouble()) }
+        postToDecoder {
+            val backup = fallback
+            if (backup != null) backup.setSpeed(speed)
+            else runCatching { mpv?.setPropertyDouble("speed", speed.toDouble()) }
+        }
     }
 
-    @Synchronized
     fun play() {
         if (released) return
-        fallback?.let { it.play(); return }
         lastPlaying = true
-        runCatching { mpv?.setPropertyBoolean("pause", false) }
+        postToDecoder {
+            val backup = fallback
+            if (backup != null) backup.play()
+            else runCatching { mpv?.setPropertyBoolean("pause", false) }
+        }
     }
 
-    @Synchronized
     fun pause() {
         if (released) return
-        fallback?.let { it.pause(); return }
         lastPlaying = false
-        runCatching { mpv?.setPropertyBoolean("pause", true) }
+        postToDecoder {
+            val backup = fallback
+            if (backup != null) backup.pause()
+            else runCatching { mpv?.setPropertyBoolean("pause", true) }
+        }
     }
 
     /**
-     * Kinetic's native timeline clock remains authoritative. libmpv runs its
-     * own frame clock between corrections; large drift is corrected with an
-     * exact seek rather than continuously seeking every UI tick.
+     * The native timeline clock remains authoritative. Only the newest clock
+     * snapshot is retained, so slow native property calls cannot build an
+     * unbounded queue of stale synchronization tasks.
      */
-    @Synchronized
     fun syncMasterClock(
         positionUs: Long,
         monotonicNs: Long,
@@ -134,37 +160,98 @@ class FfmpegVideoPlayer(
         generation: Long
     ) {
         if (released) return
-        fallback?.let {
-            it.syncMasterClock(positionUs, monotonicNs, masterSpeed, playing,
+        pendingClockSync.set(
+            ClockSync(positionUs, monotonicNs, masterSpeed, playing,
                 clipStartUs, sourceOffsetUs, clipSpeed, generation)
+        )
+        scheduleClockSync()
+    }
+
+    fun release() {
+        if (released) return
+        released = true
+        state = 2
+        runCatching {
+            decoderExecutor.execute {
+                fallback?.release()
+                fallback = null
+                val instance = mpv
+                mpv = null
+                initialized = false
+                loaded = false
+                if (instance != null) {
+                    runCatching { instance.detachSurface() }
+                    runCatching { instance.destroy() }
+                }
+                sourceDescriptor?.close()
+                sourceDescriptor = null
+                surface = null
+                attachedSurface = null
+                decoderExecutor.shutdown()
+            }
+        }.onFailure {
+            decoderExecutor.shutdownNow()
+        }
+    }
+
+    private fun postToDecoder(block: () -> Unit) {
+        if (released) return
+        runCatching {
+            decoderExecutor.execute {
+                if (!released) block()
+            }
+        }
+    }
+
+    private fun scheduleClockSync() {
+        if (released || !clockSyncQueued.compareAndSet(false, true)) return
+        runCatching {
+            decoderExecutor.execute {
+                try {
+                    val latest = pendingClockSync.getAndSet(null)
+                    if (latest != null && !released) applyClockSync(latest)
+                } finally {
+                    clockSyncQueued.set(false)
+                    if (pendingClockSync.get() != null) scheduleClockSync()
+                }
+            }
+        }.onFailure {
+            clockSyncQueued.set(false)
+        }
+    }
+
+    private fun applyClockSync(sync: ClockSync) {
+        val backup = fallback
+        if (backup != null) {
+            backup.syncMasterClock(
+                sync.positionUs, sync.monotonicNs, sync.masterSpeed, sync.playing,
+                sync.clipStartUs, sync.sourceOffsetUs, sync.clipSpeed, sync.generation
+            )
             return
         }
         val instance = mpv ?: return
         val nowNs = SystemClock.elapsedRealtimeNanos()
-        val safeMasterSpeed = masterSpeed.coerceIn(0.1f, 4f)
-        val safeClipSpeed = clipSpeed.coerceIn(0.1f, 4f)
-        val timelineNowUs = positionUs.coerceAtLeast(0L) +
-            if (playing) (((nowNs - monotonicNs).coerceAtLeast(0L) / 1_000.0) *
+        val safeMasterSpeed = sync.masterSpeed.coerceIn(0.1f, 4f)
+        val safeClipSpeed = sync.clipSpeed.coerceIn(0.1f, 4f)
+        val timelineNowUs = sync.positionUs.coerceAtLeast(0L) +
+            if (sync.playing) (((nowNs - sync.monotonicNs).coerceAtLeast(0L) / 1_000.0) *
                 safeMasterSpeed).toLong() else 0L
-        val expectedSourceUs = sourceOffsetUs.coerceAtLeast(0L) +
-            (((timelineNowUs - clipStartUs).coerceAtLeast(0L)) * safeClipSpeed).toLong()
+        val expectedSourceUs = sync.sourceOffsetUs.coerceAtLeast(0L) +
+            (((timelineNowUs - sync.clipStartUs).coerceAtLeast(0L)) * safeClipSpeed).toLong()
 
         if (nowNs - lastSyncNs >= 100_000_000L) {
             lastSyncNs = nowNs
             runCatching {
                 instance.setPropertyDouble("speed", (safeMasterSpeed * safeClipSpeed).coerceIn(0.1f, 4f).toDouble())
-                instance.setPropertyBoolean("pause", !playing)
+                instance.setPropertyBoolean("pause", !sync.playing)
             }
             val actualSeconds = instance.getPropertyDouble("time-pos")
             val expectedSeconds = expectedSourceUs / 1_000_000.0
-            val generationChanged = masterGeneration != generation
+            val generationChanged = masterGeneration != sync.generation
             val driftSeconds = actualSeconds?.let { it - expectedSeconds }
             val drifted = driftSeconds != null && abs(driftSeconds) > 0.18
             val correctionReady = nowNs - lastCorrectionNs >= 300_000_000L
 
-            // Report the decoder actually selected by libmpv, not merely the
-            // requested "auto-safe" setting. This makes software fallback and
-            // frame-rate regressions visible in device logs.
             if (nowNs - lastDiagnosticsNs >= 1_000_000_000L) {
                 lastDiagnosticsNs = nowNs
                 val activeHwdec = runCatching { instance.getPropertyString("hwdec-current") }
@@ -177,33 +264,14 @@ class FfmpegVideoPlayer(
                 Log.i(TAG, "decoder=$activeHwdec codec=$codecName fps=$decodedFps driftMs=$driftMs")
             }
 
-            if ((generationChanged || (playing && drifted && correctionReady)) && loaded) {
-                Log.w(TAG, "Correcting preview clock drift: ${driftSeconds?.times(1_000.0)?.toLong() ?: 0L}ms")
+            if ((generationChanged || (sync.playing && drifted && correctionReady)) && loaded) {
+                Log.w(TAG, "Correcting preview clock drift: \${driftSeconds?.times(1_000.0)?.toLong() ?: 0L}ms")
                 seekMpv((expectedSourceUs / 1_000L).coerceAtLeast(0L))
                 lastCorrectionNs = nowNs
             }
-            masterGeneration = generation
+            masterGeneration = sync.generation
         }
-        lastPlaying = playing
-    }
-
-    @Synchronized
-    fun release() {
-        if (released) return
-        released = true
-        fallback?.release()
-        fallback = null
-        val instance = mpv
-        mpv = null
-        initialized = false
-        loaded = false
-        if (instance != null) {
-            runCatching { instance.detachSurface() }
-            runCatching { instance.destroy() }
-        }
-        sourceDescriptor?.close()
-        sourceDescriptor = null
-        surface = null
+        lastPlaying = sync.playing
     }
 
     private fun ensureInitialized() {
