@@ -58,7 +58,7 @@ fun SettingsScreen(settings: AppSettings, onBack: () -> Unit) {
 
             Section("Preview & performance")
             ChoiceRow("Preview quality", AppSettings.PREVIEW_QUALITIES, settings.previewQualityIndex) { settings.updatePreviewQuality(it) }
-            ChoiceRow("Preview memory cache", AppSettings.PREVIEW_MEMORY_MB.map { "$it MB" }, settings.previewMemoryIndex) { settings.updatePreviewMemory(it) }
+            ChoiceRow("Rendered-frame RAM cache", AppSettings.PREVIEW_MEMORY_MB.map { "$it MB" }, settings.previewMemoryIndex) { settings.updatePreviewMemory(it) }
             SwitchRow("Automatic preview-frame caching", settings.autoPreviewCache) { settings.updateAutoPreviewCache(it) }
             ChoiceRow("Rendered-frame disk cache", AppSettings.FRAME_CACHE_DISK_MB.map { "$it MB" }, settings.frameCacheDiskIndex) { settings.updateFrameCacheDisk(it) }
             TextButton(onClick = { scope.launch { CompositionFrameCache.clear(context) } }) {
