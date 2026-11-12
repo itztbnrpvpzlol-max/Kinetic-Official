@@ -20,6 +20,11 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.ui.Alignment
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
@@ -79,7 +84,11 @@ fun PreviewCanvas(editor: EditorState, modifier: Modifier = Modifier) {
     }
     val directVideo = activeVisualLayers.singleOrNull()?.takeIf { layer ->
         layer.type == LayerType.VIDEO &&
-            layer.width == COMP_W && layer.height == COMP_H &&
+            layer.width > 0f && layer.height > 0f &&
+            (layer.width / COMP_W).coerceAtMost(1f) > 0f &&
+            (layer.height / COMP_H).coerceAtMost(1f) > 0f &&
+            kotlin.math.abs(layer.width / COMP_W - layer.height / COMP_H) < 0.002f &&
+            layer.width <= COMP_W && layer.height <= COMP_H &&
             !layer.maskEnabled && layer.effects.isEmpty() && layer.blendMode == "Normal" &&
             kotlin.math.abs(layer.p(PropId.OPACITY).valueAt(editor.time) - 100f) < 0.01f &&
             kotlin.math.abs(layer.p(PropId.POS_X).valueAt(editor.time) - COMP_W / 2f) < 0.01f &&
@@ -157,18 +166,22 @@ private fun DirectVideoPreviewCanvas(
         previousTimelineTime = editor.time
     }
 
-    AndroidView(
-        factory = { viewContext ->
-            PlayerView(viewContext).apply {
-                player = player
-                useController = false
-                resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
-                setShutterBackgroundColor(android.graphics.Color.BLACK)
-            }
-        },
-        modifier = modifier,
-        update = { view -> if (view.player !== player) view.player = player }
-    )
+    Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        AndroidView(
+            factory = { viewContext ->
+                PlayerView(viewContext).apply {
+                    player = player
+                    useController = false
+                    resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+                    setShutterBackgroundColor(android.graphics.Color.BLACK)
+                }
+            },
+            modifier = Modifier
+                .fillMaxWidth((layer.width / COMP_W).coerceIn(0.01f, 1f))
+                .fillMaxHeight((layer.height / COMP_H).coerceIn(0.01f, 1f)),
+            update = { view -> if (view.player !== player) view.player = player }
+        )
+    }
 }
 
 @Composable
