@@ -258,7 +258,7 @@ object MediaLoader {
                     return@synchronized hit
                 }
 
-                val diskBitmap = diskFile?.takeIf { it.isFile }?.let { BitmapFactory.decodeFile(it.absolutePath) }
+                val diskBitmap = diskFile?.takeIf { hasValidPreviewFrame(it) }?.let { BitmapFactory.decodeFile(it.absolutePath) }
                 val decodeStartedNs = System.nanoTime()
                 val bmp = diskBitmap ?: try {
                     if (type == LayerType.IMAGE) decodeImage(ctx, uri, maxEdge)
@@ -371,18 +371,36 @@ object MediaLoader {
         return File(File(ctx.filesDir, "preview-frames"), "$digest.$extension")
     }
 
+    private fun hasValidPreviewFrame(file: File): Boolean {
+        if (!file.isFile) return false
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(file.absolutePath, bounds)
+        val valid = bounds.outWidth > 0 && bounds.outHeight > 0
+        if (!valid) file.delete()
+        return valid
+    }
+
     private fun writePreviewFrame(file: File, bitmap: Bitmap, type: LayerType) {
         runCatching {
-            if (file.isFile) return
+            if (hasValidPreviewFrame(file)) return
+            file.delete()
             file.parentFile?.mkdirs()
-            val temp = File(file.parentFile, "${file.name}.tmp")
+            val temp = File(file.parentFile, "${file.name}.${Thread.currentThread().id}.tmp")
             val format = if (type == LayerType.IMAGE) Bitmap.CompressFormat.PNG else Bitmap.CompressFormat.JPEG
             val written = FileOutputStream(temp).use { output ->
                 val success = bitmap.compress(format, 86, output)
                 output.flush()
                 success
             }
-            if (!written || !temp.renameTo(file)) temp.delete()
+            if (!written) {
+                temp.delete()
+            } else {
+                if (file.exists()) file.delete()
+                if (!temp.renameTo(file)) {
+                    temp.copyTo(file, overwrite = true)
+                    temp.delete()
+                }
+            }
         }
     }
 
@@ -465,7 +483,7 @@ object MediaLoader {
                 val bucket = (sourceTime * fps.toFloat()).toInt()
                 val key = "$sourceKey@$fps@$maxEdge@$bucket"
                 val file = previewFrameFile(ctx, key, LayerType.VIDEO)
-                if (!file.isFile) {
+                if (!hasValidPreviewFrame(file)) {
                     bitmapFor(
                         ctx, uri, LayerType.VIDEO, sourceTime,
                         sampleFps = fps, maxEdge = maxEdge,
@@ -564,7 +582,7 @@ object MediaLoader {
                                         val bucket = (targetSec * fps.toFloat()).toInt()
                                         val key = "$sourceKey@$fps@$maxEdge@$bucket"
                                         val file = previewFrameFile(ctx, key, LayerType.VIDEO)
-                                        if (!file.isFile && cacheImageFrame(image, file, rotation, maxEdge)) {
+                                        if (!hasValidPreviewFrame(file) && cacheImageFrame(image, file, rotation, maxEdge)) {
                                             cached++
                                             if (cached % 8 == 0) onProgressCount(cached)
                                         }
