@@ -28,6 +28,15 @@ object NativeRenderEngine {
     external fun nativeGlDrawTexture(
         textureId: Int, vertices: FloatArray, alpha: Float, gray: Float, blendMode: Int
     )
+    /** Draws a complete ordered scene in one JNI call on the current GLES3 context. */
+    external fun nativeGlDrawComposition(
+        textureIds: IntArray,
+        flags: IntArray,
+        params: FloatArray,
+        vertices: FloatArray,
+        textureMatrices: FloatArray,
+        layerCount: Int
+    )
     external fun nativeGlDrawExternalTexture(
         textureId: Int, vertices: FloatArray, alpha: Float, gray: Float,
         textureMatrix: FloatArray, blendMode: Int
