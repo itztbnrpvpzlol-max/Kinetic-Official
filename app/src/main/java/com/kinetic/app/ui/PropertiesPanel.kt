@@ -1,13 +1,14 @@
 package com.kinetic.app.ui
 
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -26,10 +27,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kinetic.app.model.EditorState
@@ -42,80 +42,77 @@ import kotlin.math.abs
 @Composable
 fun PropertiesList(editor: EditorState, layer: Layer, onParent: () -> Unit) {
     val byId = editor.layers.associateBy { it.id }
-    Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
-        Row(
-            Modifier.fillMaxWidth().height(36.dp).clickable(onClick = onParent).padding(horizontal = 14.dp),
-            verticalAlignment = Alignment.CenterVertically
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState())
+            .padding(horizontal = 14.dp, vertical = 12.dp)
+    ) {
+        Text("LAYER", color = KColors.Muted, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.3.sp)
+        Spacer(Modifier.height(8.dp))
+        Column(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
+                .background(KColors.Surface2).border(1.dp, KColors.Line, RoundedCornerShape(14.dp))
+                .padding(horizontal = 14.dp, vertical = 10.dp)
         ) {
-            Text("Parent", color = KColors.Text, fontSize = 13.sp, modifier = Modifier.weight(1f))
-            Text(
-                layer.parentId?.let { byId[it]?.name } ?: "None",
-                color = KColors.Accent, fontSize = 13.sp, maxLines = 1
-            )
-        }
-        if (layer.type != LayerType.AUDIO) {
-            Row(Modifier.fillMaxWidth().height(38.dp).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("Link Scale X / Y", color = KColors.Text, fontSize = 12.sp, modifier = Modifier.weight(1f))
-                Box(Modifier.clip(RoundedCornerShape(8.dp)).background(if (layer.scaleLinked) KColors.Accent.copy(alpha = 0.22f) else KColors.Surface2).clickable { editor.toggleScaleLink(layer.id) }.padding(horizontal = 12.dp, vertical = 6.dp)) {
-                    Text(if (layer.scaleLinked) "LINKED" else "UNLINKED", color = if (layer.scaleLinked) KColors.Accent else KColors.Muted, fontSize = 10.sp)
+            Row(
+                Modifier.fillMaxWidth().height(38.dp).clickable(onClick = onParent),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("Parent layer", color = KColors.Text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    Text("Layer hierarchy", color = KColors.Muted, fontSize = 10.sp)
+                }
+                Text(layer.parentId?.let { byId[it]?.name } ?: "None",
+                    color = KColors.Accent, fontSize = 12.sp, maxLines = 1)
+            }
+            if (layer.type != LayerType.AUDIO) {
+                Box(Modifier.fillMaxWidth().height(1.dp).background(KColors.Line))
+                Row(Modifier.fillMaxWidth().height(42.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Link scale", color = KColors.Text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        Text("Keep horizontal and vertical scale together", color = KColors.Muted, fontSize = 10.sp)
+                    }
+                    Box(
+                        Modifier.clip(RoundedCornerShape(8.dp))
+                            .background(if (layer.scaleLinked) KColors.Accent.copy(alpha = 0.18f) else KColors.Surface)
+                            .border(1.dp, if (layer.scaleLinked) KColors.Accent.copy(alpha = 0.55f) else KColors.Line, RoundedCornerShape(8.dp))
+                            .clickable { editor.toggleScaleLink(layer.id) }
+                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                    ) {
+                        Text(if (layer.scaleLinked) "LINKED" else "UNLINKED",
+                            color = if (layer.scaleLinked) KColors.Accent else KColors.Muted,
+                            fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                    }
                 }
             }
         }
+
+        Spacer(Modifier.height(16.dp))
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text("TRANSFORM", color = KColors.Muted, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.3.sp)
+            Spacer(Modifier.weight(1f))
+            Text("AT ${fmt("%.2f", editor.time)}s", color = KColors.Accent, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+        }
+        Spacer(Modifier.height(8.dp))
         if (layer.type == LayerType.AUDIO) {
-            Text(
-                "Audio layers have no transform properties yet.",
-                color = KColors.Dim, fontSize = 12.sp, modifier = Modifier.padding(14.dp)
-            )
+            Column(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(KColors.Surface2)
+                    .padding(16.dp)
+            ) {
+                Text("No transform controls", color = KColors.Text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                Text("Audio layers use their own volume and playback controls.", color = KColors.Muted, fontSize = 11.sp)
+            }
         } else {
-            for (id in PropId.values()) PropRow(editor, layer, id)
+            PropId.values().forEach { id -> PropertyControlCard(editor, layer, id) }
         }
     }
 }
 
 @Composable
-private fun PropRow(editor: EditorState, layer: Layer, id: PropId) {
-    val p = layer.p(id)
-    val value = p.valueAt(editor.time)
-    val isSel = editor.selectedProp == id
-    val atKey = p.keys.any { abs(it.t - editor.time) <= editor.frame / 2f }
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .height(40.dp)
-            .background(if (isSel) KColors.RowSel else Color.Transparent)
-            .clickable { editor.selectProp(id) }
-            .padding(horizontal = 6.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(
-            Modifier.size(34.dp).clickable { editor.toggleStopwatch(layer.id, id) },
-            contentAlignment = Alignment.Center
-        ) { KIcon(IconKind.STOPWATCH, if (p.animated) KColors.Accent else KColors.Dim) }
-        Text(id.label, color = KColors.Text, fontSize = 14.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold, modifier = Modifier.weight(1f), maxLines = 1)
-        if (editor.settings.afterEffectsScrubbing) ScrubValue(editor, layer, id, value) else PropertySlider(editor, layer, id, value)
-        Box(
-            Modifier.size(30.dp).clickable(enabled = p.animated) { editor.jumpKey(layer.id, id, -1) },
-            contentAlignment = Alignment.Center
-        ) { KIcon(IconKind.PREV, if (p.animated) KColors.Muted else KColors.Dim, Modifier.size(16.dp)) }
-        Box(
-            Modifier.size(30.dp).clickable { editor.toggleKeyAtTime(layer.id, id) },
-            contentAlignment = Alignment.Center
-        ) {
-            KIcon(
-                if (atKey) IconKind.DIAMOND_FILLED else IconKind.DIAMOND,
-                if (atKey) KColors.Accent else KColors.Muted, Modifier.size(18.dp)
-            )
-        }
-        Box(
-            Modifier.size(30.dp).clickable(enabled = p.animated) { editor.jumpKey(layer.id, id, 1) },
-            contentAlignment = Alignment.Center
-        ) { KIcon(IconKind.NEXT, if (p.animated) KColors.Muted else KColors.Dim, Modifier.size(16.dp)) }
-    }
-}
-
-
-@Composable
-private fun PropertySlider(editor: EditorState, layer: Layer, id: PropId, value: Float) {
+private fun PropertyControlCard(editor: EditorState, layer: Layer, id: PropId) {
+    val prop = layer.p(id)
+    val value = prop.valueAt(editor.time)
+    val selected = editor.selectedProp == id
+    val atKey = prop.keys.any { abs(it.t - editor.time) <= editor.frame / 2f }
     val range = when (id) {
         PropId.OPACITY -> 0f..100f
         PropId.ROTATION -> -360f..360f
@@ -123,42 +120,84 @@ private fun PropertySlider(editor: EditorState, layer: Layer, id: PropId, value:
         else -> -1000f..1000f
     }
     var editing by remember(layer.id, id) { mutableStateOf(false) }
-    Column(Modifier.width(116.dp).padding(horizontal = 3.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(id.format(value), color = KColors.Accent, fontSize = 10.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, maxLines = 1)
-        Canvas(Modifier.fillMaxWidth().height(7.dp)) {
-            val gap = size.width / 24f
-            for (i in 0..24) drawLine(KColors.Muted.copy(alpha = if (i % 4 == 0) 0.9f else 0.45f), Offset(i * gap, 1f), Offset(i * gap, if (i % 4 == 0) 7f else 5f), 1.dp.toPx())
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(13.dp))
+            .background(if (selected) KColors.RowSel else KColors.Surface2)
+            .border(1.dp, if (selected) KColors.Accent.copy(alpha = 0.45f) else KColors.Line, RoundedCornerShape(13.dp))
+            .clickable { editor.selectProp(id) }
+            .padding(horizontal = 12.dp, vertical = 9.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(id.label, color = KColors.Text, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                Text(if (prop.animated) "KEYFRAMED" else "STATIC", color = KColors.Muted, fontSize = 8.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp)
+            }
+            Box(
+                Modifier.clip(RoundedCornerShape(7.dp)).background(KColors.Surface)
+                    .clickable { editor.selectProp(id) }.padding(horizontal = 10.dp, vertical = 6.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(id.format(value), color = KColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            }
+            Box(Modifier.size(34.dp).clickable { editor.toggleStopwatch(layer.id, id) }, contentAlignment = Alignment.Center) {
+                KIcon(IconKind.STOPWATCH, if (prop.animated) KColors.Accent else KColors.Muted, Modifier.size(17.dp))
+            }
+            Box(Modifier.size(30.dp).clickable { editor.toggleKeyAtTime(layer.id, id) }, contentAlignment = Alignment.Center) {
+                KIcon(if (atKey) IconKind.DIAMOND_FILLED else IconKind.DIAMOND,
+                    if (atKey) KColors.Accent else KColors.Muted, Modifier.size(17.dp))
+            }
         }
-        Slider(value = value.coerceIn(range), onValueChange = {
-            if (!editing) { editor.beginEdit(); editing = true }
-            editor.setPropValue(layer.id, id, it)
-        }, onValueChangeFinished = { editing = false }, valueRange = range)
+        if (editor.settings.afterEffectsScrubbing) {
+            ScrubValue(editor, layer, id, value)
+        } else {
+            Slider(
+                value = value.coerceIn(range),
+                onValueChange = {
+                    if (!editing) { editor.beginEdit(); editing = true }
+                    editor.setPropValue(layer.id, id, it)
+                },
+                onValueChangeFinished = { editing = false },
+                valueRange = range
+            )
+        }
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(28.dp).clickable(enabled = prop.animated) { editor.jumpKey(layer.id, id, -1) }, contentAlignment = Alignment.Center) {
+                KIcon(IconKind.PREV, if (prop.animated) KColors.Muted else KColors.Dim, Modifier.size(14.dp))
+            }
+            Text("${prop.keys.size} keyframes", color = KColors.Muted, fontSize = 9.sp, modifier = Modifier.weight(1f))
+            Box(Modifier.size(28.dp).clickable(enabled = prop.animated) { editor.jumpKey(layer.id, id, 1) }, contentAlignment = Alignment.Center) {
+                KIcon(IconKind.NEXT, if (prop.animated) KColors.Muted else KColors.Dim, Modifier.size(14.dp))
+            }
+        }
     }
 }
 
-/** After Effects style scrubby value: drag left/right to change, tap to type. */
 @Composable
 private fun ScrubValue(editor: EditorState, layer: Layer, id: PropId, value: Float) {
     val dens = LocalDensity.current.density
     var typing by remember { mutableStateOf(false) }
     Box(
-        Modifier.width(104.dp).height(32.dp).clip(RoundedCornerShape(8.dp)).background(KColors.Surface2)
-            .then(if (editor.settings.afterEffectsScrubbing) Modifier.pointerInput(layer.id, id) {
+        Modifier.fillMaxWidth().height(30.dp).clip(RoundedCornerShape(8.dp))
+            .background(KColors.Surface)
+            .pointerInput(layer.id, id) {
                 detectHorizontalDragGestures(onDragStart = { editor.beginEdit() }) { change, dx ->
                     change.consume()
                     val cur = editor.layers.firstOrNull { it.id == layer.id }?.p(id)?.valueAt(editor.time)
-                    if (cur != null) editor.setPropValue(layer.id, id, cur + dx / dens * id.scrubStep * editor.settings.scrubMultiplier)
+                    if (cur != null) editor.setPropValue(layer.id, id,
+                        cur + dx / dens * id.scrubStep * editor.settings.scrubMultiplier)
                 }
-            } else Modifier)
-            .pointerInput(layer.id, id) { detectTapGestures { typing = true } },
+            }
+            .clickable { typing = true },
         contentAlignment = Alignment.Center
-    ) { Text(id.format(value), color = KColors.Accent, fontSize = 13.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, maxLines = 1) }
-
+    ) {
+        Text(id.format(value), color = KColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+    }
     if (typing) {
         TextInputDialog(
-            title = id.label, initial = fmt("%.2f", value),
-            onDone = { s ->
-                s.trim().toFloatOrNull()?.let { editor.beginEdit(); editor.setPropValue(layer.id, id, it) }
+            title = id.label,
+            initial = fmt("%.2f", value),
+            onDone = { input ->
+                input.trim().toFloatOrNull()?.let { editor.beginEdit(); editor.setPropValue(layer.id, id, it) }
                 typing = false
             },
             onDismiss = { typing = false }

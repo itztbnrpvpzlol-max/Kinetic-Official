@@ -106,6 +106,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
     var showLeave by remember { mutableStateOf(false) }
     var panelHeight by remember { mutableFloatStateOf(210f) }
     var panelTab by remember { mutableIntStateOf(0) }
+    var showPropertiesPanel by remember { mutableStateOf(false) }
     var renameTarget by remember { mutableStateOf<Layer?>(null) }
     var parentPicker by remember { mutableStateOf(false) }
     var previewExpanded by remember { mutableStateOf(false) }
@@ -113,8 +114,14 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
     var dockTool by remember { mutableStateOf("Select") }
     var showToolSheet by remember { mutableStateOf(false) }
     LaunchedEffect(editor.selectedId) {
-        dockTool = if (editor.selectedId == null) "Select" else "Properties"
         showToolSheet = false
+        if (editor.selectedId == null) {
+            showPropertiesPanel = false
+            dockTool = "Select"
+        } else {
+            // Selection and panel visibility are deliberately independent.
+            dockTool = "Properties"
+        }
     }
 
     fun leave() { if (editor.layers.isEmpty()) onExit() else showLeave = true }
@@ -303,11 +310,11 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
             TimelinePane(editor, Modifier.weight(1f))
             val activeLayer = editor.selected
             if (activeLayer != null) {
-                if (!compactHeight) {
-                    AlightCutBar(editor, activeLayer)
+                AlightCutBar(editor, activeLayer)
+                if (showPropertiesPanel && !compactHeight) {
                     ResizeHandle(density) { panelHeight = it }
                     val adaptivePanelHeight = panelHeight.coerceAtMost((windowMaxHeight.value * 0.38f).coerceAtLeast(130f))
-                    EditPanel(editor, activeLayer, panelTab, { panelTab = it }, { editor.select(null) },
+                    EditPanel(editor, activeLayer, panelTab, { panelTab = it }, { showPropertiesPanel = false },
                         onRename = { renameTarget = activeLayer }, onParent = { parentPicker = true },
                         modifier = Modifier.fillMaxWidth().height(adaptivePanelHeight.dp))
                 }
@@ -316,8 +323,8 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                 dockTool = tool
                 when (tool) {
                     "Select" -> editor.select(null)
-                    "Properties" -> if (activeLayer != null) panelTab = 0
-                    "Graph" -> if (activeLayer != null) panelTab = 1
+                    "Properties" -> if (activeLayer != null) { panelTab = 0; showPropertiesPanel = true }
+                    "Graph" -> if (activeLayer != null) { panelTab = 1; showPropertiesPanel = true }
                     "Speed", "Volume", "Extract audio", "Masking", "Effects", "Blending", "Blend modes" -> {
                         if (activeLayer != null) showToolSheet = true
                         else Toast.makeText(ctx, "Select a layer first", Toast.LENGTH_SHORT).show()
@@ -790,11 +797,17 @@ private fun EditPanel(
     Column(
         modifier.clip(shape).background(KColors.Surface).border(1.dp, KColors.Line, shape)
     ) {
-        Row(Modifier.fillMaxWidth().height(42.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            Modifier.fillMaxWidth().height(54.dp).padding(start = 16.dp, end = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("LAYER CONTROLS", color = KColors.Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp)
+                Text(layer.name, color = KColors.Text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
             TabLabel("Properties", tab == 0) { onTab(0) }
             TabLabel("Graph", tab == 1) { onTab(1) }
-            Spacer(Modifier.weight(1f))
-            Text(layer.name, color = KColors.Muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 100.dp))
             Box {
                 IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, "Layer actions", tint = KColors.Muted) }
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, containerColor = KColors.Surface2) {
@@ -814,7 +827,7 @@ private fun EditPanel(
                     DropdownMenuItem(text = { Text("Delete", color = KColors.Danger) }, onClick = { menu = false; editor.deleteLayer(layer.id) })
                 }
             }
-            IconButton(onClick = onCollapse) { KIcon(IconKind.CHEVRON_DOWN, KColors.Muted, Modifier.size(22.dp)) }
+            TextButton(onClick = onCollapse) { Text("CLOSE", color = KColors.Muted, fontSize = 10.sp, fontWeight = FontWeight.Bold) }
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             if (tab == 0) PropertiesList(editor, layer, onParent) else GraphPanel(editor, layer)
