@@ -62,7 +62,7 @@ Java_com_kinetic_app_engine_NativeRenderEngine_nativeEvaluateCurves(
 #include <chrono>
 #include <cstdint>
 #include <mutex>
-#include <GLES2/gl2.h>
+#include <GLES3/gl3.h>
 #include <GLES2/gl2ext.h>
 
 namespace {
@@ -264,6 +264,12 @@ void drawNativeTexture(GLuint program, GLint positionHandle, GLint uvHandle,
 
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_kinetic_app_engine_NativeRenderEngine_nativeGlInit(JNIEnv*, jobject) {
+    // KRE requires an actual ES 3.x context. Do not initialize against a
+    // silently downgraded ES 2 context.
+    GLint glMajor = 0;
+    glGetIntegerv(GL_MAJOR_VERSION, &glMajor);
+    if (glMajor < 3) return JNI_FALSE;
+
     static const char* vertex =
         "attribute vec2 aPosition; attribute vec2 aTexCoord; varying vec2 vTexCoord;"
         "void main(){ gl_Position=vec4(aPosition,0.0,1.0); vTexCoord=aTexCoord; }";
