@@ -272,23 +272,26 @@ object MediaLoader {
                 val decodeStartedNs = System.nanoTime()
                 val bmp = diskBitmap ?: try {
                     if (type == LayerType.IMAGE) decodeImage(ctx, uri, maxEdge)
-                    else if (lowPriorityPrefetch) {
-                        videoFrame(
-                            ctx, uri, bucket / sampleFps.toFloat(), maxEdge,
-                            if (sampleFps <= 2) MediaMetadataRetriever.OPTION_CLOSEST_SYNC
-                            else MediaMetadataRetriever.OPTION_CLOSEST
-                        )
-                    } else {
-                        val sequentialFrame = sequentialVideoDecoder.decodeFrame(
-                            ctx, uri, sourceKey, bucket.toLong() * 1_000_000L / sampleFps.coerceAtLeast(1), maxEdge
-                        )
-                        if (sequentialFrame != null) sequentialFrame
-                        else if (sequentialVideoDecoder.shouldUseRetrieverFallback(sourceKey)) {
-                            videoFrame(
-                                ctx, uri, bucket / sampleFps.toFloat(), maxEdge,
-                                MediaMetadataRetriever.OPTION_CLOSEST
+                    else {
+                        // Let cache warmup reuse the same persistent MediaCodec session
+                        // as preview. Reopening MediaMetadataRetriever for each look-ahead
+                        // sample made RAM prefetch dramatically slower.
+                        if (lowPriorityPrefetch && MediaWorkers.isPlaybackRequested) {
+                            null
+                        } else {
+                            val sequentialFrame = sequentialVideoDecoder.decodeFrame(
+                                ctx, uri, sourceKey,
+                                bucket.toLong() * 1_000_000L / sampleFps.coerceAtLeast(1),
+                                maxEdge
                             )
-                        } else null
+                            if (sequentialFrame != null) sequentialFrame
+                            else if (sequentialVideoDecoder.shouldUseRetrieverFallback(sourceKey)) {
+                                videoFrame(
+                                    ctx, uri, bucket / sampleFps.toFloat(), maxEdge,
+                                    MediaMetadataRetriever.OPTION_CLOSEST
+                                )
+                            } else null
+                        }
                     }
                 } catch (e: Exception) {
                     null
@@ -337,16 +340,12 @@ object MediaLoader {
         maximumTimeSec: Float = Float.POSITIVE_INFINITY
     ): List<Float> = withContext(MediaWorkers.cacheDispatcher) {
         val fps = sampleFps.coerceAtLeast(1)
-        val before = beforeFrames.coerceIn(0, 8)
-        val after = afterFrames.coerceIn(0, 12)
+        // Keep this queue monotonic: center first, then forward-only samples.
+        // Backward requests reset MediaCodec to a keyframe and destroy the
+        // sequential decoder's throughput advantage.
+        val after = afterFrames.coerceIn(0, 4)
         val step = 1f / fps.toFloat()
-        val offsets = buildList {
-            add(0)
-            for (distance in 1..maxOf(before, after)) {
-                if (distance <= after) add(distance)
-                if (distance <= before) add(-distance)
-            }
-        }
+        val offsets = (0..after).toList()
         val times = offsets.map { offset ->
             (centerTimeSec + offset * step)
                 .coerceIn(minimumTimeSec.coerceAtLeast(0f), maximumTimeSec)

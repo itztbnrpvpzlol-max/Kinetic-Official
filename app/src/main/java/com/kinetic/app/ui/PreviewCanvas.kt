@@ -88,16 +88,17 @@ fun CpuPreviewCanvas(editor: EditorState, modifier: Modifier = Modifier) {
                 val frameBudget = MediaLoader
                     .recommendedPrefetchFrameCount(activeVideoLayers.size, edge)
                     .coerceIn(1, 5)
-                val beforeFrames = (frameBudget / 3).coerceAtMost(1)
-                val afterFrames = (frameBudget - beforeFrames - 1).coerceAtMost(3)
+                // On this device, sequential forward decode is much cheaper
+                // than seeking backward and rebuilding the codec session.
+                val beforeFrames = 0
+                val afterFrames = (frameBudget - 1).coerceAtMost(4)
                 val minimumTime = layer.srcOffset.coerceAtLeast(0f)
                 val maximumTime = if (layer.srcLength.isFinite()) {
                     (layer.srcLength - 0.05f).coerceAtLeast(minimumTime)
                 } else {
                     Float.POSITIVE_INFINITY
                 }
-                val windowStart = (sourceTime - beforeFrames / fps.toFloat())
-                    .coerceAtLeast(minimumTime)
+                val windowStart = sourceTime.coerceAtLeast(minimumTime)
                 val windowEnd = (sourceTime + afterFrames / fps.toFloat())
                     .coerceAtMost(maximumTime)
                 val signature = rawUri + "|" + layer.srcOffset + "|" + layer.srcLength + "|" + fps + "|" + edge
@@ -196,7 +197,8 @@ fun CpuPreviewCanvas(editor: EditorState, modifier: Modifier = Modifier) {
                     (currentSourceTime * MediaLoader.CPU_PREVIEW_SAMPLE_FPS.toFloat()).toInt()
                 } else 0
                 val currentEdge = if (
-                    previewClock.playing && layer.type == LayerType.VIDEO
+                    layer.type == LayerType.VIDEO &&
+                    (previewClock.playing || MediaWorkers.isConstrainedDevice)
                 ) 320 else 640
                 // Decode on constrained devices can take several hundred milliseconds.
                 // Do not discard a successfully decoded frame just because the playhead
