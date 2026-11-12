@@ -327,7 +327,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                     val sourceTime = (
                         (timelineTime - layer.start).coerceAtLeast(0f) * speed + layer.srcOffset
                     ).coerceAtLeast(0f)
-                    MediaLoader.hasCachedVideoFrame(ctx, source, sourceTime, 12, 360)
+                    MediaLoader.hasCachedVideoFrame(source, sourceTime, 12, 360)
                 }
             }
 
