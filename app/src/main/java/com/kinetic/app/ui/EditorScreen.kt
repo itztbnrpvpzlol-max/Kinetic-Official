@@ -119,7 +119,10 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
     suspend fun prepareVideoPreview(source: Uri) {
         val scale = resolvePreviewScale(
             ctx, editor.settings.previewQualityIndex,
-            editor.layers.count { it.visible } + 1
+            editor.layers.count {
+                it.visible && it.type != LayerType.AUDIO &&
+                    it.type != LayerType.NULL && it.type != LayerType.ADJUSTMENT
+            } + 1
         )
         if (scale >= 0.99f) return
         val targetHeight = when {
