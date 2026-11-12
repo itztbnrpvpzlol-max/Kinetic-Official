@@ -25,6 +25,12 @@ class NativePlaybackEngine {
     private var fallbackPlaying = false
     private var fallbackAnchorNs = SystemClock.elapsedRealtimeNanos()
     private var released = false
+    private var fallbackGeneration = 1L
+
+    data class ClockSnapshot(
+        val positionUs: Long, val monotonicNs: Long, val speed: Float,
+        val playing: Boolean, val generation: Long
+    )
 
     fun configure(durationSeconds: Float, looping: Boolean, speed: Float = 1f) {
         if (released) return
@@ -38,6 +44,7 @@ class NativePlaybackEngine {
             fallbackPosition = min(fallbackPosition, fallbackDuration)
         }
         fallbackAnchorNs = SystemClock.elapsedRealtimeNanos()
+        fallbackGeneration++
     }
 
     fun seek(positionSeconds: Float) {
@@ -46,6 +53,7 @@ class NativePlaybackEngine {
         fallbackPosition = positionSeconds.coerceIn(0f, upper)
         fallbackAnchorNs = SystemClock.elapsedRealtimeNanos()
         if (handle != 0L) nativeSeek(handle, fallbackPosition.toDouble())
+        fallbackGeneration++
     }
 
     fun play() {
@@ -59,6 +67,7 @@ class NativePlaybackEngine {
             fallbackAnchorNs = SystemClock.elapsedRealtimeNanos()
             fallbackPlaying = true
         }
+        fallbackGeneration++
     }
 
     fun pause() {
@@ -70,12 +79,26 @@ class NativePlaybackEngine {
             fallbackPlaying = false
             fallbackAnchorNs = SystemClock.elapsedRealtimeNanos()
         }
+        fallbackGeneration++
     }
 
     fun positionSeconds(): Float {
         if (released) return fallbackPosition
         if (handle != 0L) return nativePosition(handle).toFloat()
         return fallbackPositionNow()
+    }
+
+    fun clockSnapshot(): ClockSnapshot {
+        if (released) return ClockSnapshot((fallbackPosition.coerceAtLeast(0f) * 1_000_000f).toLong(),
+            SystemClock.elapsedRealtimeNanos(), fallbackSpeed, false, fallbackGeneration)
+        if (handle != 0L) {
+            val values = runCatching { nativeClockSnapshot(handle) }.getOrNull()
+            if (values != null && values.size >= 5) return ClockSnapshot(
+                values[0].coerceAtLeast(0L), values[1].coerceAtLeast(0L),
+                (values[2] / 1_000_000f).coerceIn(0.1f, 4f), values[3] != 0L, values[4])
+        }
+        return ClockSnapshot((positionSeconds().coerceAtLeast(0f) * 1_000_000f).toLong(),
+            SystemClock.elapsedRealtimeNanos(), fallbackSpeed, fallbackPlaying, fallbackGeneration)
     }
 
     /** Frame index sampled directly from the authoritative native monotonic clock. */
@@ -129,6 +152,7 @@ class NativePlaybackEngine {
     private external fun nativePause(handle: Long)
     private external fun nativePosition(handle: Long): Double
     private external fun nativePositionFrame(handle: Long, fps: Double): Long
+    private external fun nativeClockSnapshot(handle: Long): LongArray
     private external fun nativeIsPlaying(handle: Long): Boolean
     private external fun nativeRelease(handle: Long)
 }
