@@ -207,13 +207,13 @@ object CompositionFrameCache {
             if (opacity <= 0f) continue
             val bitmap = when (layer.type) {
                 LayerType.IMAGE -> layer.uri?.let {
-                    MediaLoader.bitmapFor(context, Uri.parse(it), LayerType.IMAGE, 0f, 1, max(width, height))
+                    MediaLoader.bitmapFor(context, Uri.parse(it), LayerType.IMAGE, 0f, 1, max(width, height), persistToDisk = false)
                 }
                 LayerType.VIDEO -> {
                     val uri = layer.uri ?: continue
                     val sourceTime = ((time - layer.start).coerceAtLeast(0f) * layer.speed + layer.srcOffset)
                         .coerceAtLeast(0f)
-                    MediaLoader.bitmapFor(context, Uri.parse(uri), LayerType.VIDEO, sourceTime, fps, max(width, height))
+                    MediaLoader.bitmapFor(context, Uri.parse(uri), LayerType.VIDEO, sourceTime, fps, max(width, height), persistToDisk = false)
                 }
                 LayerType.TEXT, LayerType.SHAPE -> makeTextOrShapeBitmap(layer)
                 else -> null
