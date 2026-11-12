@@ -63,8 +63,9 @@ object MediaWorkers {
 
     private fun cacheThreadFactory(name: String): ThreadFactory = ThreadFactory { runnable ->
         Thread({
-            // Look-ahead work should yield CPU time to the live preview decoder.
-            Process.setThreadPriority(Process.THREAD_PRIORITY_LOWEST)
+            // Keep look-ahead below the interactive decoder, but runnable enough
+            // to prepare the next frame while the preview decodes the current one.
+            Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND)
             runnable.run()
         }, name).apply { isDaemon = true }
     }
