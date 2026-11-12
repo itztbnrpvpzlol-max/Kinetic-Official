@@ -205,19 +205,25 @@ private fun GpuCompositionPreviewCanvas(
     val context = LocalContext.current
     val frames = remember { mutableStateMapOf<String, Bitmap>() }
     val textTextures = remember { mutableMapOf<String, Pair<Int, Bitmap>>() }
+    val failedVideoIds = remember { mutableStateMapOf<String, Boolean>() }
     // Hardware decoder instances are scarce system resources, not a thread pool.
     // Excess video layers use the existing bitmap preview path rather than
     // exhausting MediaCodec resources.
     val decoderLimit = com.kinetic.app.data.MediaWorkers.maxConcurrentVideoDecoders
-    val videoLayers = editor.layers.filter {
+    val activeVideoLayers = editor.layers.filter {
         it.visible && it.activeAt(editor.time) && it.type == LayerType.VIDEO && it.uri != null
-    }.take(decoderLimit)
+    }
+    val videoLayers = activeVideoLayers
+        .filter { failedVideoIds[it.id] != true }
+        .take(decoderLimit)
     val textureVideoIds = videoLayers.mapTo(HashSet<String>()) { it.id }
 
-    LaunchedEffect(editor.layers.map { it.id }) {
+    LaunchedEffect(editor.layers.map { it.id to it.uri }) {
         val currentIds = editor.layers.mapTo(HashSet<String>()) { it.id }
         val stale = textTextures.keys.filter { it !in currentIds }
         stale.forEach { textTextures.remove(it) }
+        failedVideoIds.keys.filter { it !in currentIds }.toList()
+            .forEach { failedVideoIds.remove(it) }
     }
 
     // Video layers use Media3/MediaCodec Surface outputs and are composited
@@ -341,7 +347,10 @@ private fun GpuCompositionPreviewCanvas(
                                     context, playbackUri ?: Uri.parse(uri)
                                 )
                             }
-                            GpuVideoPlayerLayer(editor, layer, player, view)
+                            GpuVideoPlayerLayer(
+                                editor, layer, player, view,
+                                onDecoderFailed = { failedVideoIds[it] = true }
+                            )
                         }
                     }
                 }
@@ -358,7 +367,8 @@ private fun GpuVideoPlayerLayer(
     editor: EditorState,
     layer: com.kinetic.app.model.Layer,
     player: com.kinetic.app.engine.NativeVideoPlayer,
-    surfaceView: GpuPreviewSurfaceView
+    surfaceView: GpuPreviewSurfaceView,
+    onDecoderFailed: (String) -> Unit
 ) {
     val sourceTime = ((editor.time - layer.start).coerceAtLeast(0f) * layer.speed + layer.srcOffset)
         .coerceAtLeast(0f)
@@ -369,6 +379,20 @@ private fun GpuVideoPlayerLayer(
         onDispose {
             surfaceView.detachVideo(layer.id, player)
             player.release()
+        }
+    }
+
+    LaunchedEffect(player, layer.id) {
+        while (true) {
+            when (player.decoderState()) {
+                1 -> break
+                -1 -> {
+                    Log.e("KineticVideo", "Hardware decoder failed for layer ${layer.id}; using bitmap fallback")
+                    onDecoderFailed(layer.id)
+                    break
+                }
+            }
+            kotlinx.coroutines.delay(50L)
         }
     }
 
