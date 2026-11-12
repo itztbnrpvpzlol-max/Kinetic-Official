@@ -130,7 +130,7 @@ object CompositionFrameCache {
             frameKey(projectId, layers, time, fps, width, height)
         }
         if (withContext(Dispatchers.IO) { isCached(context, key) }) return key
-        val rendered = withContext(MediaWorkers.cpuDispatcher) {
+        val rendered = withContext(MediaWorkers.cacheDispatcher) {
             renderCompositionFrame(context, layers, time, fps, width, height)
         } ?: return null
         val saved = withContext(Dispatchers.IO) {
