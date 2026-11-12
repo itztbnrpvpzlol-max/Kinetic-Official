@@ -211,6 +211,13 @@ private fun HardwareVideoLayer(
                 videoReady = playbackState == Player.STATE_READY
                 onReadyChanged(layer.id, videoReady)
             }
+
+            override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                // A failed video should not hold the entire composition's audio
+                // transport behind a readiness barrier forever.
+                videoReady = true
+                onReadyChanged(layer.id, true)
+            }
         }
         player.addListener(listener)
         onReadyChanged(layer.id, videoReady)
@@ -301,6 +308,11 @@ private fun DirectVideoPreviewCanvas(
             override fun onPlaybackStateChanged(playbackState: Int) {
                 videoReady = playbackState == Player.STATE_READY
                 onVideoReady(videoReady)
+            }
+
+            override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                videoReady = true
+                onVideoReady(true)
             }
         }
         player.addListener(listener)
