@@ -36,7 +36,7 @@ import kotlin.math.max
 object CompositionFrameCache {
     private const val DIRECTORY = "kinetic-rendered-frames"
     private const val JPEG_QUALITY = 90
-    private var memoryLimitBytes = 64 * 1024 * 1024
+    private var memoryLimitBytes = MediaWorkers.bitmapCacheBudgetMb * 1024 * 1024
     private val memory = object : LruCache<String, Bitmap>(memoryLimitBytes) {
         override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount
     }
@@ -45,8 +45,7 @@ object CompositionFrameCache {
 
     @Synchronized
     fun configure(memoryMb: Int) {
-        val heapBudgetMb = (Runtime.getRuntime().maxMemory() / (1024L * 1024L) / 8L)
-            .toInt().coerceIn(16, 128)
+        val heapBudgetMb = MediaWorkers.bitmapCacheBudgetMb
         memoryLimitBytes = memoryMb.coerceIn(16, 256).coerceAtMost(heapBudgetMb) * 1024 * 1024
         memory.resize(memoryLimitBytes)
         knownDiskBytes = -1L
