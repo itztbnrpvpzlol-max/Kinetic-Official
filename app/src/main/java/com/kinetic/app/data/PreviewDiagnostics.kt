@@ -1,5 +1,6 @@
 package com.kinetic.app.data
 
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.analytics.AnalyticsListener
 import java.util.concurrent.atomic.AtomicLong
@@ -8,6 +9,7 @@ import java.util.concurrent.atomic.AtomicLong
  * Lightweight preview telemetry. GL timings measure CPU-side draw submission,
  * while dropped-frame counts come from Media3 decoder analytics.
  */
+@OptIn(UnstableApi::class)
 object PreviewDiagnostics {
     data class Snapshot(
         val glFps: Float,
