@@ -146,7 +146,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
         )
     }
 
-    // Playback uses the live composition renderer without timeline frame pre-caching.
+    // Playback uses the live composition renderer with a bounded source-frame look-ahead cache.
     fun togglePlayback() {
         editor.playing = !editor.playing
     }
