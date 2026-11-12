@@ -154,10 +154,21 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
         val callbacks = object : ComponentCallbacks2 {
             override fun onTrimMemory(level: Int) {
                 MediaLoader.trimMemory(level)
+                when {
+                    level >= ComponentCallbacks2.TRIM_MEMORY_COMPLETE -> {
+                        KreEngine.clearCalculationCache()
+                        KreEngine.setCalculationCacheBudget(64 * 1024)
+                    }
+                    level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW -> {
+                        KreEngine.setCalculationCacheBudget(64 * 1024)
+                    }
+                }
             }
 
             override fun onLowMemory() {
                 MediaLoader.trimMemory(ComponentCallbacks2.TRIM_MEMORY_COMPLETE)
+                KreEngine.clearCalculationCache()
+                KreEngine.setCalculationCacheBudget(64 * 1024)
             }
 
             override fun onConfigurationChanged(newConfig: Configuration) = Unit
