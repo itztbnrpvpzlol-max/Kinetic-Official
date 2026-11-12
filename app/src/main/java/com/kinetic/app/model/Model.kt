@@ -199,7 +199,7 @@ fun layerMatrixInto(
     t: Float,
     byId: Map<String, Layer>,
     out: Matrix,
-    scratch: MutableMap<String, Matrix>,
+    scratch: MutableMap<Int, Matrix>,
     depth: Int = 0
 ) {
     out.reset()
@@ -209,7 +209,7 @@ fun layerMatrixInto(
     out.postTranslate(layer.p(PropId.POS_X).valueAt(t), layer.p(PropId.POS_Y).valueAt(t))
     val parent = layer.parentId?.let { byId[it] }
     if (parent != null && parent.id != layer.id && depth < 16) {
-        val parentMatrix = scratch.getOrPut(parent.id) { Matrix() }
+        val parentMatrix = scratch.getOrPut(depth + 1) { Matrix() }
         layerMatrixInto(parent, t, byId, parentMatrix, scratch, depth + 1)
         out.postTranslate(parent.p(PropId.ANCHOR_X).valueAt(t), parent.p(PropId.ANCHOR_Y).valueAt(t))
         out.postConcat(parentMatrix)
