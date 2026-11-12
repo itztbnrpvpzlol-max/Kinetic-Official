@@ -138,7 +138,7 @@ fun CpuPreviewCanvas(editor: EditorState, modifier: Modifier = Modifier) {
     val destinationRects = remember(layerSnapshot) {
         layerSnapshot.associate { it.id to RectF(0f, 0f, it.width, it.height) }
     }
-    val matrixScratch = remember { mutableMapOf<String, Matrix>() }
+    val matrixScratch = remember(layerSnapshot) { mutableMapOf<String, Matrix>() }
     val selectionPath = remember { AndroidPath() }
     val selectionPoints = remember { FloatArray(8) }
     val selectionAnchor = remember { FloatArray(2) }
@@ -220,7 +220,7 @@ fun CpuPreviewCanvas(editor: EditorState, modifier: Modifier = Modifier) {
             nc.restore()
 
             // selection overlay (not clipped to the composition)
-            val sel = byId[selId]
+            val sel = selId?.let { byId[it] }
             if (sel != null && sel.visible && sel.activeAt(time) && sel.type != LayerType.AUDIO) {
                 nc.save()
                 nc.translate(ox, oy)
