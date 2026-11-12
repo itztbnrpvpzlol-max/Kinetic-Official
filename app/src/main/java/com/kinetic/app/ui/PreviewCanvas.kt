@@ -18,6 +18,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
@@ -51,9 +52,20 @@ fun CpuPreviewCanvas(editor: EditorState, modifier: Modifier = Modifier) {
                 DisposableEffect(l.id) {
                     onDispose { bitmaps.remove(l.id) }
                 }
-                LaunchedEffect(uri, bucket) {
+                // Track the newest requested bucket independently of this
+                // coroutine. MediaMetadataRetriever calls can block while a
+                // previous decode finishes; never publish that stale result
+                // after the playhead has already advanced.
+                val latestBucket = rememberUpdatedState(bucket)
+                LaunchedEffect(uri, bucket, editor.playing) {
                     if (bucket >= 0) {
-                        MediaLoader.bitmapFor(ctx, Uri.parse(uri), l.type, src, 12, 640)?.let { bitmaps[l.id] = it }
+                        val frame = MediaLoader.bitmapFor(
+                            ctx, Uri.parse(uri), l.type, src, 12, 640,
+                            persistToDisk = !editor.playing
+                        )
+                        if (latestBucket.value == bucket && frame != null) {
+                            bitmaps[l.id] = frame
+                        }
                     } else {
                         bitmaps.remove(l.id)
                     }
