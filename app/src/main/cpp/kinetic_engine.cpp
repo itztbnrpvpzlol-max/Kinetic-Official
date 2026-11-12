@@ -190,6 +190,18 @@ Java_com_kinetic_app_engine_NativePlaybackEngine_nativePosition(JNIEnv*, jobject
     return clock->positionLocked(std::chrono::steady_clock::now());
 }
 
+extern "C" JNIEXPORT jlong JNICALL
+Java_com_kinetic_app_engine_NativePlaybackEngine_nativePositionFrame(
+        JNIEnv*, jobject, jlong handle, jdouble fps) {
+    auto* clock = reinterpret_cast<PlaybackClock*>(handle);
+    if (clock == nullptr || !std::isfinite(fps) || fps <= 0.0) return 0;
+    std::lock_guard<std::mutex> lock(clock->mutex);
+    const double position = clock->positionLocked(std::chrono::steady_clock::now());
+    const double safeFps = std::clamp(fps, 1.0, 240.0);
+    const double frame = std::floor(position * safeFps + 1.0e-7);
+    return static_cast<jlong>(std::max(0.0, frame));
+}
+
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_kinetic_app_engine_NativePlaybackEngine_nativeIsPlaying(JNIEnv*, jobject, jlong handle) {
     auto* clock = reinterpret_cast<PlaybackClock*>(handle);
