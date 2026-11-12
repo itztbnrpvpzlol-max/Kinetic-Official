@@ -391,7 +391,7 @@ object MediaLoader {
         uri: Uri,
         firstFrameTimeSec: Float,
         frameCount: Int = 2,
-        sampleFps: Int = 12,
+        sampleFps: Int = CPU_PREVIEW_SAMPLE_FPS,
         maxEdge: Int = 240,
         sourceStepSec: Float = 1f / sampleFps
     ) = withContext(MediaWorkers.cacheDispatcher) {
