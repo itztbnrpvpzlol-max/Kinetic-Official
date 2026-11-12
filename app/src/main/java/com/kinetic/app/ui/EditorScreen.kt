@@ -2,6 +2,7 @@ package com.kinetic.app.ui
 
 import android.net.Uri
 import android.app.ActivityManager
+import android.content.Context
 import android.content.ComponentCallbacks2
 import android.content.res.Configuration
 import android.widget.Toast
