@@ -183,7 +183,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
 
     // Persistent per-clip RAM cache pass. The cursor belongs to the clip,
     // not the playhead: scrubbing and play/pause never move it backwards.
-    // Frames are decoded at the same 12fps/320px keys used by CPU playback.
+    // Background RAM warming stays at 12fps/320px; live preview follows composition FPS.
     LaunchedEffect(
         editor.layers.map {
             val fingerprint = it.uri?.let { raw ->
@@ -308,13 +308,13 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
             // playhead publication at 30 Hz. Publishing 60-120 UI states per
             // second needlessly recomposes the editor and timeline on low-RAM
             // phones; video output is scheduled directly from the native clock.
-            val uiFps = editor.fps.coerceIn(1, 30)
+            val uiFps = editor.fps.coerceIn(1, 60)
             var publishedFrame = (editor.time * uiFps).toInt()
             var lastAudioSyncMs = 0L
             audio.sync(editor.layers, editor.time, true)
 
             while (editor.playing) {
-                delay(16L)
+                delay((1000f / uiFps).toLong().coerceAtLeast(1L))
                 val transportTime = playback.positionSeconds()
                     .coerceIn(0f, editor.duration.coerceAtLeast(0f))
 
