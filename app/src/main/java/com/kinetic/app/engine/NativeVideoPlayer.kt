@@ -56,6 +56,16 @@ class NativeVideoPlayer(
         }
     }
 
+    fun syncMasterClock(
+        positionUs: Long, monotonicNs: Long, masterSpeed: Float, playing: Boolean,
+        clipStartUs: Long, sourceOffsetUs: Long, clipSpeed: Float, generation: Long
+    ) = synchronized(lock) {
+        if (released || handle == 0L) return@synchronized
+        nativeSyncMasterClock(handle, positionUs.coerceAtLeast(0L), monotonicNs.coerceAtLeast(0L),
+            masterSpeed.coerceIn(0.1f, 4f), playing, clipStartUs, sourceOffsetUs.coerceAtLeast(0L),
+            clipSpeed.coerceIn(0.1f, 4f), generation)
+    }
+
     fun setSpeed(value: Float) = synchronized(lock) {
         if (released) return@synchronized
         speed = value.coerceIn(0.1f, 4f)
@@ -116,6 +126,10 @@ class NativeVideoPlayer(
     private external fun nativePlay(handle: Long)
     private external fun nativePause(handle: Long)
     private external fun nativeSetSpeed(handle: Long, speed: Float)
+    private external fun nativeSyncMasterClock(
+        handle: Long, positionUs: Long, monotonicNs: Long, masterSpeed: Float,
+        playing: Boolean, clipStartUs: Long, sourceOffsetUs: Long, clipSpeed: Float, generation: Long
+    )
     private external fun nativeRelease(handle: Long)
     private external fun nativeGetState(handle: Long): Int
 
