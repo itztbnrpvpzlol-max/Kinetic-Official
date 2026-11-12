@@ -265,7 +265,6 @@ object MediaLoader {
      * It checks the exact same frame bucket and source fingerprint as bitmapFor.
      */
     fun hasCachedVideoFrame(
-        ctx: Context,
         uri: Uri,
         timeSec: Float,
         sampleFps: Int,
@@ -274,8 +273,9 @@ object MediaLoader {
         val fps = sampleFps.coerceAtLeast(1)
         val bucket = (timeSec.coerceAtLeast(0f) * fps.toFloat()).toInt()
         val key = "${mediaCacheIdentity(uri)}@$fps@$maxEdge@$bucket"
-        if (cache.get(key) != null) return true
-        return previewFrameFile(ctx, key, LayerType.VIDEO).isFile
+        // Playback prefetches are RAM-only by design. Avoid disk and hashing
+        // work on the UI thread while checking every transport tick.
+        return cache.get(key) != null
     }
 
     private fun mediaCacheIdentity(uri: Uri): String {
