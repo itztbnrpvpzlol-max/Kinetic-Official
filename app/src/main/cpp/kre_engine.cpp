@@ -100,6 +100,18 @@ static CalculationCache calculations;
 
 } // namespace kre
 
+extern "C" bool kreGetCalculation(uint64_t key, float* output, size_t count) {
+    if (!output || count == 0) return false;
+    std::vector<float> values;
+    if (!kre::calculations.get(key, values) || values.size() != count) return false;
+    std::copy(values.begin(), values.end(), output);
+    return true;
+}
+
+extern "C" void krePutCalculation(uint64_t key, const float* values, size_t count) {
+    kre::calculations.put(key, values, count);
+}
+
 extern "C" JNIEXPORT jlongArray JNICALL
 Java_com_kinetic_app_engine_KreEngine_nativePlanFrames(
         JNIEnv* env, jobject, jlong playheadUs, jdouble fps, jdouble speed,
