@@ -488,8 +488,9 @@ private class CompositionGlRenderer(
     private var compositionTextureIds = IntArray(0)
     private var compositionFlags = IntArray(0)
     private var compositionParams = FloatArray(0)
-    private var compositionVertices = FloatArray(0)
     private var compositionMatrices = FloatArray(0)
+    private var compositionTextureMatrices = FloatArray(0)
+    private val compositionFrameMetrics = FloatArray(4)
     private val identityTextureMatrix = FloatArray(16) {
         if (it % 5 == 0) 1f else 0f
     }
@@ -787,6 +788,10 @@ private class CompositionGlRenderer(
      * Packs the ordered scene once and lets the native KRE renderer issue all
      * GLES3 draw calls. Kotlin retains Android Bitmap/Surface lifecycle only.
      */
+    /**
+     * Packs layer state once. KRE evaluates transforms, viewport geometry,
+     * texture sampling and the ordered GLES3 draw pass natively.
+     */
     private fun drawComposition(
         layers: List<GpuLayer>,
         scale: Float,
@@ -798,10 +803,15 @@ private class CompositionGlRenderer(
         if (compositionTextureIds.size < required) {
             compositionTextureIds = IntArray(required)
             compositionFlags = IntArray(required)
-            compositionParams = FloatArray(required * 2)
-            compositionVertices = FloatArray(required * 16)
-            compositionMatrices = FloatArray(required * 16)
+            compositionParams = FloatArray(required * 4)
+            compositionMatrices = FloatArray(required * 9)
+            compositionTextureMatrices = FloatArray(required * 16)
         }
+
+        compositionFrameMetrics[0] = viewportWidth.toFloat()
+        compositionFrameMetrics[1] = viewportHeight.toFloat()
+        compositionFrameMetrics[2] = COMP_W.toFloat()
+        compositionFrameMetrics[3] = COMP_H.toFloat()
 
         var count = 0
         for (layer in layers) {
@@ -816,45 +826,32 @@ private class CompositionGlRenderer(
             }
             if (textureId == 0) continue
 
-            val right = if (layer.mask) layer.width * 0.8f else layer.width
-            val bottom = if (layer.mask) layer.height * 0.8f else layer.height
-            val uvMax = if (layer.mask) 0.8f else 1f
-            val points = pointScratch
-            points[0] = 0f; points[1] = 0f
-            points[2] = 0f; points[3] = bottom
-            points[4] = right; points[5] = 0f
-            points[6] = right; points[7] = bottom
-            layer.matrix.mapPoints(points)
-
-            val vertexOffset = count * 16
-            val data = compositionVertices
-            data[vertexOffset] = ndcX(points[0], scale, ox)
-            data[vertexOffset + 1] = ndcY(points[1], scale, oy)
-            data[vertexOffset + 2] = 0f
-            data[vertexOffset + 3] = 0f
-            data[vertexOffset + 4] = ndcX(points[2], scale, ox)
-            data[vertexOffset + 5] = ndcY(points[3], scale, oy)
-            data[vertexOffset + 6] = 0f
-            data[vertexOffset + 7] = uvMax
-            data[vertexOffset + 8] = ndcX(points[4], scale, ox)
-            data[vertexOffset + 9] = ndcY(points[5], scale, oy)
-            data[vertexOffset + 10] = uvMax
-            data[vertexOffset + 11] = 0f
-            data[vertexOffset + 12] = ndcX(points[6], scale, ox)
-            data[vertexOffset + 13] = ndcY(points[7], scale, oy)
-            data[vertexOffset + 14] = uvMax
-            data[vertexOffset + 15] = uvMax
-
             compositionTextureIds[count] = textureId
             compositionFlags[count] =
-                (if (externalOutput != null) 1 else 0) or (blendModeCode(layer.blend) shl 1)
-            compositionParams[count * 2] = layer.opacity.coerceIn(0f, 1f)
-            compositionParams[count * 2 + 1] = if (layer.grayscale) 1f else 0f
-            val matrixOffset = count * 16
+                (if (externalOutput != null) 1 else 0) or
+                (blendModeCode(layer.blend) shl 1) or
+                (if (layer.mask) 1 shl 5 else 0)
+            val paramOffset = count * 4
+            compositionParams[paramOffset] = layer.opacity.coerceIn(0f, 1f)
+            compositionParams[paramOffset + 1] = if (layer.grayscale) 1f else 0f
+            compositionParams[paramOffset + 2] = layer.width
+            compositionParams[paramOffset + 3] = layer.height
+
+            val matrixOffset = count * 9
+            layer.matrix.getValues(fingerprintMatrixScratch)
+            System.arraycopy(fingerprintMatrixScratch, 0, compositionMatrices, matrixOffset, 9)
+
+            val textureMatrixOffset = count * 16
             if (externalOutput != null) {
-                System.arraycopy(externalOutput.transform, 0, compositionMatrices, matrixOffset, 16)
+                System.arraycopy(
+                    externalOutput.transform, 0,
+                    compositionTextureMatrices, textureMatrixOffset, 16
+                )
             } else {
-                System.arraycopy(identityTextureMatrix, 0, compositionMatrices, matrixOffset, 16)
+                System.arraycopy(
+                    identityTextureMatrix, 0,
+                    compositionTextureMatrices, textureMatrixOffset, 16
+                )
             }
             count++
         }
@@ -864,8 +861,9 @@ private class CompositionGlRenderer(
                 compositionTextureIds,
                 compositionFlags,
                 compositionParams,
-                compositionVertices,
                 compositionMatrices,
+                compositionTextureMatrices,
+                compositionFrameMetrics,
                 count
             )
         }
