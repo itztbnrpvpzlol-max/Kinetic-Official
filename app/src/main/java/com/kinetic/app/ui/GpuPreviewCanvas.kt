@@ -574,7 +574,10 @@ private class CompositionGlRenderer(
             val activeTextureIds = current.layers.filterNot { it.isVideo }.mapTo(HashSet<String>()) { it.id }
             val staleIds = textures.keys.filter { it !in activeTextureIds }
             staleIds.forEach { id -> textures.remove(id)?.let { GLES20.glDeleteTextures(1, intArrayOf(it.id), 0) } }
-            val scale = minOf(viewportWidth / COMP_W, viewportHeight / COMP_H)
+            val scale = minOf(
+                viewportWidth.toFloat() / COMP_W.toFloat(),
+                viewportHeight.toFloat() / COMP_H.toFloat()
+            )
             val offsetX = (viewportWidth - COMP_W * scale) / 2f
             val offsetY = (viewportHeight - COMP_H * scale) / 2f
             for (layer in current.layers) drawLayer(layer, scale, offsetX, offsetY)
