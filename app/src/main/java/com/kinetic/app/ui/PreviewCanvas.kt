@@ -25,6 +25,7 @@ import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.platform.LocalContext
 import com.kinetic.app.data.MediaLoader
+import com.kinetic.app.data.PreviewProxyStore
 import com.kinetic.app.model.COMP_H
 import com.kinetic.app.model.COMP_W
 import com.kinetic.app.model.EditorState
@@ -57,10 +58,22 @@ fun CpuPreviewCanvas(editor: EditorState, modifier: Modifier = Modifier) {
                 // previous decode finishes; never publish that stale result
                 // after the playhead has already advanced.
                 val latestBucket = rememberUpdatedState(bucket)
-                LaunchedEffect(uri, bucket, editor.playing) {
+                val playbackSource = remember(uri, editor.playing) {
+                    val original = Uri.parse(uri)
+                    if (editor.playing && l.type == LayerType.VIDEO) {
+                        PreviewProxyStore.findExisting(
+                            ctx,
+                            original,
+                            PreviewProxyStore.PLAYBACK_PROXY_HEIGHT,
+                            PreviewProxyStore.PLAYBACK_PROXY_BITRATE
+                        ) ?: original
+                    } else original
+                }
+                val frameEdge = if (editor.playing && l.type == LayerType.VIDEO) 360 else 640
+                LaunchedEffect(uri, playbackSource, bucket, editor.playing) {
                     if (bucket >= 0) {
                         val frame = MediaLoader.bitmapFor(
-                            ctx, Uri.parse(uri), l.type, src, 12, 640,
+                            ctx, playbackSource, l.type, src, 12, frameEdge,
                             persistToDisk = !editor.playing
                         )
                         if (latestBucket.value == bucket && frame != null) {
