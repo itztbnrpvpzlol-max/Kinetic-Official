@@ -109,8 +109,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
     }
 
     fun leave() { if (editor.layers.isEmpty()) onExit() else showLeave = true }
-    // Playback starts immediately. Expensive composition cache generation is
-    // reserved for idle time so it cannot compete with live video decoding.
+    // Playback uses the live composition renderer without timeline frame pre-caching.
     fun togglePlayback() {
         editor.playing = !editor.playing
     }
@@ -120,7 +119,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
     val audio = remember { AudioEngine(ctx) }
     DisposableEffect(Unit) { onDispose { audio.release(); MediaLoader.releaseAll() } }
     val projectStore = remember { ProjectStore(ctx) }
-    LaunchedEffect(editor.settings.previewMemoryMb, editor.settings.frameCacheDiskMb) {
+    LaunchedEffect(editor.settings.previewMemoryMb) {
         MediaLoader.configureCache(editor.settings.previewMemoryMb)
     }
     LaunchedEffect(editor.layers.map { it.id to it.uri }) { audio.prepare(editor.layers) }
