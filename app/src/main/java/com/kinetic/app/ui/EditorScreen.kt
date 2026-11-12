@@ -788,45 +788,63 @@ private fun EditPanel(
 ) {
     val displayTime = rememberEditorDisplayTime(editor)
     var menu by remember { mutableStateOf(false) }
-    val shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp)
-    Column(
-        modifier.clip(shape).background(KColors.Surface).border(1.dp, KColors.Line, shape)
-    ) {
-        Row(
-            Modifier.fillMaxWidth().height(54.dp).padding(start = 16.dp, end = 8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text("LAYER CONTROLS", color = KColors.Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp)
-                Text(layer.name, color = KColors.Text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-            TabLabel("Properties", tab == 0) { onTab(0) }
-            TabLabel("Graph", tab == 1) { onTab(1) }
+    val activeProp = editor.selectedProp ?: com.kinetic.app.model.PropId.POS_X
+    val hasKey = layer.p(activeProp).keys.any { kotlin.math.abs(it.t - editor.time) <= editor.frame / 2f }
+    val shape = RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp)
+    Column(modifier.clip(shape).background(KColors.Surface).border(1.dp, KColors.Line, shape)) {
+        Row(Modifier.fillMaxWidth().height(38.dp).padding(start = 13.dp, end = 5.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            Text(layer.name, color = KColors.Text, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
             Box {
-                IconButton(onClick = { menu = true }) { KIcon(IconKind.MORE, KColors.Muted) }
+                IconButton(onClick = { menu = true }, modifier = Modifier.size(32.dp)) {
+                    KIcon(IconKind.MORE, KColors.Muted, Modifier.size(18.dp))
+                }
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, containerColor = KColors.Surface2) {
-                    DropdownMenuItem(text = { Text(if (layer.type == LayerType.TEXT) "Edit text" else "Rename", color = KColors.Text) }, onClick = { menu = false; onRename() })
-                    DropdownMenuItem(text = { Text("Duplicate", color = KColors.Text) }, onClick = { menu = false; editor.duplicate(layer.id) })
+                    DropdownMenuItem(text = { Text(if (layer.type == LayerType.TEXT) "Edit text" else "Rename", color = KColors.Text) },
+                        onClick = { menu = false; onRename() })
+                    DropdownMenuItem(text = { Text("Duplicate", color = KColors.Text) },
+                        onClick = { menu = false; editor.duplicate(layer.id) })
                     if (displayTime > layer.start + editor.frame && displayTime < layer.end - editor.frame) {
-                        DropdownMenuItem(text = { Text("Split at playhead", color = KColors.Text) }, onClick = { menu = false; editor.splitSelected() })
-                        DropdownMenuItem(text = { Text("Trim end to playhead", color = KColors.Text) }, onClick = { menu = false; editor.moveLayerEndToPlayhead(layer.id) })
+                        DropdownMenuItem(text = { Text("Split at playhead", color = KColors.Text) },
+                            onClick = { menu = false; editor.splitSelected() })
                     }
-                    if (displayTime < layer.start) {
-                        DropdownMenuItem(text = { Text("Move layer to playhead", color = KColors.Text) }, onClick = { menu = false; editor.moveLayerStartToPlayhead(layer.id) })
-                    }
-                    if (displayTime > layer.end) {
-                        DropdownMenuItem(text = { Text("Extend to playhead", color = KColors.Text) }, onClick = { menu = false; editor.extendLayerToPlayhead(layer.id) })
-                    }
-                    DropdownMenuItem(text = { Text("Parent", color = KColors.Text) }, onClick = { menu = false; onParent() })
-                    DropdownMenuItem(text = { Text("Delete", color = KColors.Danger) }, onClick = { menu = false; editor.deleteLayer(layer.id) })
+                    DropdownMenuItem(text = { Text("Parent", color = KColors.Text) },
+                        onClick = { menu = false; onParent() })
+                    DropdownMenuItem(text = { Text("Delete", color = KColors.Danger) },
+                        onClick = { menu = false; editor.deleteLayer(layer.id) })
                 }
             }
-            TextButton(onClick = onCollapse) { Text("CLOSE", color = KColors.Muted, fontSize = 10.sp, fontWeight = FontWeight.Bold) }
+            Box(Modifier.size(32.dp).clickable(onClick = onCollapse), contentAlignment = Alignment.Center) {
+                KIcon(IconKind.CLOSE, KColors.Muted, Modifier.size(16.dp))
+            }
         }
-        Box(Modifier.weight(1f).fillMaxWidth()) {
-            if (tab == 0) PropertiesList(editor, layer, onParent) else GraphPanel(editor, layer)
+        Row(Modifier.weight(1f).fillMaxWidth()) {
+            Column(Modifier.width(44.dp).fillMaxHeight().background(KColors.Bg)
+                .padding(vertical = 5.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                RailAction(IconKind.SLIDERS, tab == 0) { onTab(0) }
+                RailAction(IconKind.GRID, tab == 1) { onTab(1) }
+                Box(Modifier.padding(vertical = 5.dp).width(24.dp).height(1.dp).background(KColors.Line))
+                RailAction(IconKind.PREV, false) { editor.jumpKey(layer.id, activeProp, -1) }
+                RailAction(if (hasKey) IconKind.DIAMOND_FILLED else IconKind.DIAMOND, hasKey) {
+                    editor.selectProp(activeProp)
+                    editor.toggleKeyAtTime(layer.id, activeProp)
+                }
+                RailAction(IconKind.NEXT, false) { editor.jumpKey(layer.id, activeProp, 1) }
+            }
+            Box(Modifier.weight(1f).fillMaxHeight()) {
+                if (tab == 0) PropertiesList(editor, layer, onParent) else GraphPanel(editor, layer)
+            }
         }
+    }
+}
+
+@Composable
+private fun RailAction(icon: IconKind, selected: Boolean, onClick: () -> Unit) {
+    Box(Modifier.padding(vertical = 2.dp).size(34.dp).clip(RoundedCornerShape(7.dp))
+        .background(if (selected) KColors.Accent.copy(alpha = 0.14f) else Color.Transparent)
+        .clickable(onClick = onClick), contentAlignment = Alignment.Center) {
+        KIcon(icon, if (selected) KColors.Accent else KColors.Muted, Modifier.size(18.dp))
     }
 }
 

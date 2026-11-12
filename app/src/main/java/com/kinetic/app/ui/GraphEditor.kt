@@ -211,7 +211,7 @@ private fun GraphCanvas(
         val pad = 18.dp.toPx()
         val left = pad; val right = size.width - pad; val top = pad; val bottom = size.height - pad
         fun px(x: Float) = left + x.coerceIn(0f, 1f) * (right - left)
-        fun py(y: Float) = bottom - y.coerceIn(-0.2f, 1.2f) / 1.4f * (bottom - top)
+        fun py(y: Float) = bottom - y.coerceIn(-0.2f, 1.2f) * (bottom - top)
         detectDragGestures(onDragStart = { point ->
             dragHandle = 0
             if (mode == GraphMode.EASE && segment >= 0) {
@@ -232,7 +232,7 @@ private fun GraphCanvas(
             change.consume()
             if (mode == GraphMode.EASE && dragHandle != 0) {
                 val nx = ((change.position.x - left) / (right - left)).coerceIn(0f, 1f)
-                val ny = ((bottom - change.position.y) / (bottom - top) * 1.4f).coerceIn(-0.2f, 1.2f)
+                val ny = ((bottom - change.position.y) / (bottom - top)).coerceIn(-0.2f, 1.2f)
                 onHandleChange(dragHandle == 1, nx, ny)
             } else {
                 val u = ((change.position.x - left) / (right - left)).coerceIn(0f, 1f)
@@ -271,14 +271,14 @@ private fun GraphCanvas(
                         (speed / max(base * 2.2f, 1f)).coerceIn(0f, 1f)
                     }
                 }
-                val p = Offset(left + w * u, bottom - progress.coerceIn(-0.2f, 1.2f) / 1.4f * h)
+                val p = Offset(left + w * u, bottom - progress.coerceIn(-0.2f, 1.2f) * h)
                 if (i == 0) path.moveTo(p.x, p.y) else path.lineTo(p.x, p.y)
             }
             drawPath(path, Color.White, style = Stroke(2.4.dp.toPx(), cap = StrokeCap.Round))
             if (mode == GraphMode.EASE && a.type == KeyType.BEZIER) {
                 val start = Offset(left, bottom); val end = Offset(right, top)
-                val c1 = Offset(left + w * a.x1, bottom - h * a.y1 / 1.4f)
-                val c2 = Offset(left + w * a.x2, bottom - h * a.y2 / 1.4f)
+                val c1 = Offset(left + w * a.x1, bottom - h * a.y1)
+                val c2 = Offset(left + w * a.x2, bottom - h * a.y2)
                 drawLine(Color(0xFF36C96B), start, c1, 1.5.dp.toPx())
                 drawLine(Color(0xFFFFB23F), end, c2, 1.5.dp.toPx())
                 drawCircle(Color(0xFF36C96B), 7.dp.toPx(), c1)
