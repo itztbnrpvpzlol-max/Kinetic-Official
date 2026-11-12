@@ -14,7 +14,11 @@ import com.kinetic.app.model.Layer
 import com.kinetic.app.model.LayerType
 import java.nio.ByteBuffer
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlin.math.abs
 import kotlin.math.max
 
@@ -25,6 +29,7 @@ import kotlin.math.max
 class AudioEngine(context: Context) {
     private val appContext = context.applicationContext
     private val players = ConcurrentHashMap<String, AudioClipPlayer>()
+    private val preparedPlayers = ConcurrentHashMap<String, AudioClipPlayer>()
     private val playerUris = ConcurrentHashMap<String, String>()
     private val inactiveSinceMs = ConcurrentHashMap<String, Long>()
     private val released = AtomicBoolean(false)
@@ -38,6 +43,32 @@ class AudioEngine(context: Context) {
         players.keys.toList().forEach { id ->
             if (sources[id] != playerUris[id]) releasePlayer(id)
         }
+        val activeUris = sources.values.toSet()
+        preparedPlayers.keys.toList().forEach { uri ->
+            if (uri !in activeUris) preparedPlayers.remove(uri)?.release()
+        }
+    }
+
+    /**
+     * Open the source and initialize its audio decoder before the clip is
+     * committed to the timeline. The prepared player is adopted by sync()
+     * when playback begins, avoiding decoder startup on the first play press.
+     */
+    suspend fun prepareSource(uri: String): Boolean = withContext(Dispatchers.IO) {
+        if (released.get()) return@withContext false
+        val player = synchronized(preparedPlayers) {
+            preparedPlayers[uri] ?: AudioClipPlayer(appContext, Uri.parse(uri)).also {
+                preparedPlayers[uri] = it
+            }
+        }
+        val ready = player.awaitPrepared()
+        if (!ready) {
+            synchronized(preparedPlayers) {
+                if (preparedPlayers[uri] === player) preparedPlayers.remove(uri)
+            }
+            player.release()
+        }
+        ready
     }
 
     fun sync(layers: List<Layer>, time: Float, playing: Boolean) {
@@ -66,7 +97,7 @@ class AudioEngine(context: Context) {
             }
             inactiveSinceMs.remove(layer.id)
             if (player == null) {
-                player = AudioClipPlayer(appContext, Uri.parse(uri))
+                player = preparedPlayers.remove(uri) ?: AudioClipPlayer(appContext, Uri.parse(uri))
                 players[layer.id] = player
                 playerUris[layer.id] = uri
             }
@@ -88,7 +119,9 @@ class AudioEngine(context: Context) {
     fun release() {
         if (!released.compareAndSet(false, true)) return
         players.values.forEach { it.release() }
+        preparedPlayers.values.forEach { it.release() }
         players.clear()
+        preparedPlayers.clear()
         playerUris.clear()
         inactiveSinceMs.clear()
     }
@@ -123,9 +156,20 @@ class AudioEngine(context: Context) {
         @Volatile private var trackStarted = false
         @Volatile private var dropBeforeUs = -1L
         @Volatile private var track: AudioTrack? = null
+        @Volatile private var prepareSucceeded = false
+        private val prepareLatch = CountDownLatch(1)
         private val worker = Thread(::decodeLoop, "KineticAudioClip").apply {
             priority = Thread.NORM_PRIORITY + 1
             start()
+        }
+
+        fun awaitPrepared(): Boolean {
+            return try {
+                prepareLatch.await(PREPARE_TIMEOUT_MS, TimeUnit.MILLISECONDS) && prepareSucceeded
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+                false
+            }
         }
 
         fun sync(positionMs: Long, speed: Float, volume: Float) {
@@ -134,20 +178,21 @@ class AudioEngine(context: Context) {
             requestedVolume = volume.coerceIn(0f, 2f)
             val now = SystemClock.elapsedRealtime()
             val currentTrack = track
-            if (!wantsPlayback || currentTrack == null) {
+            if (!wantsPlayback) {
+                // Seek only on the transition from paused to playing. Replacing
+                // this request every UI sync tick while the decoder starts can
+                // repeatedly flush MediaCodec before it emits its first PCM block.
                 pendingSeekMs = positionMs
-            } else {
+            } else if (currentTrack != null && trackStarted) {
                 val head = currentTrack.playbackHeadPosition.toLong() and 0xffffffffL
                 val elapsedFrames = (head - startHeadFrames).coerceAtLeast(0L)
-                if (trackStarted) {
-                    // playbackHeadPosition is already measured in source PCM frames;
-                    // applying playback speed again would double-scale the clock.
-                    val actualMs = lastSeekMs +
-                        (elapsedFrames * 1000.0 / sampleRate).toLong()
-                    if (abs(positionMs - actualMs) > DRIFT_CORRECTION_MS &&
-                        now - lastSyncMs >= CORRECTION_COOLDOWN_MS) {
-                        pendingSeekMs = positionMs
-                    }
+                // playbackHeadPosition is already measured in source PCM frames;
+                // applying playback speed again would double-scale the clock.
+                val actualMs = lastSeekMs +
+                    (elapsedFrames * 1000.0 / sampleRate).toLong()
+                if (abs(positionMs - actualMs) > DRIFT_CORRECTION_MS &&
+                    now - lastSyncMs >= CORRECTION_COOLDOWN_MS) {
+                    pendingSeekMs = positionMs
                 }
             }
             lastSyncMs = now
@@ -183,6 +228,8 @@ class AudioEngine(context: Context) {
                 codec = MediaCodec.createDecoderByType(mime)
                 codec.configure(sourceFormat, null, null, 0)
                 codec.start()
+                prepareSucceeded = true
+                prepareLatch.countDown()
 
                 while (!closed) {
                     val seek = pendingSeekMs
@@ -281,6 +328,7 @@ class AudioEngine(context: Context) {
             } catch (_: Throwable) {
                 // Invalid, unsupported, or revoked sources fail closed without crashing the editor.
             } finally {
+                prepareLatch.countDown()
                 runCatching { track?.pause(); track?.flush(); track?.release() }
                 track = null
                 runCatching { codec?.stop(); codec?.release() }
@@ -386,6 +434,7 @@ class AudioEngine(context: Context) {
     companion object {
         private const val DRIFT_CORRECTION_MS = 30L
         private const val CORRECTION_COOLDOWN_MS = 120L
+        private const val PREPARE_TIMEOUT_MS = 8_000L
         private const val IDLE_PLAYER_RELEASE_MS = 2_500L
     }
 }

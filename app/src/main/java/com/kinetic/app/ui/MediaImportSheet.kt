@@ -33,6 +33,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -51,6 +52,7 @@ import androidx.core.content.ContextCompat
 import com.kinetic.app.data.MediaLoader
 import com.kinetic.app.model.LayerType
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 data class ImportMediaEntry(
@@ -65,7 +67,7 @@ data class ImportMediaEntry(
 @Composable
 fun MediaImportSheet(
     onDismiss: () -> Unit,
-    onImport: (ImportMediaEntry, Float, Float) -> Unit
+    onImport: suspend (ImportMediaEntry, Float, Float) -> Unit
 ) {
     val context = LocalContext.current
     val previewPlayer = remember { ExoPlayer.Builder(context).build() }
@@ -77,6 +79,8 @@ fun MediaImportSheet(
     var previewAt by remember { mutableFloatStateOf(0f) }
     var trimEnd by remember { mutableFloatStateOf(5f) }
     var hasPermission by remember { mutableStateOf(false) }
+    var isImporting by remember { mutableStateOf(false) }
+    val importScope = rememberCoroutineScope()
 
     LaunchedEffect(selected?.uri) {
         previewPlayer.stop()
@@ -231,11 +235,29 @@ fun MediaImportSheet(
                 }
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("Cancel", color = KColors.Muted, modifier = Modifier.weight(1f).clickable(onClick = onDismiss).padding(12.dp))
-                Text("Add to timeline", color = KColors.Accent, modifier = Modifier.weight(1f).clickable(enabled = selected != null) {
-                    selected?.let { onImport(it, trimStart, trimEnd) }
-                    onDismiss()
-                }.padding(12.dp))
+                Text(
+                    if (isImporting) "Preparing clip + audio…" else "Cancel",
+                    color = KColors.Muted,
+                    modifier = Modifier.weight(1f)
+                        .clickable(enabled = !isImporting, onClick = onDismiss)
+                        .padding(12.dp)
+                )
+                Text(
+                    if (isImporting) "Preparing…" else "Add to timeline",
+                    color = KColors.Accent,
+                    modifier = Modifier.weight(1f).clickable(enabled = selected != null && !isImporting) {
+                        val item = selected ?: return@clickable
+                        isImporting = true
+                        importScope.launch {
+                            try {
+                                onImport(item, trimStart, trimEnd)
+                                onDismiss()
+                            } finally {
+                                isImporting = false
+                            }
+                        }
+                    }.padding(12.dp)
+                )
             }
         }
     }

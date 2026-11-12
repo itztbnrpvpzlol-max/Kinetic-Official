@@ -249,6 +249,11 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                 // it does not copy the file or pre-render/cache video frames.
                 val info = withContext(MediaWorkers.cpuDispatcher) { MediaLoader.probe(ctx, u, type) }
                 val name = MediaLoader.displayName(ctx, u)
+                // Initialize the embedded audio decoder before the clip becomes
+                // visible on the timeline. Clips without an audio stream continue normally.
+                if (type == LayerType.VIDEO || type == LayerType.AUDIO) {
+                    audio.prepareSource(u.toString())
+                }
                 editor.addMedia(type, name, u.toString(), info.width, info.height, info.length)
             }
         }
@@ -341,24 +346,25 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
             MediaImportSheet(
                 onDismiss = { showImport = false },
                 onImport = { item, trimIn, trimOut ->
-                    scope.launch {
-                        // Add the original MediaStore URI directly; no import-time
-                        // media copy, preview-frame generation, or RAM prewarming.
-                        runCatching {
-                            ctx.contentResolver.takePersistableUriPermission(
-                                item.uri,
-                                android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
-                            )
-                        }
-                        val info = withContext(MediaWorkers.cpuDispatcher) {
-                            MediaLoader.probe(ctx, item.uri, item.type)
-                        }
-                        editor.addMediaTrimmed(item.type, item.name, item.uri.toString(),
-                            if (info.width > 0) info.width else item.width,
-                            if (info.height > 0) info.height else item.height,
-                            if (item.type == LayerType.IMAGE) null else item.duration,
-                            trimIn, trimOut)
+                    // Finish media inspection and audio decoder preparation before
+                    // the clip is inserted into the timeline.
+                    runCatching {
+                        ctx.contentResolver.takePersistableUriPermission(
+                            item.uri,
+                            android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+                        )
                     }
+                    val info = withContext(MediaWorkers.cpuDispatcher) {
+                        MediaLoader.probe(ctx, item.uri, item.type)
+                    }
+                    if (item.type == LayerType.VIDEO || item.type == LayerType.AUDIO) {
+                        audio.prepareSource(item.uri.toString())
+                    }
+                    editor.addMediaTrimmed(item.type, item.name, item.uri.toString(),
+                        if (info.width > 0) info.width else item.width,
+                        if (info.height > 0) info.height else item.height,
+                        if (item.type == LayerType.IMAGE) null else item.duration,
+                        trimIn, trimOut)
                 }
             )
         }
