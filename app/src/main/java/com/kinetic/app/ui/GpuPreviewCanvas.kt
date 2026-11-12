@@ -53,6 +53,8 @@ import androidx.compose.ui.viewinterop.AndroidView
 import com.kinetic.app.data.CompositionFrameCache
 import com.kinetic.app.data.MediaLoader
 import com.kinetic.app.data.MediaWorkers
+import com.kinetic.app.data.PreviewDiagnostics
+import com.kinetic.app.data.PreviewProxyStore
 import com.kinetic.app.model.COMP_H
 import com.kinetic.app.model.COMP_W
 import com.kinetic.app.model.EditorState
@@ -208,18 +210,43 @@ private fun LivePreviewCanvas(
     }
 }
 
-private fun applyPlaybackDecodeLimit(player: ExoPlayer, playing: Boolean) {
-    // During transport, ask Media3 for a 360p-class stream/track and cap its
-    // selected bitrate. This affects preview decoding only, never source media.
-    val maxHeight = if (playing) 360 else Int.MAX_VALUE
-    val maxWidth = if (playing) {
-        (COMP_W.toFloat() * 360f / COMP_H.toFloat()).toInt().coerceAtLeast(240)
-    } else Int.MAX_VALUE
-    val maxBitrate = if (playing) 8_000_000 else Int.MAX_VALUE
+private fun applyPlaybackDecodeLimit(player: ExoPlayer, playing: Boolean, qualityScale: Float) {
+    // Keep decoder selection aligned with the actual preview/proxy resolution.
+    val maxHeight = if (playing) (COMP_H * qualityScale).toInt().coerceAtLeast(240) else Int.MAX_VALUE
+    val maxWidth = if (playing) (COMP_W * qualityScale).toInt().coerceAtLeast(240) else Int.MAX_VALUE
+    val maxBitrate = if (!playing) Int.MAX_VALUE else when {
+        maxHeight <= 360 -> 2_000_000
+        maxHeight <= 540 -> 3_000_000
+        else -> 5_000_000
+    }
     player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
         .setMaxVideoSize(maxWidth, maxHeight)
         .setMaxVideoBitrate(maxBitrate)
         .build()
+}
+@Composable
+private fun rememberPlaybackUri(uri: String?, qualityScale: Float, playing: Boolean): Uri? {
+    val context = LocalContext.current.applicationContext
+    var proxy by remember(uri, qualityScale) { mutableStateOf<Uri?>(null) }
+    LaunchedEffect(uri, qualityScale, playing) {
+        val source = uri?.let(Uri::parse)
+        if (source == null || qualityScale >= 0.99f) {
+            proxy = null
+            return@LaunchedEffect
+        }
+        val targetHeight = when {
+            qualityScale <= 0.40f -> 360
+            qualityScale <= 0.60f -> 540
+            else -> 720
+        }
+        proxy = PreviewProxyStore.findExisting(context, source, targetHeight)
+        if (proxy == null && !playing) {
+            proxy = runCatching {
+                PreviewProxyStore.getOrCreate(context, source, targetHeight)
+            }.getOrNull()
+        }
+    }
+    return proxy ?: uri?.let(Uri::parse)
 }
 
 internal fun resolvePreviewScale(context: Context, qualityIndex: Int, activeLayers: Int): Float {
@@ -279,16 +306,18 @@ private fun MultiVideoPreviewCanvas(
                 key(layer.id) {
                     val uri = layer.uri
                     if (uri != null) {
+                        val playbackUri = rememberPlaybackUri(uri, qualityScale, editor.playing)
                         val maxW = (COMP_W * qualityScale).toInt().coerceAtLeast(240)
                         val maxH = (COMP_H * qualityScale).toInt().coerceAtLeast(135)
-                        val player = remember(uri) {
+                        val player = remember(playbackUri, qualityScale) {
                             ExoPlayer.Builder(context).build().apply {
+                                PreviewDiagnostics.attach(this)
                                 trackSelectionParameters = TrackSelectionParameters.Builder(context)
                                     .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, true)
                                     .setMaxVideoSize(maxW, maxH)
                                     .build()
                                 repeatMode = Player.REPEAT_MODE_OFF
-                                setMediaItem(MediaItem.fromUri(Uri.parse(uri)))
+                                setMediaItem(MediaItem.fromUri(playbackUri ?: Uri.parse(uri)))
                                 prepare()
                             }
                         }
@@ -296,7 +325,7 @@ private fun MultiVideoPreviewCanvas(
                             onDispose { player.release() }
                         }
                         HardwareVideoLayer(
-                            editor, layer, player, fitScale, allReady
+                            editor, layer, player, fitScale, allReady, qualityScale
                         ) { id, ready -> readyById[id] = ready }
                     }
                 }
@@ -312,9 +341,12 @@ private fun HardwareVideoLayer(
     player: ExoPlayer,
     fitScale: Float,
     canStartPlayback: Boolean,
+    qualityScale: Float,
     onReadyChanged: (String, Boolean) -> Unit
 ) {
-    LaunchedEffect(editor.playing, player) { applyPlaybackDecodeLimit(player, editor.playing) }
+    LaunchedEffect(editor.playing, player, qualityScale) {
+        applyPlaybackDecodeLimit(player, editor.playing, qualityScale)
+    }
     var videoReady by remember(player) { androidx.compose.runtime.mutableStateOf(player.playbackState == Player.STATE_READY) }
     DisposableEffect(player, layer.id) {
         val listener = object : Player.Listener {
@@ -398,10 +430,12 @@ private fun DirectVideoPreviewCanvas(
 ) {
     val context = LocalContext.current
     val uri = layer.uri ?: return
+    val playbackUri = rememberPlaybackUri(uri, qualityScale, editor.playing)
     val maxWidth = (COMP_W * qualityScale).toInt().coerceAtLeast(240)
     val maxHeight = (COMP_H * qualityScale).toInt().coerceAtLeast(135)
-    val player = remember(context, qualityScale) {
+    val player = remember(context, qualityScale, playbackUri) {
         ExoPlayer.Builder(context).build().apply {
+            PreviewDiagnostics.attach(this)
             trackSelectionParameters = TrackSelectionParameters.Builder(context)
                 .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, true)
                 .setMaxVideoSize(maxWidth, maxHeight)
@@ -409,7 +443,9 @@ private fun DirectVideoPreviewCanvas(
             repeatMode = Player.REPEAT_MODE_OFF
         }
     }
-    LaunchedEffect(editor.playing, player) { applyPlaybackDecodeLimit(player, editor.playing) }
+    LaunchedEffect(editor.playing, player, qualityScale) {
+        applyPlaybackDecodeLimit(player, editor.playing, qualityScale)
+    }
     var videoReady by remember(player) { androidx.compose.runtime.mutableStateOf(player.playbackState == Player.STATE_READY) }
     DisposableEffect(player) {
         val listener = object : Player.Listener {
@@ -437,9 +473,9 @@ private fun DirectVideoPreviewCanvas(
         .coerceAtLeast(0f)
     val sourcePositionMs = (sourceTime * 1000f).toLong()
 
-    LaunchedEffect(layer.id, uri, layer.speed) {
+    LaunchedEffect(layer.id, uri, playbackUri, layer.speed) {
         player.pause()
-        player.setMediaItem(MediaItem.fromUri(Uri.parse(uri)))
+        player.setMediaItem(MediaItem.fromUri(playbackUri ?: Uri.parse(uri)))
         player.setPlaybackSpeed(layer.speed.coerceIn(0.1f, 4f))
         player.seekTo(sourcePositionMs)
         player.prepare()
@@ -491,10 +527,14 @@ private fun GpuVideoPlayerLayer(
     editor: EditorState,
     layer: com.kinetic.app.model.Layer,
     player: ExoPlayer,
-    surfaceView: GpuPreviewSurfaceView
+    surfaceView: GpuPreviewSurfaceView,
+    playbackUri: Uri,
+    qualityScale: Float
 ) {
     val uri = layer.uri ?: return
-    LaunchedEffect(editor.playing, player) { applyPlaybackDecodeLimit(player, editor.playing) }
+    LaunchedEffect(editor.playing, player, qualityScale) {
+        applyPlaybackDecodeLimit(player, editor.playing, qualityScale)
+    }
     var videoReady by remember(player) {
         androidx.compose.runtime.mutableStateOf(player.playbackState == Player.STATE_READY)
     }
@@ -517,9 +557,9 @@ private fun GpuVideoPlayerLayer(
     val sourceTime = ((editor.time - layer.start).coerceAtLeast(0f) * layer.speed + layer.srcOffset)
         .coerceAtLeast(0f)
     val sourcePositionMs = (sourceTime * 1000f).toLong()
-    LaunchedEffect(layer.id, uri, layer.speed, player) {
+    LaunchedEffect(layer.id, uri, playbackUri, layer.speed, player) {
         player.pause()
-        player.setMediaItem(MediaItem.fromUri(Uri.parse(uri)))
+        player.setMediaItem(MediaItem.fromUri(playbackUri))
         player.setPlaybackSpeed(layer.speed.coerceIn(0.1f, 4f))
         player.prepare()
         player.seekTo(sourcePositionMs)
@@ -680,10 +720,12 @@ private fun GpuCompositionPreviewCanvas(
                     key(layer.id) {
                         val uri = layer.uri
                         if (uri != null) {
+                            val playbackUri = rememberPlaybackUri(uri, qualityScale, editor.playing)
                             val maxW = (COMP_W * qualityScale).toInt().coerceAtLeast(240)
                             val maxH = (COMP_H * qualityScale).toInt().coerceAtLeast(135)
-                            val player = remember(uri, qualityScale) {
+                            val player = remember(playbackUri, qualityScale) {
                                 ExoPlayer.Builder(context).build().apply {
+                                    PreviewDiagnostics.attach(this)
                                     trackSelectionParameters = TrackSelectionParameters.Builder(context)
                                         .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, true)
                                         .setMaxVideoSize(maxW, maxH)
@@ -694,7 +736,7 @@ private fun GpuCompositionPreviewCanvas(
                             DisposableEffect(player) {
                                 onDispose { player.release() }
                             }
-                            GpuVideoPlayerLayer(editor, layer, player, view)
+                            GpuVideoPlayerLayer(editor, layer, player, view, playbackUri ?: Uri.parse(uri), qualityScale)
                         }
                     }
                 }
@@ -709,6 +751,7 @@ private fun GpuCompositionPreviewCanvas(
 private class GpuPreviewSurfaceView(context: Context, onGpuFailure: () -> Unit) : GLSurfaceView(context) {
     private val mainHandler = Handler(Looper.getMainLooper())
     private val attachedPlayers = ConcurrentHashMap<String, ExoPlayer>()
+    @Volatile private var videoLayerIds: Set<String> = emptySet()
     private val gpuRenderer = CompositionGlRenderer(
         onGpuFailure = onGpuFailure,
         onVideoSurfaceAvailable = { id, surface ->
@@ -725,7 +768,11 @@ private class GpuPreviewSurfaceView(context: Context, onGpuFailure: () -> Unit) 
     }
     fun submit(scene: GpuScene) {
         gpuRenderer.submit(scene)
-        queueEvent { gpuRenderer.updateVideoLayers(scene.layers.filter { it.isVideo }.map { it.id }.toSet()) }
+        val nextVideoIds = scene.layers.filter { it.isVideo }.mapTo(HashSet()) { it.id }
+        if (nextVideoIds != videoLayerIds) {
+            videoLayerIds = nextVideoIds
+            queueEvent { gpuRenderer.updateVideoLayers(nextVideoIds) }
+        }
         requestRender()
     }
     fun attachVideo(id: String, player: ExoPlayer) {
@@ -867,18 +914,23 @@ private class CompositionGlRenderer(
     }
 
     override fun onDrawFrame(gl: GL10?) {
-        GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
-        if (program == 0) return
-        val current = scene
-        refreshVideoFrames()
-        val activeTextureIds = current.layers.filterNot { it.isVideo }.mapTo(HashSet<String>()) { it.id }
-        val staleIds = textures.keys.filter { it !in activeTextureIds }
-        staleIds.forEach { id -> textures.remove(id)?.let { GLES20.glDeleteTextures(1, intArrayOf(it.id), 0) } }
-        val scale = minOf(viewportWidth / COMP_W, viewportHeight / COMP_H)
-        val offsetX = (viewportWidth - COMP_W * scale) / 2f
-        val offsetY = (viewportHeight - COMP_H * scale) / 2f
-        for (layer in current.layers) drawLayer(layer, scale, offsetX, offsetY)
-        current.selected?.let { drawSelection(it, scale, offsetX, offsetY) }
+        val startedNs = System.nanoTime()
+        try {
+            GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+            if (program == 0) return
+            val current = scene
+            refreshVideoFrames()
+            val activeTextureIds = current.layers.filterNot { it.isVideo }.mapTo(HashSet<String>()) { it.id }
+            val staleIds = textures.keys.filter { it !in activeTextureIds }
+            staleIds.forEach { id -> textures.remove(id)?.let { GLES20.glDeleteTextures(1, intArrayOf(it.id), 0) } }
+            val scale = minOf(viewportWidth / COMP_W, viewportHeight / COMP_H)
+            val offsetX = (viewportWidth - COMP_W * scale) / 2f
+            val offsetY = (viewportHeight - COMP_H * scale) / 2f
+            for (layer in current.layers) drawLayer(layer, scale, offsetX, offsetY)
+            current.selected?.let { drawSelection(it, scale, offsetX, offsetY) }
+        } finally {
+            PreviewDiagnostics.recordGlFrame(System.nanoTime() - startedNs)
+        }
     }
 
     private fun drawLayer(layer: GpuLayer, scale: Float, ox: Float, oy: Float) {
