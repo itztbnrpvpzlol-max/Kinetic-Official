@@ -45,9 +45,9 @@ object MediaLoader {
     private val sourceProxyWrites = AtomicInteger()
 
     /**
-     * Keep a rolling minimum of fifteen small source frames across active
-     * video layers. At 240px max edge, even square ARGB frames fit in the
-     * constrained-device 4 MiB minimum cache budget.
+     * Calculate a safe look-ahead count from the actual source-frame edge
+     * and the current byte budget. The 480px default keeps the cache useful
+     * for preview while preventing large decoded-frame bursts.
      */
     fun recommendedPrefetchFrameCount(
         activeVideoLayers: Int,
