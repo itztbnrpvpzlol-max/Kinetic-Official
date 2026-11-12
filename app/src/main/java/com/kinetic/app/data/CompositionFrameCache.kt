@@ -204,7 +204,8 @@ object CompositionFrameCache {
                 }
                 LayerType.TEXT, LayerType.SHAPE -> makeTextOrShapeBitmap(layer)
                 else -> null
-            } ?: run {
+            }
+            if (bitmap == null) {
                 if (layer.type == LayerType.IMAGE || layer.type == LayerType.VIDEO) {
                     output.recycle()
                     return null
