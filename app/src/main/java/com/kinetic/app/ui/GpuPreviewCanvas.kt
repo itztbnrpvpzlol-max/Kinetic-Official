@@ -103,18 +103,34 @@ fun PreviewCanvas(
     val outputHeight = (COMP_H * qualityScale).toInt().coerceAtLeast(135)
     val frameIndex = (editor.time * editor.fps).toInt().coerceAtLeast(0)
     val frameTime = frameIndex / editor.fps.toFloat()
-    val frameKey by androidx.compose.runtime.produceState<String?>(
+    val frameKeys by androidx.compose.runtime.produceState<Pair<String, String>?>(
         initialValue = null, editor.projectId, editor.layers, frameIndex,
         editor.fps, outputWidth, outputHeight
     ) {
         value = kotlinx.coroutines.withContext(MediaWorkers.cpuDispatcher) {
-            CompositionFrameCache.frameKey(
-                editor.projectId, editor.layers, frameTime, editor.fps, outputWidth, outputHeight
+            val fullKey = CompositionFrameCache.frameKey(
+                editor.projectId, editor.layers, frameTime, editor.fps,
+                outputWidth, outputHeight
             )
+            val warmScale = minOf(qualityScale, 0.5f)
+            val warmWidth = (COMP_W * warmScale).toInt().coerceAtLeast(240)
+            val warmHeight = (COMP_H * warmScale).toInt().coerceAtLeast(135)
+            val warmKey = CompositionFrameCache.frameKey(
+                editor.projectId, editor.layers, frameTime, editor.fps,
+                warmWidth, warmHeight
+            )
+            fullKey to warmKey
         }
     }
     val readyKey = editor.cachedFrames[frameIndex]
-    val frameReady = frameKey != null && readyKey == frameKey
+    // Prefer full-quality frames, but use the low-resolution warm frame while
+    // its full-quality replacement is still being rendered.
+    val frameKey = when {
+        readyKey != null && readyKey == frameKeys?.first -> frameKeys?.first
+        readyKey != null && readyKey == frameKeys?.second -> frameKeys?.second
+        else -> null
+    }
+    val frameReady = frameKey != null
 
     // Keep a few upcoming rendered frames warm in RAM so disk-backed cache
     // playback does not need to decode every JPEG at the exact presentation time.
@@ -123,7 +139,7 @@ fun PreviewCanvas(
         while (editor.playing) {
             val current = (editor.time * editor.fps).toInt().coerceAtLeast(0)
             val count = kotlin.math.ceil(editor.duration * editor.fps).toInt().coerceAtLeast(1)
-            for (offset in 1..3) {
+            for (offset in 1..6) {
                 val next = (current + offset) % count
                 val nextKey = editor.cachedFrames[next] ?: continue
                 CompositionFrameCache.loadFrame(context, nextKey)
