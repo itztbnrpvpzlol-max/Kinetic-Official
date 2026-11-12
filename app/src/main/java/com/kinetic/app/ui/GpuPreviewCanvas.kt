@@ -231,6 +231,7 @@ private fun HardwareVideoLayer(
     val sourcePositionMs = (sourceTime * 1000f).toLong()
     LaunchedEffect(editor.playing, canStartPlayback, videoReady, layer.id, layer.speed, player) {
         if (editor.playing && canStartPlayback && videoReady) {
+            player.setPlaybackSpeed(layer.speed.coerceIn(0.1f, 4f))
             player.seekTo(sourcePositionMs)
             player.play()
         } else {
