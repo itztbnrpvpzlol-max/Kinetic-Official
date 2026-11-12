@@ -83,12 +83,20 @@ object MediaLoader {
     /** Called from Android memory callbacks. Keep only a small warm cache under pressure. */
     fun trimMemory(level: Int) {
         when {
-            level >= android.content.ComponentCallbacks2.TRIM_MEMORY_COMPLETE ->
+            level >= android.content.ComponentCallbacks2.TRIM_MEMORY_COMPLETE -> {
+                cache.resize(4 * 1024 * 1024)
                 cache.evictAll()
-            level >= android.content.ComponentCallbacks2.TRIM_MEMORY_BACKGROUND ->
-                cache.trimToSize((cache.maxSize() / 4).coerceAtLeast(2 * 1024 * 1024))
-            level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW ->
-                cache.trimToSize((cache.maxSize() / 2).coerceAtLeast(2 * 1024 * 1024))
+            }
+            level >= android.content.ComponentCallbacks2.TRIM_MEMORY_BACKGROUND -> {
+                val reduced = (cache.maxSize() / 4).coerceAtLeast(2 * 1024 * 1024)
+                cache.resize(reduced)
+                cache.trimToSize(reduced)
+            }
+            level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW -> {
+                val reduced = (cache.maxSize() / 2).coerceAtLeast(2 * 1024 * 1024)
+                cache.resize(reduced)
+                cache.trimToSize(reduced)
+            }
         }
         if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_BACKGROUND) {
             waveformCache.evictAll()
