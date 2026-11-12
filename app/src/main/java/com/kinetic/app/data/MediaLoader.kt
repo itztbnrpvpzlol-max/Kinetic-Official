@@ -20,6 +20,7 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import java.util.concurrent.ConcurrentHashMap
+import java.util.LinkedHashMap
 import java.util.concurrent.atomic.AtomicInteger
 import java.io.File
 import java.io.FileOutputStream
@@ -39,6 +40,9 @@ object MediaLoader {
     }
     private val retrievers = ConcurrentHashMap<String, MediaMetadataRetriever>()
     private val retrieverLocks = ConcurrentHashMap<String, Any>()
+    private val retrieverRegistryLock = Any()
+    private val retrieverLru = LinkedHashMap<String, Unit>(8, 0.75f, true)
+    private val maxCachedRetrievers = if (MediaWorkers.isConstrainedDevice) 1 else 4
     private val waveformCache = object : LruCache<String, FloatArray>(if (MediaWorkers.isConstrainedDevice) 2 * 1024 * 1024 else 8 * 1024 * 1024) {
         override fun sizeOf(key: String, value: FloatArray): Int = value.size * 4
     }
@@ -104,12 +108,46 @@ object MediaLoader {
     }
 
     fun releaseAll() {
-        retrievers.forEach { (key, retriever) ->
-            synchronized(retrieverLocks.getOrPut(key) { Any() }) { runCatching { retriever.release() } }
+        val toRelease = synchronized(retrieverRegistryLock) {
+            val snapshot = retrievers.entries.map { it.key to it.value }
+            retrievers.clear()
+            retrieverLru.clear()
+            snapshot
         }
-        retrievers.clear()
+        toRelease.forEach { (key, retriever) ->
+            synchronized(retrieverLocks.getOrPut(key) { Any() }) {
+                runCatching { retriever.release() }
+            }
+        }
         retrieverLocks.clear()
         waveformCache.evictAll()
+    }
+
+    /** Obtain a retriever from a tiny device-aware LRU; release evictions safely. */
+    private fun obtainRetriever(ctx: Context, uri: Uri, key: String): MediaMetadataRetriever {
+        val evicted = ArrayList<Pair<String, MediaMetadataRetriever>>()
+        val selected = synchronized(retrieverRegistryLock) {
+            val existing = retrievers[key]
+            if (existing != null) {
+                retrieverLru[key] = Unit
+                existing
+            } else {
+                val created = MediaMetadataRetriever().apply { setDataSource(ctx, uri) }
+                retrievers[key] = created
+                retrieverLru[key] = Unit
+                while (retrieverLru.size > maxCachedRetrievers) {
+                    val oldestKey = retrieverLru.entries.iterator().next().key
+                    retrieverLru.remove(oldestKey)
+                    retrievers.remove(oldestKey)?.let { evicted.add(oldestKey to it) }
+                }
+                created
+            }
+        }
+        evicted.forEach { (oldKey, retriever) ->
+            val lock = retrieverLocks.getOrPut(oldKey) { Any() }
+            synchronized(lock) { runCatching { retriever.release() } }
+        }
+        return selected
     }
 
     fun displayName(ctx: Context, uri: Uri): String {
@@ -445,9 +483,7 @@ object MediaLoader {
         val key = uri.toString()
         val lock = retrieverLocks.computeIfAbsent(key) { Any() }
         return synchronized(lock) {
-            val r = retrievers.computeIfAbsent(key) {
-                MediaMetadataRetriever().apply { setDataSource(ctx, uri) }
-            }
+            val r = obtainRetriever(ctx, uri, key)
             val timeUs = (sec * 1_000_000f).toLong()
             if (Build.VERSION.SDK_INT >= 27) {
                 var sourceW = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: maxEdge
