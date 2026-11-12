@@ -82,6 +82,10 @@ object MediaLoader {
             else -> requested
         }
         cache.resize(minOf(requested, adaptiveLimit).coerceAtLeast(4) * 1024 * 1024)
+        maxCachedRetrievers = if (
+            memoryInfo.lowMemory || availableMb < 160 || MediaWorkers.isConstrainedDevice
+        ) 1 else 4
+        trimRetrieverCache(maxCachedRetrievers)
     }
 
     /** Called from Android memory callbacks. Keep only a small warm cache under pressure. */
