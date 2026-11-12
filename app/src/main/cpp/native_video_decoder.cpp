@@ -1,6 +1,7 @@
 #include <jni.h>
 #include <android/native_window.h>
 #include <android/native_window_jni.h>
+#include <android/log.h>
 #include <media/NdkMediaCodec.h>
 #include <media/NdkMediaExtractor.h>
 #include <media/NdkMediaFormat.h>
@@ -16,6 +17,8 @@
 #include <thread>
 
 namespace {
+constexpr const char* LOG_TAG = "KineticVideo";
+
 struct NativeVideoDecoder {
     int fd = -1;
     int64_t offset = 0;
@@ -111,10 +114,16 @@ struct NativeVideoDecoder {
 
     bool setup() {
         extractor = AMediaExtractor_new();
-        if (!extractor || fd < 0) return false;
+        if (!extractor || fd < 0) {
+            __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, "Extractor allocation or source fd failed (fd=%d)", fd);
+            return false;
+        }
         media_status_t dataStatus = AMediaExtractor_setDataSourceFd(
             extractor, fd, offset, length > 0 ? length : INT64_MAX);
-        if (dataStatus != AMEDIA_OK) return false;
+        if (dataStatus != AMEDIA_OK) {
+            __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, "setDataSourceFd failed: %d (offset=%lld length=%lld)", dataStatus, (long long)offset, (long long)length);
+            return false;
+        }
 
         ssize_t videoTrack = -1;
         const size_t tracks = AMediaExtractor_getTrackCount(extractor);
@@ -128,13 +137,32 @@ struct NativeVideoDecoder {
             AMediaFormat_delete(format);
             if (isVideo) break;
         }
-        if (videoTrack < 0) return false;
+        if (videoTrack < 0) {
+            __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, "No video track found");
+            return false;
+        }
         if (AMediaExtractor_selectTrack(extractor, static_cast<size_t>(videoTrack)) != AMEDIA_OK) return false;
         AMediaFormat* format = AMediaExtractor_getTrackFormat(extractor, static_cast<size_t>(videoTrack));
-        if (!format) return false;
+        if (!format) {
+            __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, "Could not read video track format");
+            return false;
+        }
+        int32_t videoWidth = 0;
+        int32_t videoHeight = 0;
+        AMediaFormat_getInt32(format, AMEDIAFORMAT_KEY_WIDTH, &videoWidth);
+        AMediaFormat_getInt32(format, AMEDIAFORMAT_KEY_HEIGHT, &videoHeight);
+        if (videoWidth > 0 && videoHeight > 0 && window) {
+            const int geometryStatus = ANativeWindow_setBuffersGeometry(window, videoWidth, videoHeight, 0);
+            if (geometryStatus != 0) {
+                __android_log_print(ANDROID_LOG_WARN, LOG_TAG, "Surface buffer geometry %dx%d returned %d", videoWidth, videoHeight, geometryStatus);
+            }
+        } else {
+            __android_log_print(ANDROID_LOG_WARN, LOG_TAG, "Invalid video dimensions %dx%d", videoWidth, videoHeight);
+        }
         const char* mime = nullptr;
         const bool hasMime = AMediaFormat_getString(format, AMEDIAFORMAT_KEY_MIME, &mime) && mime;
         if (!hasMime) {
+            __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, "Video track has no MIME type");
             AMediaFormat_delete(format);
             return false;
         }
@@ -143,7 +171,16 @@ struct NativeVideoDecoder {
             ? AMediaCodec_configure(codec, format, window, nullptr, 0)
             : AMEDIA_ERROR_UNSUPPORTED;
         AMediaFormat_delete(format);
-        if (!codec || configured != AMEDIA_OK || AMediaCodec_start(codec) != AMEDIA_OK) return false;
+        if (!codec || configured != AMEDIA_OK) {
+            __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, "Codec configure failed: codec=%p status=%d mime=%s", codec, configured, mime);
+            return false;
+        }
+        const media_status_t startStatus = AMediaCodec_start(codec);
+        if (startStatus != AMEDIA_OK) {
+            __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, "Codec start failed: %d", startStatus);
+            return false;
+        }
+        __android_log_print(ANDROID_LOG_INFO, LOG_TAG, "Decoder started: %s %dx%d start=%lldus", mime, videoWidth, videoHeight, (long long)initialPositionUs);
         if (initialPositionUs > 0) {
             AMediaExtractor_seekTo(extractor, initialPositionUs, AMEDIAEXTRACTOR_SEEK_PREVIOUS_SYNC);
             AMediaCodec_flush(codec);
@@ -173,6 +210,7 @@ struct NativeVideoDecoder {
             std::lock_guard<std::mutex> lock(mutex);
             initialized = false;
             playing = false;
+            __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, "Video decoder setup failed; preview output unavailable");
             return;
         }
         while (true) {
@@ -231,6 +269,13 @@ struct NativeVideoDecoder {
             const ssize_t outputIndex = AMediaCodec_dequeueOutputBuffer(codec, &info, 1000);
             if (outputIndex >= 0) {
                 bool render = info.size > 0;
+                static std::atomic<uint32_t> renderedFrames{0};
+                if (render) {
+                    const uint32_t frameNumber = ++renderedFrames;
+                    if (frameNumber == 1 || frameNumber % 300 == 0) {
+                        __android_log_print(ANDROID_LOG_INFO, LOG_TAG, "Decoded video output frame %u pts=%lldus size=%d", frameNumber, (long long)info.presentationTimeUs, info.size);
+                    }
+                }
                 if (render && dropBeforeUs >= 0) {
                     if (info.presentationTimeUs < dropBeforeUs) {
                         AMediaCodec_releaseOutputBuffer(codec, static_cast<size_t>(outputIndex), false);
