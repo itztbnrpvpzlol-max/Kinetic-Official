@@ -35,7 +35,6 @@ class FfmpegVideoPlayer(
     private val clockSyncQueued = AtomicBoolean(false)
     private var mpv: MPVLib? = null
     private var sourceDescriptor: ParcelFileDescriptor? = null
-    @Volatile private var surface: Surface? = null
     @Volatile private var fallback: AndroidVideoPlayer? = null
     @Volatile private var released = false
     @Volatile private var state = 0
@@ -63,7 +62,6 @@ class FfmpegVideoPlayer(
 
     fun attachSurface(next: Surface) {
         if (released) return
-        surface = next
         postToDecoder {
             if (fallback != null) {
                 fallback?.attachSurface(next)
@@ -85,7 +83,6 @@ class FfmpegVideoPlayer(
     }
 
     fun detachSurface() {
-        surface = null
         postToDecoder {
             fallback?.detachSurface()
             if (fallback == null) runCatching { mpv?.detachSurface() }
