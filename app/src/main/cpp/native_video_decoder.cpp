@@ -276,13 +276,22 @@ struct NativeVideoDecoder {
             }
 
             AMediaCodecBufferInfo info{};
-            const ssize_t outputIndex = AMediaCodec_dequeueOutputBuffer(codec, &info, 1000);
+            // Keep the decoder responsive to pause/seek/stop commands. A long
+            // dequeue timeout can otherwise present stale output after transport changes.
+            const ssize_t outputIndex = AMediaCodec_dequeueOutputBuffer(codec, &info, 5'000);
             if (outputIndex >= 0) {
                 // Surface-backed video decoders may report size == 0 because
                 // decoded pixels are delivered to the Surface, not a CPU buffer.
                 // A non-EOS output buffer is still a displayable frame.
                 const bool endOfStream = (info.flags & AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM) != 0;
-                const bool render = !endOfStream;
+                bool transportAllowsOutput = false;
+                {
+                    std::lock_guard<std::mutex> lock(mutex);
+                    // Never publish a frame that completed decoding after a pause,
+                    // a newer seek request, or shutdown.
+                    transportAllowsOutput = !stopping && playing && pendingSeekUs < 0;
+                }
+                const bool render = !endOfStream && transportAllowsOutput;
                 static std::atomic<uint32_t> outputBuffers{0};
                 static std::atomic<uint32_t> renderedFrames{0};
                 const uint32_t outputNumber = ++outputBuffers;
