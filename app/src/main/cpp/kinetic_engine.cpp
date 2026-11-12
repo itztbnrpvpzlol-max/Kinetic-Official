@@ -436,58 +436,99 @@ Java_com_kinetic_app_engine_NativeRenderEngine_nativeGlDrawExternalTexture(
 extern "C" JNIEXPORT void JNICALL
 Java_com_kinetic_app_engine_NativeRenderEngine_nativeGlDrawComposition(
         JNIEnv* env, jobject, jintArray textureIds, jintArray flags,
-        jfloatArray params, jfloatArray vertices, jfloatArray matrices, jint layerCount) {
-    if (!textureIds || !flags || !params || !vertices || !matrices) return;
+        jfloatArray params, jfloatArray layerMatrices, jfloatArray textureMatrices,
+        jfloatArray frameMetrics, jint layerCount) {
+    if (!textureIds || !flags || !params || !layerMatrices ||
+        !textureMatrices || !frameMetrics) return;
     const jsize count = static_cast<jsize>(layerCount);
-    if (count <= 0 || count > 256 ||
+    if (count <= 0 || count > 1024 ||
         env->GetArrayLength(textureIds) < count ||
         env->GetArrayLength(flags) < count ||
-        env->GetArrayLength(params) < count * 2 ||
-        env->GetArrayLength(vertices) < count * 16 ||
-        env->GetArrayLength(matrices) < count * 16 ||
+        env->GetArrayLength(params) < count * 4 ||
+        env->GetArrayLength(layerMatrices) < count * 9 ||
+        env->GetArrayLength(textureMatrices) < count * 16 ||
+        env->GetArrayLength(frameMetrics) < 4 ||
         !gVertexBuffer || !gVertexArrayObject) return;
 
     jint* ids = env->GetIntArrayElements(textureIds, nullptr);
     jint* layerFlags = env->GetIntArrayElements(flags, nullptr);
     jfloat* layerParams = env->GetFloatArrayElements(params, nullptr);
-    jfloat* layerVertices = env->GetFloatArrayElements(vertices, nullptr);
-    jfloat* layerMatrices = env->GetFloatArrayElements(matrices, nullptr);
-    if (!ids || !layerFlags || !layerParams || !layerVertices || !layerMatrices) {
+    jfloat* transforms = env->GetFloatArrayElements(layerMatrices, nullptr);
+    jfloat* textureTransforms = env->GetFloatArrayElements(textureMatrices, nullptr);
+    jfloat* metrics = env->GetFloatArrayElements(frameMetrics, nullptr);
+    if (!ids || !layerFlags || !layerParams || !transforms || !textureTransforms || !metrics) {
         if (ids) env->ReleaseIntArrayElements(textureIds, ids, JNI_ABORT);
         if (layerFlags) env->ReleaseIntArrayElements(flags, layerFlags, JNI_ABORT);
         if (layerParams) env->ReleaseFloatArrayElements(params, layerParams, JNI_ABORT);
-        if (layerVertices) env->ReleaseFloatArrayElements(vertices, layerVertices, JNI_ABORT);
-        if (layerMatrices) env->ReleaseFloatArrayElements(matrices, layerMatrices, JNI_ABORT);
+        if (transforms) env->ReleaseFloatArrayElements(layerMatrices, transforms, JNI_ABORT);
+        if (textureTransforms) env->ReleaseFloatArrayElements(textureMatrices, textureTransforms, JNI_ABORT);
+        if (metrics) env->ReleaseFloatArrayElements(frameMetrics, metrics, JNI_ABORT);
         return;
     }
+
+    const float viewportWidth = std::max(1.0f, metrics[0]);
+    const float viewportHeight = std::max(1.0f, metrics[1]);
+    const float compositionWidth = std::max(1.0f, metrics[2]);
+    const float compositionHeight = std::max(1.0f, metrics[3]);
+    const float scale = std::min(viewportWidth / compositionWidth,
+                                 viewportHeight / compositionHeight);
+    const float offsetX = (viewportWidth - compositionWidth * scale) * 0.5f;
+    const float offsetY = (viewportHeight - compositionHeight * scale) * 0.5f;
 
     glBindVertexArray(gVertexArrayObject);
     glBindBuffer(GL_ARRAY_BUFFER, gVertexBuffer);
     for (jsize i = 0; i < count; ++i) {
         const jint mode = (layerFlags[i] >> 1) & 0x0F;
         const bool external = (layerFlags[i] & 1) != 0;
-        const jfloat alpha = std::clamp(layerParams[i * 2], 0.0f, 1.0f);
+        const bool masked = (layerFlags[i] & (1 << 5)) != 0;
+        const float alpha = std::clamp(layerParams[i * 4], 0.0f, 1.0f);
         if (alpha <= 0.0f || ids[i] <= 0) continue;
-        const jfloat gray = layerParams[i * 2 + 1] > 0.5f ? 1.0f : 0.0f;
-        const jfloat* quad = layerVertices + static_cast<size_t>(i) * 16;
+        const float gray = layerParams[i * 4 + 1] > 0.5f ? 1.0f : 0.0f;
+        const float width = std::max(0.0f, layerParams[i * 4 + 2]);
+        const float height = std::max(0.0f, layerParams[i * 4 + 3]);
+        const float right = masked ? width * 0.8f : width;
+        const float bottom = masked ? height * 0.8f : height;
+        const float uvMax = masked ? 0.8f : 1.0f;
+        const float* transform = transforms + static_cast<size_t>(i) * 9;
+        const float* texMatrix = textureTransforms + static_cast<size_t>(i) * 16;
+
+        const float sourceX[4] = {0.0f, 0.0f, right, right};
+        const float sourceY[4] = {0.0f, bottom, 0.0f, bottom};
+        const float uvX[4] = {0.0f, 0.0f, uvMax, uvMax};
+        const float uvY[4] = {0.0f, uvMax, 0.0f, uvMax};
+        float quad[16];
+        for (int corner = 0; corner < 4; ++corner) {
+            const float x = sourceX[corner];
+            const float y = sourceY[corner];
+            const float w = transform[6] * x + transform[7] * y + transform[8];
+            const float safeW = std::abs(w) < 0.000001f ? 1.0f : w;
+            const float mappedX = (transform[0] * x + transform[1] * y + transform[2]) / safeW;
+            const float mappedY = (transform[3] * x + transform[4] * y + transform[5]) / safeW;
+            const float screenX = offsetX + mappedX * scale;
+            const float screenY = offsetY + mappedY * scale;
+            const int vertex = corner * 4;
+            quad[vertex] = (screenX / viewportWidth) * 2.0f - 1.0f;
+            quad[vertex + 1] = 1.0f - (screenY / viewportHeight) * 2.0f;
+            quad[vertex + 2] = uvX[corner];
+            quad[vertex + 3] = uvY[corner];
+        }
 
         if (external) {
             if (!gExternalProgram) continue;
             glUseProgram(gExternalProgram);
-            glBufferData(GL_ARRAY_BUFFER, 16 * sizeof(jfloat), quad, GL_STREAM_DRAW);
+            glBufferData(GL_ARRAY_BUFFER, sizeof(quad), quad, GL_STREAM_DRAW);
             glEnableVertexAttribArray(static_cast<GLuint>(gExternalPosition));
             glVertexAttribPointer(static_cast<GLuint>(gExternalPosition), 2, GL_FLOAT, GL_FALSE,
-                                  4 * sizeof(jfloat), reinterpret_cast<const void*>(0));
+                                  4 * sizeof(float), reinterpret_cast<const void*>(0));
             glEnableVertexAttribArray(static_cast<GLuint>(gExternalUv));
             glVertexAttribPointer(static_cast<GLuint>(gExternalUv), 2, GL_FLOAT, GL_FALSE,
-                                  4 * sizeof(jfloat), reinterpret_cast<const void*>(2 * sizeof(jfloat)));
+                                  4 * sizeof(float), reinterpret_cast<const void*>(2 * sizeof(float)));
             glActiveTexture(GL_TEXTURE0);
             glBindTexture(GL_TEXTURE_EXTERNAL_OES, static_cast<GLuint>(ids[i]));
             glUniform1i(gExternalSampler, 0);
             glUniform1f(gExternalAlpha, alpha);
             glUniform1f(gExternalGray, gray);
-            glUniformMatrix4fv(gExternalMatrix, 1, GL_FALSE,
-                               layerMatrices + static_cast<size_t>(i) * 16);
+            glUniformMatrix4fv(gExternalMatrix, 1, GL_FALSE, texMatrix);
             applyNativeBlend(mode);
             glEnable(GL_BLEND);
             glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
@@ -497,13 +538,13 @@ Java_com_kinetic_app_engine_NativeRenderEngine_nativeGlDrawComposition(
         } else {
             if (!gTextureProgram) continue;
             glUseProgram(gTextureProgram);
-            glBufferData(GL_ARRAY_BUFFER, 16 * sizeof(jfloat), quad, GL_STREAM_DRAW);
+            glBufferData(GL_ARRAY_BUFFER, sizeof(quad), quad, GL_STREAM_DRAW);
             glEnableVertexAttribArray(static_cast<GLuint>(gTexturePosition));
             glVertexAttribPointer(static_cast<GLuint>(gTexturePosition), 2, GL_FLOAT, GL_FALSE,
-                                  4 * sizeof(jfloat), reinterpret_cast<const void*>(0));
+                                  4 * sizeof(float), reinterpret_cast<const void*>(0));
             glEnableVertexAttribArray(static_cast<GLuint>(gTextureUv));
             glVertexAttribPointer(static_cast<GLuint>(gTextureUv), 2, GL_FLOAT, GL_FALSE,
-                                  4 * sizeof(jfloat), reinterpret_cast<const void*>(2 * sizeof(jfloat)));
+                                  4 * sizeof(float), reinterpret_cast<const void*>(2 * sizeof(float)));
             glActiveTexture(GL_TEXTURE0);
             glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(ids[i]));
             glUniform1i(gTextureSampler, 0);
@@ -525,8 +566,9 @@ Java_com_kinetic_app_engine_NativeRenderEngine_nativeGlDrawComposition(
     env->ReleaseIntArrayElements(textureIds, ids, JNI_ABORT);
     env->ReleaseIntArrayElements(flags, layerFlags, JNI_ABORT);
     env->ReleaseFloatArrayElements(params, layerParams, JNI_ABORT);
-    env->ReleaseFloatArrayElements(vertices, layerVertices, JNI_ABORT);
-    env->ReleaseFloatArrayElements(matrices, layerMatrices, JNI_ABORT);
+    env->ReleaseFloatArrayElements(layerMatrices, transforms, JNI_ABORT);
+    env->ReleaseFloatArrayElements(textureMatrices, textureTransforms, JNI_ABORT);
+    env->ReleaseFloatArrayElements(frameMetrics, metrics, JNI_ABORT);
 }
 
 extern "C" JNIEXPORT void JNICALL
