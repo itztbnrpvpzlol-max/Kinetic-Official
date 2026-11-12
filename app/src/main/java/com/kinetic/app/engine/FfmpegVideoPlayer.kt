@@ -260,10 +260,6 @@ class FfmpegVideoPlayer(
 
         if (nowNs - lastSyncNs >= 100_000_000L) {
             lastSyncNs = nowNs
-            runCatching {
-                instance.setPropertyDouble("speed", targetSpeed)
-                instance.setPropertyBoolean("pause", !sync.playing)
-            }
             val actualSeconds = instance.getPropertyDouble("time-pos")
             val expectedSeconds = expectedSourceUs / 1_000_000.0
             val generationChanged = masterGeneration != sync.generation
@@ -277,6 +273,10 @@ class FfmpegVideoPlayer(
             } else 1.0
             val targetSpeed = (safeMasterSpeed * safeClipSpeed * driftSpeedFactor)
                 .coerceIn(0.1, 4.0)
+            runCatching {
+                instance.setPropertyDouble("speed", targetSpeed)
+                instance.setPropertyBoolean("pause", !sync.playing)
+            }
 
             if (nowNs - lastDiagnosticsNs >= 1_000_000_000L) {
                 lastDiagnosticsNs = nowNs
