@@ -128,7 +128,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
     val projectStore = remember { ProjectStore(ctx) }
     LaunchedEffect(editor.settings.previewMemoryMb, editor.settings.frameCacheDiskMb) {
         MediaLoader.configureCache(editor.settings.previewMemoryMb)
-        CompositionFrameCache.configure(editor.settings.previewMemoryMb, editor.settings.frameCacheDiskMb)
+        CompositionFrameCache.configure(editor.settings.previewMemoryMb)
     }
     LaunchedEffect(editor.layers.map { it.id to it.uri }) { audio.prepare(editor.layers) }
 
