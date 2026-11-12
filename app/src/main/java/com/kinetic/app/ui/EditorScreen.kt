@@ -112,6 +112,24 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
     }
 
     fun leave() { if (editor.layers.isEmpty()) onExit() else showLeave = true }
+
+    // Build the lightweight H.264 playback proxy BEFORE a video becomes a
+    // timeline layer. This keeps full-resolution source decoding out of the
+    // first playback attempt on low-memory devices.
+    suspend fun prepareVideoPreview(source: Uri) {
+        val scale = resolvePreviewScale(
+            ctx, editor.settings.previewQualityIndex,
+            editor.layers.count { it.visible } + 1
+        )
+        if (scale >= 0.99f) return
+        val targetHeight = when {
+            scale <= 0.40f -> 360
+            scale <= 0.60f -> 540
+            else -> 720
+        }
+        runCatching { PreviewProxyStore.getOrCreate(ctx, source, targetHeight) }
+    }
+
     // Playback uses the live composition renderer without timeline frame pre-caching.
     fun togglePlayback() {
         editor.playing = !editor.playing
@@ -265,13 +283,10 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                 val cachedUri = MediaLoader.cacheMedia(ctx, u)
                 val info = withContext(MediaWorkers.cpuDispatcher) { MediaLoader.probe(ctx, cachedUri, type) }
                 val name = MediaLoader.displayName(ctx, u)
+                if (type == LayerType.VIDEO) prepareVideoPreview(cachedUri)
+                // Only expose the layer to playback after its low-res proxy
+                // has been prepared (or the source has safely fallen back).
                 editor.addMedia(type, name, cachedUri.toString(), info.width, info.height, info.length)
-                // Warm a compact, low-resolution import cache off the playback path.
-                if (type == LayerType.VIDEO && info.length != null) {
-                    scope.launch {
-                        MediaLoader.cacheVideoPreviewFrames(ctx, cachedUri, info.length) { }
-                    }
-                }
             }
         }
     }
@@ -366,16 +381,12 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                     scope.launch {
                         val cachedUri = MediaLoader.cacheMedia(ctx, item.uri)
                         val info = withContext(MediaWorkers.cpuDispatcher) { MediaLoader.probe(ctx, cachedUri, item.type) }
+                        if (item.type == LayerType.VIDEO) prepareVideoPreview(cachedUri)
                         editor.addMediaTrimmed(item.type, item.name, cachedUri.toString(),
                             if (info.width > 0) info.width else item.width,
                             if (info.height > 0) info.height else item.height,
                             if (item.type == LayerType.IMAGE) null else item.duration,
                             trimIn, trimOut)
-                        if (item.type == LayerType.VIDEO) {
-                            scope.launch {
-                                MediaLoader.cacheVideoPreviewFrames(ctx, cachedUri, info.length ?: item.duration) { }
-                            }
-                        }
                     }
                 }
             )
