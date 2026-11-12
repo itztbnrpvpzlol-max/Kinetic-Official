@@ -31,6 +31,9 @@ import kotlin.math.max
 object MediaLoader {
     class Info(val length: Float?, val width: Int, val height: Int)
 
+    // A moderate temporal sampling rate for the constrained CPU Canvas preview.
+    const val CPU_PREVIEW_SAMPLE_FPS = 18
+
     // Bitmap memory is expensive on mobile. Keep the preview cache proportional
     // to the app heap instead of allowing a user preference to consume hundreds
     // of megabytes and trigger GC pauses or process-level memory pressure.
@@ -297,7 +300,7 @@ object MediaLoader {
         centerTimeSec: Float,
         beforeFrames: Int,
         afterFrames: Int,
-        sampleFps: Int = 12,
+        sampleFps: Int = CPU_PREVIEW_SAMPLE_FPS,
         maxEdge: Int = 320,
         minimumTimeSec: Float = 0f,
         maximumTimeSec: Float = Float.POSITIVE_INFINITY
