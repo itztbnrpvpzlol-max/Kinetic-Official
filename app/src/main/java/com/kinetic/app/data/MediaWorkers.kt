@@ -6,32 +6,43 @@ import java.util.concurrent.Executors
 import java.util.concurrent.ThreadFactory
 
 /**
- * Bounded CPU dispatcher for media decoding and image processing.
+ * Device-aware limits for background media work.
  *
- * Keep at least one logical processor available where possible for the UI,
- * audio scheduling, rendering and Android itself. Background priority prevents
- * thumbnail/waveform work from starving interactive playback.
+ * Low-memory / four-core devices keep one worker in each pool so decoding and
+ * idle cache generation cannot occupy every CPU core or grow competing queues.
+ * Larger devices can use more parallelism while retaining UI/audio headroom.
  */
 object MediaWorkers {
-    val workerCount: Int = (Runtime.getRuntime().availableProcessors() - 1).coerceIn(1, 4)
+    private val cpuCores = Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
+    private val heapMb = (Runtime.getRuntime().maxMemory() / (1024L * 1024L))
+        .toInt().coerceAtLeast(64)
+
+    val isConstrainedDevice: Boolean = cpuCores <= 4 || heapMb <= 256
+    val bitmapCacheBudgetMb: Int = if (isConstrainedDevice) {
+        (heapMb / 16).coerceIn(12, 24)
+    } else {
+        (heapMb / 8).coerceIn(32, 128)
+    }
+
+    val workerCount: Int = if (isConstrainedDevice) 1 else (cpuCores - 2).coerceIn(2, 4)
+    private val cacheWorkerCount: Int = if (isConstrainedDevice) 1
+        else if (cpuCores >= 8 && heapMb >= 512) 2 else 1
 
     val cpuDispatcher = Executors.newFixedThreadPool(
         workerCount,
-        ThreadFactory { runnable ->
-            Thread({
-                Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND)
-                runnable.run()
-            }, "KineticMediaWorker").apply { isDaemon = true }
-        }
+        backgroundThreadFactory("KineticMediaWorker")
     ).asCoroutineDispatcher()
 
-    // Two bounded workers let independent composition frames render in parallel.
-    // Background priority keeps interactive preview and the dedicated audio thread
-    // responsive; we deliberately leave CPU headroom for Android and the UI.
-    val cacheDispatcher = Executors.newFixedThreadPool(2) { runnable ->
+    // Cache generation stays separately bounded and never takes all CPU cores.
+    val cacheDispatcher = Executors.newFixedThreadPool(
+        cacheWorkerCount,
+        backgroundThreadFactory("KineticFrameCache")
+    ).asCoroutineDispatcher()
+
+    private fun backgroundThreadFactory(name: String): ThreadFactory = ThreadFactory { runnable ->
         Thread({
             Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND)
             runnable.run()
-        }, "KineticFrameCache").apply { isDaemon = true }
-    }.asCoroutineDispatcher()
+        }, name).apply { isDaemon = true }
+    }
 }
