@@ -161,7 +161,13 @@ fun MediaImportSheet(
     val preview by produceState<android.graphics.Bitmap?>(null, selected?.uri, previewTime) {
         val item = selected
         value = if (item?.type == LayerType.IMAGE) {
-            MediaLoader.bitmapFor(context, item.uri, item.type, previewTime, 8, 720)
+            MediaLoader.bitmapFor(
+                context, item.uri, item.type, previewTime,
+                sampleFps = 8,
+                maxEdge = 720,
+                persistToDisk = false,
+                retainInRam = false
+            )
         } else null
     }
 
