@@ -6,8 +6,8 @@
 #include <vector>
 #include <cstddef>
 
-extern "C" bool kreGetCalculation(uint64_t key, float* output, size_t count);
-extern "C" void krePutCalculation(uint64_t key, const float* values, size_t count);
+extern "C" bool kreGetCalculation(uint64_t key, float* output, std::size_t count);
+extern "C" void krePutCalculation(uint64_t key, const float* values, std::size_t count);
 
 namespace {
 inline float cubic(float t, float a, float b) {
