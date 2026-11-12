@@ -42,6 +42,7 @@ import java.util.concurrent.ConcurrentHashMap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import com.kinetic.app.data.MediaLoader
+import com.kinetic.app.engine.NativeRenderEngine
 import com.kinetic.app.data.MediaWorkers
 import com.kinetic.app.data.PreviewDiagnostics
 import com.kinetic.app.data.PreviewProxyStore
@@ -484,22 +485,14 @@ private class CompositionGlRenderer(
         solidProgram = 0
         externalProgram = 0
         try {
-            program = linkProgram(VERTEX_SHADER, TEXTURE_SHADER)
-            solidProgram = linkProgram(VERTEX_SHADER, SOLID_SHADER)
-            externalProgram = linkProgram(VERTEX_SHADER, EXTERNAL_TEXTURE_SHADER)
-            positionHandle = GLES20.glGetAttribLocation(program, "aPosition")
-            uvHandle = GLES20.glGetAttribLocation(program, "aTexCoord")
-            samplerHandle = GLES20.glGetUniformLocation(program, "uTexture")
-            alphaHandle = GLES20.glGetUniformLocation(program, "uAlpha")
-            grayHandle = GLES20.glGetUniformLocation(program, "uGray")
-            solidPositionHandle = GLES20.glGetAttribLocation(solidProgram, "aPosition")
-            solidColorHandle = GLES20.glGetUniformLocation(solidProgram, "uColor")
-            externalPositionHandle = GLES20.glGetAttribLocation(externalProgram, "aPosition")
-            externalUvHandle = GLES20.glGetAttribLocation(externalProgram, "aTexCoord")
-            externalSamplerHandle = GLES20.glGetUniformLocation(externalProgram, "uTexture")
-            externalAlphaHandle = GLES20.glGetUniformLocation(externalProgram, "uAlpha")
-            externalGrayHandle = GLES20.glGetUniformLocation(externalProgram, "uGray")
-            externalMatrixHandle = GLES20.glGetUniformLocation(externalProgram, "uTexMatrix")
+            check(NativeRenderEngine.available && NativeRenderEngine.nativeGlInit()) {
+                "Native OpenGL renderer initialization failed"
+            }
+            // Non-zero sentinels keep the existing lifecycle checks compact;
+            // all shader programs and draw calls are owned by the C++ renderer.
+            program = 1
+            solidProgram = 1
+            externalProgram = 1
         } catch (_: Throwable) {
             program = 0
             solidProgram = 0
@@ -554,30 +547,9 @@ private class CompositionGlRenderer(
             ndcX(points[4], scale, ox), ndcY(points[5], scale, oy), uvMax, 0f,
             ndcX(points[6], scale, ox), ndcY(points[7], scale, oy), uvMax, uvMax
         )
-        vertices.clear(); vertices.put(data); vertices.position(0)
-        GLES20.glUseProgram(program)
-        vertices.position(0)
-        GLES20.glEnableVertexAttribArray(positionHandle)
-        GLES20.glVertexAttribPointer(positionHandle, 2, GLES20.GL_FLOAT, false, 16, vertices)
-        vertices.position(2)
-        GLES20.glEnableVertexAttribArray(uvHandle)
-        GLES20.glVertexAttribPointer(uvHandle, 2, GLES20.GL_FLOAT, false, 16, vertices)
-        GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
-        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texture)
-        GLES20.glUniform1i(samplerHandle, 0)
-        GLES20.glUniform1f(alphaHandle, layer.opacity)
-        GLES20.glUniform1f(grayHandle, if (layer.grayscale) 1f else 0f)
-        when (layer.blend) {
-            "Multiply" -> GLES20.glBlendFunc(GLES20.GL_DST_COLOR, GLES20.GL_ONE_MINUS_SRC_ALPHA)
-            "Screen" -> GLES20.glBlendFunc(GLES20.GL_ONE, GLES20.GL_ONE_MINUS_SRC_COLOR)
-            "Add" -> GLES20.glBlendFunc(GLES20.GL_ONE, GLES20.GL_ONE)
-            else -> GLES20.glBlendFunc(GLES20.GL_ONE, GLES20.GL_ONE_MINUS_SRC_ALPHA)
-        }
-        GLES20.glEnable(GLES20.GL_BLEND)
-        GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
-        GLES20.glDisable(GLES20.GL_BLEND)
-        GLES20.glDisableVertexAttribArray(positionHandle)
-        GLES20.glDisableVertexAttribArray(uvHandle)
+        NativeRenderEngine.nativeGlDrawTexture(
+            texture, data, layer.opacity, if (layer.grayscale) 1f else 0f, blendModeCode(layer.blend)
+        )
     }
 
     private fun drawVideoLayer(layer: GpuLayer, scale: Float, ox: Float, oy: Float) {
@@ -594,31 +566,10 @@ private class CompositionGlRenderer(
             ndcX(points[4], scale, ox), ndcY(points[5], scale, oy), uvMax, 0f,
             ndcX(points[6], scale, ox), ndcY(points[7], scale, oy), uvMax, uvMax
         )
-        vertices.clear(); vertices.put(data); vertices.position(0)
-        GLES20.glUseProgram(externalProgram)
-        vertices.position(0)
-        GLES20.glEnableVertexAttribArray(externalPositionHandle)
-        GLES20.glVertexAttribPointer(externalPositionHandle, 2, GLES20.GL_FLOAT, false, 16, vertices)
-        vertices.position(2)
-        GLES20.glEnableVertexAttribArray(externalUvHandle)
-        GLES20.glVertexAttribPointer(externalUvHandle, 2, GLES20.GL_FLOAT, false, 16, vertices)
-        GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
-        GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, output.textureId)
-        GLES20.glUniform1i(externalSamplerHandle, 0)
-        GLES20.glUniform1f(externalAlphaHandle, layer.opacity)
-        GLES20.glUniform1f(externalGrayHandle, if (layer.grayscale) 1f else 0f)
-        GLES20.glUniformMatrix4fv(externalMatrixHandle, 1, false, output.transform, 0)
-        when (layer.blend) {
-            "Multiply" -> GLES20.glBlendFunc(GLES20.GL_DST_COLOR, GLES20.GL_ONE_MINUS_SRC_ALPHA)
-            "Screen" -> GLES20.glBlendFunc(GLES20.GL_ONE, GLES20.GL_ONE_MINUS_SRC_COLOR)
-            "Add" -> GLES20.glBlendFunc(GLES20.GL_ONE, GLES20.GL_ONE)
-            else -> GLES20.glBlendFunc(GLES20.GL_ONE, GLES20.GL_ONE_MINUS_SRC_ALPHA)
-        }
-        GLES20.glEnable(GLES20.GL_BLEND)
-        GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
-        GLES20.glDisable(GLES20.GL_BLEND)
-        GLES20.glDisableVertexAttribArray(externalPositionHandle)
-        GLES20.glDisableVertexAttribArray(externalUvHandle)
+        NativeRenderEngine.nativeGlDrawExternalTexture(
+            output.textureId, data, layer.opacity, if (layer.grayscale) 1f else 0f,
+            output.transform, blendModeCode(layer.blend)
+        )
     }
 
     private fun textureFor(layerId: String, bitmap: Bitmap): Int? {
@@ -647,14 +598,14 @@ private class CompositionGlRenderer(
             ndcX(p[4], scale, ox), ndcY(p[5], scale, oy),
             ndcX(p[6], scale, ox), ndcY(p[7], scale, oy)
         )
-        solidVertices.clear(); solidVertices.put(data); solidVertices.position(0)
-        GLES20.glUseProgram(solidProgram)
-        GLES20.glEnableVertexAttribArray(solidPositionHandle)
-        GLES20.glVertexAttribPointer(solidPositionHandle, 2, GLES20.GL_FLOAT, false, 0, solidVertices)
-        GLES20.glUniform4f(solidColorHandle, 0.52f, 0.40f, 1f, 1f)
-        GLES20.glLineWidth(2f)
-        GLES20.glDrawArrays(GLES20.GL_LINE_LOOP, 0, 4)
-        GLES20.glDisableVertexAttribArray(solidPositionHandle)
+        NativeRenderEngine.nativeGlDrawSelection(data)
+    }
+
+    private fun blendModeCode(mode: String): Int = when (mode) {
+        "Multiply" -> 1
+        "Screen" -> 2
+        "Add" -> 3
+        else -> 0
     }
 
     private fun ndcX(x: Float, scale: Float, ox: Float) = ((ox + x * scale) / viewportWidth) * 2f - 1f
@@ -666,38 +617,9 @@ private class CompositionGlRenderer(
             GLES20.glDeleteTextures(textures.size, textures.values.map { it.id }.toIntArray(), 0)
             textures.clear()
         }
-        if (program != 0) GLES20.glDeleteProgram(program)
-        if (solidProgram != 0) GLES20.glDeleteProgram(solidProgram)
-        if (externalProgram != 0) GLES20.glDeleteProgram(externalProgram)
+        NativeRenderEngine.nativeGlRelease()
         program = 0; solidProgram = 0; externalProgram = 0
     }
 
-    private fun linkProgram(vertex: String, fragment: String): Int {
-        val vs = compileShader(GLES20.GL_VERTEX_SHADER, vertex)
-        val fs = compileShader(GLES20.GL_FRAGMENT_SHADER, fragment)
-        val result = GLES20.glCreateProgram()
-        GLES20.glAttachShader(result, vs); GLES20.glAttachShader(result, fs)
-        GLES20.glLinkProgram(result)
-        val status = IntArray(1)
-        GLES20.glGetProgramiv(result, GLES20.GL_LINK_STATUS, status, 0)
-        GLES20.glDeleteShader(vs); GLES20.glDeleteShader(fs)
-        check(status[0] == GLES20.GL_TRUE) { GLES20.glGetProgramInfoLog(result) }
-        return result
-    }
 
-    private fun compileShader(type: Int, source: String): Int {
-        val shader = GLES20.glCreateShader(type)
-        GLES20.glShaderSource(shader, source); GLES20.glCompileShader(shader)
-        val status = IntArray(1)
-        GLES20.glGetShaderiv(shader, GLES20.GL_COMPILE_STATUS, status, 0)
-        check(status[0] == GLES20.GL_TRUE) { GLES20.glGetShaderInfoLog(shader) }
-        return shader
-    }
-
-    companion object {
-        private const val VERTEX_SHADER = "attribute vec2 aPosition; attribute vec2 aTexCoord; varying vec2 vTexCoord; void main(){ gl_Position=vec4(aPosition,0.0,1.0); vTexCoord=aTexCoord; }"
-        private const val TEXTURE_SHADER = "precision mediump float; uniform sampler2D uTexture; uniform float uAlpha; uniform float uGray; varying vec2 vTexCoord; void main(){ vec4 c=texture2D(uTexture,vTexCoord); if(uGray>0.5){ float y=dot(c.rgb,vec3(0.299,0.587,0.114)); c.rgb=vec3(y); } gl_FragColor=vec4(c.rgb*uAlpha,c.a*uAlpha); }"
-        private const val SOLID_SHADER = "precision mediump float; uniform vec4 uColor; void main(){ gl_FragColor=uColor; }"
-        private const val EXTERNAL_TEXTURE_SHADER = "#extension GL_OES_EGL_image_external : require\nprecision mediump float; uniform samplerExternalOES uTexture; uniform float uAlpha; uniform float uGray; uniform mat4 uTexMatrix; varying vec2 vTexCoord; void main(){ vec2 uv=(uTexMatrix*vec4(vTexCoord,0.0,1.0)).xy; vec4 c=texture2D(uTexture,uv); if(uGray>0.5){ float y=dot(c.rgb,vec3(0.299,0.587,0.114)); c.rgb=vec3(y); } gl_FragColor=vec4(c.rgb*uAlpha,c.a*uAlpha); }"
-    }
 }

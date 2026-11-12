@@ -14,4 +14,5 @@ target_link_libraries(kinetic_engine ${log-lib})
 
 find_library(android-lib android)
 find_library(mediandk-lib mediandk)
-target_link_libraries(kinetic_engine ${android-lib} ${mediandk-lib})
+find_library(glesv2-lib GLESv2)
+target_link_libraries(kinetic_engine ${android-lib} ${mediandk-lib} ${glesv2-lib})

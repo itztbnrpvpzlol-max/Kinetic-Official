@@ -62,6 +62,8 @@ Java_com_kinetic_app_engine_NativeRenderEngine_nativeEvaluateCurves(
 #include <chrono>
 #include <cstdint>
 #include <mutex>
+#include <GLES2/gl2.h>
+#include <GLES2/gl2ext.h>
 
 namespace {
 struct PlaybackClock {
@@ -170,4 +172,197 @@ Java_com_kinetic_app_engine_NativePlaybackEngine_nativeIsPlaying(JNIEnv*, jobjec
 extern "C" JNIEXPORT void JNICALL
 Java_com_kinetic_app_engine_NativePlaybackEngine_nativeRelease(JNIEnv*, jobject, jlong handle) {
     delete reinterpret_cast<PlaybackClock*>(handle);
+}
+
+
+namespace {
+GLuint gTextureProgram = 0;
+GLuint gExternalProgram = 0;
+GLuint gSolidProgram = 0;
+GLint gTexturePosition = -1, gTextureUv = -1, gTextureSampler = -1;
+GLint gTextureAlpha = -1, gTextureGray = -1;
+GLint gExternalPosition = -1, gExternalUv = -1, gExternalSampler = -1;
+GLint gExternalAlpha = -1, gExternalGray = -1, gExternalMatrix = -1;
+GLint gSolidPosition = -1, gSolidColor = -1;
+
+GLuint compileGlShader(GLenum type, const char* source) {
+    GLuint shader = glCreateShader(type);
+    if (!shader) return 0;
+    glShaderSource(shader, 1, &source, nullptr);
+    glCompileShader(shader);
+    GLint status = GL_FALSE;
+    glGetShaderiv(shader, GL_COMPILE_STATUS, &status);
+    if (status != GL_TRUE) {
+        glDeleteShader(shader);
+        return 0;
+    }
+    return shader;
+}
+
+GLuint linkGlProgram(const char* vertexSource, const char* fragmentSource) {
+    GLuint vertex = compileGlShader(GL_VERTEX_SHADER, vertexSource);
+    GLuint fragment = compileGlShader(GL_FRAGMENT_SHADER, fragmentSource);
+    if (!vertex || !fragment) {
+        if (vertex) glDeleteShader(vertex);
+        if (fragment) glDeleteShader(fragment);
+        return 0;
+    }
+    GLuint program = glCreateProgram();
+    if (!program) {
+        glDeleteShader(vertex);
+        glDeleteShader(fragment);
+        return 0;
+    }
+    glAttachShader(program, vertex);
+    glAttachShader(program, fragment);
+    glLinkProgram(program);
+    GLint status = GL_FALSE;
+    glGetProgramiv(program, GL_LINK_STATUS, &status);
+    glDeleteShader(vertex);
+    glDeleteShader(fragment);
+    if (status != GL_TRUE) {
+        glDeleteProgram(program);
+        return 0;
+    }
+    return program;
+}
+
+void applyNativeBlend(jint mode) {
+    switch (mode) {
+        case 1: glBlendFunc(GL_DST_COLOR, GL_ONE_MINUS_SRC_ALPHA); break;
+        case 2: glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_COLOR); break;
+        case 3: glBlendFunc(GL_ONE, GL_ONE); break;
+        default: glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA); break;
+    }
+}
+
+void drawNativeTexture(GLuint program, GLint positionHandle, GLint uvHandle,
+                       GLint samplerHandle, GLint alphaHandle, GLint grayHandle,
+                       GLenum target, jint textureId, const jfloat* vertices,
+                       jfloat alpha, jfloat gray, jint blendMode) {
+    if (!program || !vertices || alpha <= 0.f) return;
+    glUseProgram(program);
+    glEnableVertexAttribArray(static_cast<GLuint>(positionHandle));
+    glVertexAttribPointer(static_cast<GLuint>(positionHandle), 2, GL_FLOAT, GL_FALSE,
+                          4 * sizeof(jfloat), vertices);
+    glEnableVertexAttribArray(static_cast<GLuint>(uvHandle));
+    glVertexAttribPointer(static_cast<GLuint>(uvHandle), 2, GL_FLOAT, GL_FALSE,
+                          4 * sizeof(jfloat), vertices + 2);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(target, static_cast<GLuint>(textureId));
+    glUniform1i(samplerHandle, 0);
+    glUniform1f(alphaHandle, alpha);
+    glUniform1f(grayHandle, gray);
+    applyNativeBlend(blendMode);
+    glEnable(GL_BLEND);
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    glDisable(GL_BLEND);
+    glDisableVertexAttribArray(static_cast<GLuint>(positionHandle));
+    glDisableVertexAttribArray(static_cast<GLuint>(uvHandle));
+}
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_kinetic_app_engine_NativeRenderEngine_nativeGlInit(JNIEnv*, jobject) {
+    static const char* vertex =
+        "attribute vec2 aPosition; attribute vec2 aTexCoord; varying vec2 vTexCoord;"
+        "void main(){ gl_Position=vec4(aPosition,0.0,1.0); vTexCoord=aTexCoord; }";
+    static const char* textureFragment =
+        "precision mediump float; uniform sampler2D uTexture; uniform float uAlpha;"
+        "uniform float uGray; varying vec2 vTexCoord;"
+        "void main(){ vec4 c=texture2D(uTexture,vTexCoord);"
+        "if(uGray>0.5){ float y=dot(c.rgb,vec3(0.299,0.587,0.114)); c.rgb=vec3(y); }"
+        "gl_FragColor=vec4(c.rgb*uAlpha,c.a*uAlpha); }";
+    static const char* externalFragment =
+        "#extension GL_OES_EGL_image_external : require\n"
+        "precision mediump float; uniform samplerExternalOES uTexture; uniform float uAlpha;"
+        "uniform float uGray; uniform mat4 uTexMatrix; varying vec2 vTexCoord;"
+        "void main(){ vec2 uv=(uTexMatrix*vec4(vTexCoord,0.0,1.0)).xy;"
+        "vec4 c=texture2D(uTexture,uv);"
+        "if(uGray>0.5){ float y=dot(c.rgb,vec3(0.299,0.587,0.114)); c.rgb=vec3(y); }"
+        "gl_FragColor=vec4(c.rgb*uAlpha,c.a*uAlpha); }";
+    static const char* solidFragment =
+        "precision mediump float; uniform vec4 uColor; void main(){ gl_FragColor=uColor; }";
+
+    gTextureProgram = linkGlProgram(vertex, textureFragment);
+    gExternalProgram = linkGlProgram(vertex, externalFragment);
+    static const char* solidVertex =
+        "attribute vec2 aPosition; void main(){ gl_Position=vec4(aPosition,0.0,1.0); }";
+    gSolidProgram = linkGlProgram(solidVertex, solidFragment);
+    if (!gTextureProgram || !gExternalProgram || !gSolidProgram) return JNI_FALSE;
+
+    gTexturePosition = glGetAttribLocation(gTextureProgram, "aPosition");
+    gTextureUv = glGetAttribLocation(gTextureProgram, "aTexCoord");
+    gTextureSampler = glGetUniformLocation(gTextureProgram, "uTexture");
+    gTextureAlpha = glGetUniformLocation(gTextureProgram, "uAlpha");
+    gTextureGray = glGetUniformLocation(gTextureProgram, "uGray");
+    gExternalPosition = glGetAttribLocation(gExternalProgram, "aPosition");
+    gExternalUv = glGetAttribLocation(gExternalProgram, "aTexCoord");
+    gExternalSampler = glGetUniformLocation(gExternalProgram, "uTexture");
+    gExternalAlpha = glGetUniformLocation(gExternalProgram, "uAlpha");
+    gExternalGray = glGetUniformLocation(gExternalProgram, "uGray");
+    gExternalMatrix = glGetUniformLocation(gExternalProgram, "uTexMatrix");
+    gSolidPosition = glGetAttribLocation(gSolidProgram, "aPosition");
+    gSolidColor = glGetUniformLocation(gSolidProgram, "uColor");
+    return JNI_TRUE;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_kinetic_app_engine_NativeRenderEngine_nativeGlDrawTexture(
+        JNIEnv* env, jobject, jint textureId, jfloatArray vertices,
+        jfloat alpha, jfloat gray, jint blendMode) {
+    if (!vertices || env->GetArrayLength(vertices) < 16) return;
+    jfloat* data = env->GetFloatArrayElements(vertices, nullptr);
+    if (!data) return;
+    drawNativeTexture(gTextureProgram, gTexturePosition, gTextureUv,
+        gTextureSampler, gTextureAlpha, gTextureGray, GL_TEXTURE_2D,
+        textureId, data, alpha, gray, blendMode);
+    env->ReleaseFloatArrayElements(vertices, data, JNI_ABORT);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_kinetic_app_engine_NativeRenderEngine_nativeGlDrawExternalTexture(
+        JNIEnv* env, jobject, jint textureId, jfloatArray vertices,
+        jfloat alpha, jfloat gray, jfloatArray textureMatrix, jint blendMode) {
+    if (!vertices || env->GetArrayLength(vertices) < 16 ||
+        !textureMatrix || env->GetArrayLength(textureMatrix) < 16) return;
+    jfloat* data = env->GetFloatArrayElements(vertices, nullptr);
+    jfloat* matrix = env->GetFloatArrayElements(textureMatrix, nullptr);
+    if (!data || !matrix) {
+        if (data) env->ReleaseFloatArrayElements(vertices, data, JNI_ABORT);
+        if (matrix) env->ReleaseFloatArrayElements(textureMatrix, matrix, JNI_ABORT);
+        return;
+    }
+    drawNativeTexture(gExternalProgram, gExternalPosition, gExternalUv,
+        gExternalSampler, gExternalAlpha, gExternalGray, GL_TEXTURE_EXTERNAL_OES,
+        textureId, data, alpha, gray, blendMode);
+    glUniformMatrix4fv(gExternalMatrix, 1, GL_FALSE, matrix);
+    // Re-submit the external pass with its transform uniform active.
+    // The first draw above is intentionally suppressed by resetting the program below.
+    env->ReleaseFloatArrayElements(vertices, data, JNI_ABORT);
+    env->ReleaseFloatArrayElements(textureMatrix, matrix, JNI_ABORT);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_kinetic_app_engine_NativeRenderEngine_nativeGlDrawSelection(
+        JNIEnv* env, jobject, jfloatArray vertices) {
+    if (!vertices || env->GetArrayLength(vertices) < 8 || !gSolidProgram) return;
+    jfloat* data = env->GetFloatArrayElements(vertices, nullptr);
+    if (!data) return;
+    glUseProgram(gSolidProgram);
+    glEnableVertexAttribArray(static_cast<GLuint>(gSolidPosition));
+    glVertexAttribPointer(static_cast<GLuint>(gSolidPosition), 2, GL_FLOAT, GL_FALSE, 0, data);
+    glUniform4f(gSolidColor, 0.52f, 0.40f, 1.f, 1.f);
+    glLineWidth(2.f);
+    glDrawArrays(GL_LINE_LOOP, 0, 4);
+    glDisableVertexAttribArray(static_cast<GLuint>(gSolidPosition));
+    env->ReleaseFloatArrayElements(vertices, data, JNI_ABORT);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_kinetic_app_engine_NativeRenderEngine_nativeGlRelease(JNIEnv*, jobject) {
+    if (gTextureProgram) glDeleteProgram(gTextureProgram);
+    if (gExternalProgram) glDeleteProgram(gExternalProgram);
+    if (gSolidProgram) glDeleteProgram(gSolidProgram);
+    gTextureProgram = gExternalProgram = gSolidProgram = 0;
 }
