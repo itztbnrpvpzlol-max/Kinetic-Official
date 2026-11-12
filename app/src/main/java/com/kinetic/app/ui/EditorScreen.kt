@@ -161,7 +161,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
 
             override fun onLowMemory() {
                 MediaLoader.trimMemory(ComponentCallbacks2.TRIM_MEMORY_COMPLETE)
-                TimelineRamCache.clear()
+                TimelineRamCache.invalidate()
                 KreEngine.clearCalculationCache()
                 KreEngine.setCalculationCacheBudget(64 * 1024)
             }
@@ -190,7 +190,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
         }
         "${it.id}|${fingerprint}|${it.start}|${it.duration}|${it.srcOffset}|${it.speed}|${it.type}"
     }
-    LaunchedEffect(ramCacheSignature, editor.playing) {
+    LaunchedEffect(ramCacheSignature, editor.playing, TimelineRamCache.generation) {
         val activityManager = ctx.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
         val memoryInfo = ActivityManager.MemoryInfo()
         runCatching { activityManager?.getMemoryInfo(memoryInfo) }
