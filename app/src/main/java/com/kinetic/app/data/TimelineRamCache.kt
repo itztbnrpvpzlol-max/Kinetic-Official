@@ -53,9 +53,14 @@ object TimelineRamCache {
         val nextIndex = (frameIndex + 1).coerceAtMost(current.totalFrames)
         scans[layerId] = current.copy(nextFrameIndex = nextIndex)
         val previous = windows[layerId]
+        val preparedUntil = if (nextIndex >= current.totalFrames) {
+            current.endSec
+        } else {
+            timelineTimeSec
+        }
         windows[layerId] = Window(
             current.startSec,
-            maxOf(previous?.preparedUntilSec ?: current.startSec, timelineTimeSec),
+            maxOf(previous?.preparedUntilSec ?: current.startSec, preparedUntil),
             current.endSec
         )
     }
