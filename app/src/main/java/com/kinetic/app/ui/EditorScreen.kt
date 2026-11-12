@@ -55,7 +55,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.withFrameNanos
+import android.os.SystemClock
+import com.kinetic.app.engine.NativePlaybackEngine
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -117,7 +118,14 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
     BackHandler(enabled = previewExpanded) { previewExpanded = false }
 
     val audio = remember { AudioEngine(ctx) }
-    DisposableEffect(Unit) { onDispose { audio.release(); MediaLoader.releaseAll() } }
+    val playback = remember { NativePlaybackEngine() }
+    DisposableEffect(Unit) {
+        onDispose {
+            playback.release()
+            audio.release()
+            MediaLoader.releaseAll()
+        }
+    }
     val projectStore = remember { ProjectStore(ctx) }
     LaunchedEffect(editor.settings.previewMemoryMb) {
         MediaLoader.configureCache(editor.settings.previewMemoryMb)
@@ -158,50 +166,47 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
         withContext(Dispatchers.IO) { runCatching { projectStore.save(editor) } }
     }
 
-    LaunchedEffect(editor.playing) {
+    LaunchedEffect(editor.playing, editor.duration, editor.settings.loop, editor.fps) {
         if (editor.playing) {
             if (editor.time >= editor.duration - 0.01f) editor.time = 0f
+            playback.configure(editor.duration, editor.settings.loop, 1f)
+            playback.seek(editor.time)
+            playback.play()
             PreviewDiagnostics.resetSession()
-            var last = withFrameNanos { it }
-            // Advance the transport on composition frames instead of publishing a new
-            // Compose state value on every display refresh (often 60/90/120 Hz).
-            // This prevents the whole timeline/property tree from being invalidated
-            // more often than the composition can actually display frames.
-            var transportTime = editor.time
-            var publishedFrame = (transportTime * editor.fps).toInt()
-            var audioAccumulator = 0f
-            // Start the audio transport immediately; subsequent clock updates are
-            // coalesced and applied on AudioEngine's dedicated playback thread.
-            audio.sync(editor.layers, transportTime, true)
-            while (editor.playing) {
-                val now = withFrameNanos { it }
-                val dt = ((now - last) / 1_000_000_000f).coerceIn(0f, 0.25f)
-                last = now
-                transportTime += dt
-                audioAccumulator += dt
-                if (transportTime >= editor.duration) {
-                    if (editor.settings.loop) {
-                        transportTime = 0f
-                        publishedFrame = -1
-                    } else {
-                        transportTime = editor.duration
-                        editor.time = editor.duration
-                        editor.playing = false
-                    }
-                }
+
+            var publishedFrame = (editor.time * editor.fps).toInt()
+            var lastAudioSyncMs = 0L
+            audio.sync(editor.layers, editor.time, true)
+
+            // Native steady_clock is authoritative; Kotlin only publishes UI
+            // frame changes and periodically forwards the latest audio position.
+            while (editor.playing && playback.isPlaying()) {
+                delay(8L)
+                val transportTime = playback.positionSeconds()
+                    .coerceIn(0f, editor.duration.coerceAtLeast(0f))
                 val nextFrame = (transportTime * editor.fps).toInt()
-                if (nextFrame != publishedFrame && editor.playing) {
+                if (nextFrame != publishedFrame) {
                     editor.time = (nextFrame / editor.fps.toFloat()).coerceAtMost(editor.duration)
                     publishedFrame = nextFrame
                 }
-                // Audio transport work is deliberately decoupled from the visual frame clock.
-                if (audioAccumulator >= 0.08f || !editor.playing) {
-                    audio.sync(editor.layers, transportTime, editor.playing)
-                    audioAccumulator = 0f
+
+                val now = SystemClock.elapsedRealtime()
+                if (now - lastAudioSyncMs >= 50L) {
+                    audio.sync(editor.layers, transportTime, playback.isPlaying())
+                    lastAudioSyncMs = now
                 }
             }
+
+            val completed = editor.playing && !playback.isPlaying() && !editor.settings.loop
+            if (completed) {
+                editor.time = editor.duration
+                editor.playing = false
+            }
+            audio.sync(editor.layers, editor.time, false)
+        } else {
+            playback.pause()
+            audio.pauseAll()
         }
-        audio.pauseAll()
     }
 
     fun importUris(uris: List<Uri>, type: LayerType) {
