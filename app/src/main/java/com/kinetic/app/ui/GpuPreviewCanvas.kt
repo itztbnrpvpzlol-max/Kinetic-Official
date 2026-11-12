@@ -310,7 +310,17 @@ private fun GpuCompositionPreviewCanvas(
     val scene = GpuScene(renderLayers, selectedLayer)
     val gpuFailed = remember { androidx.compose.runtime.mutableStateOf(false) }
 
-    if (gpuFailed.value || !supportsGles2(context)) {
+    val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+    val memoryInfo = ActivityManager.MemoryInfo()
+    activityManager?.getMemoryInfo(memoryInfo)
+    // The Mali-T820 / 2 GB class of devices can expose GLES2 but still fail to
+    // present the SurfaceView reliably under memory pressure. Use the Canvas
+    // compatibility renderer there so shapes, text and decoded media remain
+    // visible; keep the native GLES composition path for stronger devices.
+    val constrainedDevice = activityManager?.isLowRamDevice == true ||
+        memoryInfo.totalMem < 3L * 1024L * 1024L * 1024L
+
+    if (gpuFailed.value || !supportsGles2(context) || constrainedDevice) {
         CpuPreviewCanvas(editor, modifier)
     } else {
         val view = remember(context) { GpuPreviewSurfaceView(context) { gpuFailed.value = true } }
