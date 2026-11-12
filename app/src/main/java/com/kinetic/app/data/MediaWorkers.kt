@@ -42,11 +42,24 @@ object MediaWorkers {
         backgroundThreadFactory("KineticMediaWorker")
     ).asCoroutineDispatcher()
 
+    // Interactive preview decoding must not inherit the background priority
+    // used by imports, waveforms, and other non-urgent media work.
+    val previewDispatcher = Executors.newSingleThreadExecutor(
+        foregroundThreadFactory("KineticPreviewDecoder")
+    ).asCoroutineDispatcher()
+
     // Cache generation stays separately bounded and never takes all CPU cores.
     val cacheDispatcher = Executors.newFixedThreadPool(
         cacheWorkerCount,
         cacheThreadFactory("KineticFrameCache")
     ).asCoroutineDispatcher()
+
+    private fun foregroundThreadFactory(name: String): ThreadFactory = ThreadFactory { runnable ->
+        Thread({
+            Process.setThreadPriority(Process.THREAD_PRIORITY_FOREGROUND)
+            runnable.run()
+        }, name).apply { isDaemon = true }
+    }
 
     private fun cacheThreadFactory(name: String): ThreadFactory = ThreadFactory { runnable ->
         Thread({
