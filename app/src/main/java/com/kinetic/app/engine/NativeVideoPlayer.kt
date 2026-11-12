@@ -35,6 +35,14 @@ class NativeVideoPlayer(
         surface = null
     }
 
+    /** 0=not attached/starting, 1=ready, -1=decoder failed, 2=released. */
+    fun decoderState(): Int = synchronized(lock) {
+        if (released) return@synchronized 2
+        if (surface == null) return@synchronized 0
+        if (handle == 0L) return@synchronized -1
+        runCatching { nativeGetState(handle) }.getOrDefault(-1)
+    }
+
     fun updatePositionHint(targetMs: Long) = synchronized(lock) {
         if (!released) positionMs = targetMs.coerceAtLeast(0L)
     }
@@ -109,6 +117,7 @@ class NativeVideoPlayer(
     private external fun nativePause(handle: Long)
     private external fun nativeSetSpeed(handle: Long, speed: Float)
     private external fun nativeRelease(handle: Long)
+    private external fun nativeGetState(handle: Long): Int
 
     companion object {
         init { System.loadLibrary("kinetic_engine") }
