@@ -85,6 +85,20 @@ private fun supportsGles3(context: Context): Boolean = runCatching {
 }.getOrDefault(false)
 
 /**
+ * Entry-level Mali/GLES drivers can advertise GLES 3 while failing the native
+ * composition renderer. Keep constrained devices on the established Canvas
+ * renderer instead of forcing the unsupported GPU path.
+ */
+private fun shouldUseCpuPreview(context: Context): Boolean {
+    val manager = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+    val memory = ActivityManager.MemoryInfo()
+    manager?.getMemoryInfo(memory)
+    return manager?.isLowRamDevice == true ||
+        memory.totalMem < 3L * 1024L * 1024L * 1024L ||
+        MediaWorkers.isConstrainedDevice
+}
+
+/**
  * GLES3 is attempted on low-memory devices too. The renderer has a runtime
  * failure fallback to Canvas; RAM size alone must not force video through the
  * expensive Bitmap/MediaMetadataRetriever path.
@@ -104,9 +118,9 @@ fun PreviewCanvas(
         onVideoReady(true)
     }
 
-    // Prefer SurfaceTexture + hardware MediaCodec on every GLES3 device.
-    // If the driver/native renderer fails at runtime, switch to Canvas preview.
-    if (!supportsGles3(context)) {
+    // Use Canvas on constrained/entry-level devices whose GLES3 drivers
+    // expose ES 3 but cannot reliably render the native composition path.
+    if (shouldUseCpuPreview(context) || !supportsGles3(context)) {
         CpuPreviewCanvas(editor, modifier)
     } else {
         val visualLayers = editor.layers.filter {
