@@ -132,8 +132,9 @@ object MediaLoader {
         timeSec: Float,
         sampleFps: Int = 5,
         maxEdge: Int = 960,
-        persistToDisk: Boolean = true
-    ): Bitmap? = withContext(MediaWorkers.cpuDispatcher) {
+        persistToDisk: Boolean = true,
+        lowPriorityPrefetch: Boolean = false
+    ): Bitmap? = withContext(if (lowPriorityPrefetch) MediaWorkers.cacheDispatcher else MediaWorkers.cpuDispatcher) {
         val bucket = if (type == LayerType.VIDEO) (timeSec * sampleFps.toFloat()).toInt() else 0
         val key = if (type == LayerType.IMAGE) "$uri@image@$maxEdge" else "$uri@$sampleFps@$maxEdge@$bucket"
         synchronized(key.intern()) {
@@ -201,13 +202,13 @@ object MediaLoader {
         maxEdge: Int = 640,
         sourceStepSec: Float = 1f / sampleFps
     ) = withContext(MediaWorkers.cacheDispatcher) {
-        val count = frameCount.coerceIn(1, if (MediaWorkers.isConstrainedDevice) 2 else 4)
+        val count = frameCount.coerceIn(1, if (MediaWorkers.isConstrainedDevice) 1 else 4)
         for (index in 0 until count) {
             currentCoroutineContext().ensureActive()
             bitmapFor(
                 ctx, uri, LayerType.VIDEO,
                 firstFrameTimeSec + index * sourceStepSec.coerceAtLeast(0.001f),
-                sampleFps, maxEdge, persistToDisk = false
+                sampleFps, maxEdge, persistToDisk = false, lowPriorityPrefetch = true
             )
         }
     }
