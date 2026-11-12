@@ -310,10 +310,66 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
             var lastAudioSyncMs = 0L
             audio.sync(editor.layers, editor.time, true)
 
-            while (editor.playing && playback.isPlaying()) {
+            fun previewCacheReadyAt(timelineTime: Float): Boolean {
+                val activeVideos = editor.layers.filter {
+                    it.visible && it.type == LayerType.VIDEO && it.uri != null &&
+                        it.activeAt(timelineTime)
+                }
+                return activeVideos.all { layer ->
+                    val original = Uri.parse(layer.uri!!)
+                    val source = PreviewProxyStore.findExisting(
+                        ctx,
+                        original,
+                        PreviewProxyStore.PLAYBACK_PROXY_HEIGHT,
+                        PreviewProxyStore.PLAYBACK_PROXY_BITRATE
+                    ) ?: original
+                    val speed = layer.speed.coerceIn(0.1f, 4f)
+                    val sourceTime = (
+                        (timelineTime - layer.start).coerceAtLeast(0f) * speed + layer.srcOffset
+                    ).coerceAtLeast(0f)
+                    MediaLoader.hasCachedVideoFrame(ctx, source, sourceTime, 12, 360)
+                }
+            }
+
+            var waitingForPreviewCache = false
+            while (editor.playing) {
+                if (!playback.isPlaying()) {
+                    if (!waitingForPreviewCache) break
+                    val heldTime = playback.positionSeconds()
+                        .coerceIn(0f, editor.duration.coerceAtLeast(0f))
+                    if (heldTime >= editor.duration - 0.01f) break
+                    val nextProbeTime = (
+                        (heldTime * uiFps).toInt() + 1
+                    ) / uiFps.toFloat()
+                    if (previewCacheReadyAt(nextProbeTime)) {
+                        playback.play()
+                        waitingForPreviewCache = false
+                    } else {
+                        delay(16L)
+                        continue
+                    }
+                }
+
                 delay(16L)
                 val transportTime = playback.positionSeconds()
                     .coerceIn(0f, editor.duration.coerceAtLeast(0f))
+
+                // On constrained devices, hold the master clock at a frame
+                // boundary until the exact 360p proxy frame is in the RAM/disk
+                // cache. Audio pauses with it; once the cache is ready, both
+                // resume from the same master-clock position.
+                if (MediaWorkers.isConstrainedDevice && playback.isPlaying()) {
+                    val nextProbeTime = (
+                        (transportTime * uiFps).toInt() + 1
+                    ) / uiFps.toFloat()
+                    if (!previewCacheReadyAt(nextProbeTime)) {
+                        playback.pause()
+                        waitingForPreviewCache = true
+                        audio.sync(editor.layers, transportTime, false)
+                        continue
+                    }
+                }
+
                 val nextFrame = playback.positionFrame(uiFps.toFloat())
                     .coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
                 if (nextFrame != publishedFrame) {
