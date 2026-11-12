@@ -130,9 +130,9 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
             scale <= 0.60f -> 540
             else -> 720
         }
-        val proxy = if (scale < 0.99f) {
-            runCatching { PreviewProxyStore.getOrCreate(ctx, source, targetHeight) }.getOrNull()
-        } else null
+        if (scale < 0.99f) {
+            runCatching { PreviewProxyStore.getOrCreate(ctx, source, targetHeight) }
+        }
         // Warm the same source URI, time buckets and resolution used by the
         // bitmap fallback renderer. The decoder-backed primary video path
         // remains SurfaceTexture based and does not copy frames into bitmaps.
