@@ -194,7 +194,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                 val sourceTime = (
                     (playhead - layer.start).coerceAtLeast(0f) * sourceSpeed + layer.srcOffset
                 ).coerceAtLeast(0f)
-                val sourceStep = sourceSpeed / 12f
+                val sourceStep = maxOf(1f / 12f, sourceSpeed / 12f)
                 MediaLoader.prefetchUpcomingVideoFrames(
                     ctx,
                     Uri.parse(layer.uri!!),
