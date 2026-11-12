@@ -115,6 +115,7 @@ class AudioEngine(context: Context) {
         @Volatile private var lastSeekMs = 0L
         @Volatile private var lastSyncMs = 0L
         @Volatile private var sampleRate = 48_000
+        @Volatile private var appliedSpeed = Float.NaN
         @Volatile private var startHeadFrames = 0L
         @Volatile private var track: AudioTrack? = null
         private val worker = Thread(::decodeLoop, "KineticAudioClip").apply {
@@ -196,12 +197,19 @@ class AudioEngine(context: Context) {
                     }
 
                     val audioTrack = track
-                    if (audioTrack != null && audioTrack.playState != AudioTrack.PLAYSTATE_PLAYING) {
-                        runCatching {
-                            audioTrack.setVolume(requestedVolume)
-                            audioTrack.playbackParams = audioTrack.playbackParams.setSpeed(requestedSpeed)
-                            audioTrack.play()
-                            startHeadFrames = audioTrack.playbackHeadPosition.toLong() and 0xffffffffL
+                    if (audioTrack != null && !outputEos) {
+                        if (abs(appliedSpeed - requestedSpeed) > 0.001f) {
+                            runCatching {
+                                audioTrack.playbackParams = audioTrack.playbackParams.setSpeed(requestedSpeed)
+                                appliedSpeed = requestedSpeed
+                            }
+                        }
+                        if (audioTrack.playState != AudioTrack.PLAYSTATE_PLAYING) {
+                            runCatching {
+                                audioTrack.setVolume(requestedVolume.coerceIn(0f, 1f))
+                                audioTrack.play()
+                                startHeadFrames = audioTrack.playbackHeadPosition.toLong() and 0xffffffffL
+                            }
                         }
                     }
 
@@ -302,11 +310,13 @@ class AudioEngine(context: Context) {
                 .setTransferMode(AudioTrack.MODE_STREAM)
                 .setBufferSizeInBytes(bufferBytes)
                 .build()
-            created.setVolume(requestedVolume)
+            created.setVolume(requestedVolume.coerceIn(0f, 1f))
             track = created
+            appliedSpeed = Float.NaN
             startHeadFrames = 0L
             if (wantsPlayback) runCatching {
                 created.playbackParams = created.playbackParams.setSpeed(requestedSpeed)
+                appliedSpeed = requestedSpeed
                 created.play()
             }
         }
@@ -315,7 +325,7 @@ class AudioEngine(context: Context) {
             val output = track ?: return
             var remaining = size
             while (remaining > 0 && !closed && wantsPlayback) {
-                output.setVolume(requestedVolume)
+                output.setVolume(requestedVolume.coerceIn(0f, 1f))
                 val written = output.write(buffer, remaining, AudioTrack.WRITE_NON_BLOCKING)
                 if (written > 0) {
                     remaining -= written
