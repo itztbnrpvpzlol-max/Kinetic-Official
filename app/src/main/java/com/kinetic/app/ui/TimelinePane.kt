@@ -130,11 +130,9 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
     // Center the playhead under the preview transport's play control.
     // During playback, sample auto-scroll at the composition frame cadence.
     // The native clock remains authoritative; the scroll is only a visual follow.
-    val playheadSampleMs = (1000f / editor.fps.coerceIn(1, 60))
-        .toLong().coerceAtLeast(1L)
-    LaunchedEffect(editor.playing, pps, paneW, editor.fps) {
+    LaunchedEffect(editor.playing, pps, paneW) {
         snapshotFlow { editor.time }
-            .let { times -> if (editor.playing) times.sample(playheadSampleMs) else times }
+            .let { times -> if (editor.playing) times.sample(50L) else times }
             .collect { time ->
                 if (paneW > leftPx) {
                     val target = (time * pps * dens).coerceAtLeast(0f)
