@@ -773,7 +773,7 @@ private class CompositionGlRenderer(
             )
             val offsetX = (viewportWidth - COMP_W * scale) / 2f
             val offsetY = (viewportHeight - COMP_H * scale) / 2f
-            drawComposition(current.layers, scale, offsetX, offsetY)
+            drawComposition(current.layers)
             current.selected?.let { drawSelection(it, scale, offsetX, offsetY) }
             if (cacheReady) {
                 cachedCompositionFingerprint = fingerprint
@@ -792,12 +792,7 @@ private class CompositionGlRenderer(
      * Packs layer state once. KRE evaluates transforms, viewport geometry,
      * texture sampling and the ordered GLES3 draw pass natively.
      */
-    private fun drawComposition(
-        layers: List<GpuLayer>,
-        scale: Float,
-        ox: Float,
-        oy: Float
-    ) {
+    private fun drawComposition(layers: List<GpuLayer>) {
         val required = layers.size
         if (required == 0) return
         if (compositionTextureIds.size < required) {
