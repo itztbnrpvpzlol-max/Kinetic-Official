@@ -385,6 +385,8 @@ extern "C" JNIEXPORT jboolean JNICALL
 Java_com_kinetic_app_engine_NativeRenderEngine_nativeGlPresentCompositionCache(
         JNIEnv*, jobject, jint viewportWidth, jint viewportHeight) {
     if (!gCompositionFramebuffer) return JNI_FALSE;
+    // Isolate the blit result from any earlier texture-upload/draw error.
+    while (glGetError() != GL_NO_ERROR) {}
     glBindFramebuffer(GL_READ_FRAMEBUFFER, gCompositionFramebuffer);
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
     glBlitFramebuffer(
