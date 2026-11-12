@@ -260,6 +260,24 @@ object MediaLoader {
         }
     }
 
+    /**
+     * Synchronous readiness probe used by the constrained-device transport.
+     * It checks the exact same frame bucket and source fingerprint as bitmapFor.
+     */
+    fun hasCachedVideoFrame(
+        ctx: Context,
+        uri: Uri,
+        timeSec: Float,
+        sampleFps: Int,
+        maxEdge: Int
+    ): Boolean {
+        val fps = sampleFps.coerceAtLeast(1)
+        val bucket = (timeSec.coerceAtLeast(0f) * fps.toFloat()).toInt()
+        val key = "${mediaCacheIdentity(uri)}@$fps@$maxEdge@$bucket"
+        if (cache.get(key) != null) return true
+        return previewFrameFile(ctx, key, LayerType.VIDEO).isFile
+    }
+
     private fun mediaCacheIdentity(uri: Uri): String {
         val file = uri.path?.let(::File)
         return if (file?.isFile == true) {
