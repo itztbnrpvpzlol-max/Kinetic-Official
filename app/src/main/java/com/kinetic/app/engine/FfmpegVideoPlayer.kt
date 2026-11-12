@@ -182,8 +182,7 @@ class FfmpegVideoPlayer(
                 }
                 sourceDescriptor?.close()
                 sourceDescriptor = null
-                surface = null
-                attachedSurface = null
+                        attachedSurface = null
                 decoderExecutor.shutdown()
             }
         }.onFailure {
@@ -285,7 +284,7 @@ class FfmpegVideoPlayer(
             }
 
             if ((generationChanged || (sync.playing && drifted && correctionReady)) && loaded) {
-                Log.w(TAG, "Correcting preview clock drift: \${driftSeconds?.times(1_000.0)?.toLong() ?: 0L}ms")
+                Log.w(TAG, "Correcting preview clock drift: ${driftSeconds?.times(1_000.0)?.toLong() ?: 0L}ms")
                 seekMpv((expectedSourceUs / 1_000L).coerceAtLeast(0L))
                 lastCorrectionNs = nowNs
             }
