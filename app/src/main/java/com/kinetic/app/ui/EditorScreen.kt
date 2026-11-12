@@ -246,9 +246,8 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                 val cachedUri = MediaLoader.cacheMedia(ctx, u)
                 val info = withContext(MediaWorkers.cpuDispatcher) { MediaLoader.probe(ctx, cachedUri, type) }
                 val name = MediaLoader.displayName(ctx, u)
-                editor.addMedia(type, name, cachedUri.toString(), info.width, info.height, info.length)
                 if (type == LayerType.VIDEO && (info.length ?: 0f) > 0f) {
-                    Toast.makeText(ctx, "Building full preview cache…", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(ctx, "Caching video frames before adding…", Toast.LENGTH_SHORT).show()
                     runCatching {
                         MediaLoader.cacheVideoPreviewFrames(ctx, cachedUri, info.length ?: 0f) { }
                     }.onSuccess {
@@ -257,6 +256,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                         Toast.makeText(ctx, "Preview cache incomplete; decoding on demand", Toast.LENGTH_SHORT).show()
                     }
                 }
+                editor.addMedia(type, name, cachedUri.toString(), info.width, info.height, info.length)
             }
         }
     }
@@ -351,13 +351,8 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                     scope.launch {
                         val cachedUri = MediaLoader.cacheMedia(ctx, item.uri)
                         val info = withContext(MediaWorkers.cpuDispatcher) { MediaLoader.probe(ctx, cachedUri, item.type) }
-                        editor.addMediaTrimmed(item.type, item.name, cachedUri.toString(),
-                            if (info.width > 0) info.width else item.width,
-                            if (info.height > 0) info.height else item.height,
-                            if (item.type == LayerType.IMAGE) null else item.duration,
-                            trimIn, trimOut)
                         if (item.type == LayerType.VIDEO) {
-                            Toast.makeText(ctx, "Building full preview cache…", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(ctx, "Caching video frames before adding…", Toast.LENGTH_SHORT).show()
                             runCatching {
                                 MediaLoader.cacheVideoPreviewFrames(
                                     ctx, cachedUri, (trimOut - trimIn).coerceAtLeast(0.05f),
@@ -369,6 +364,11 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                                 Toast.makeText(ctx, "Preview cache incomplete; decoding on demand", Toast.LENGTH_SHORT).show()
                             }
                         }
+                        editor.addMediaTrimmed(item.type, item.name, cachedUri.toString(),
+                            if (info.width > 0) info.width else item.width,
+                            if (info.height > 0) info.height else item.height,
+                            if (item.type == LayerType.IMAGE) null else item.duration,
+                            trimIn, trimOut)
                     }
                 }
             )
