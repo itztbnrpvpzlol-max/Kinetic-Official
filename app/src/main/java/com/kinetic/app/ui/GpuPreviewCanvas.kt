@@ -129,7 +129,7 @@ private fun DirectVideoPreviewCanvas(
         .coerceAtLeast(0f)
     val sourcePositionMs = (sourceTime * 1000f).toLong()
 
-    LaunchedEffect(layer.id, uri) {
+    LaunchedEffect(layer.id, uri, layer.speed) {
         player.pause()
         player.setMediaItem(MediaItem.fromUri(Uri.parse(uri)))
         player.setPlaybackSpeed(layer.speed.coerceIn(0.1f, 4f))
@@ -138,7 +138,7 @@ private fun DirectVideoPreviewCanvas(
         if (editor.playing) player.play()
     }
 
-    LaunchedEffect(editor.playing, layer.id) {
+    LaunchedEffect(editor.playing, layer.id, layer.speed) {
         if (editor.playing) {
             player.seekTo(sourcePositionMs)
             player.play()
@@ -150,7 +150,7 @@ private fun DirectVideoPreviewCanvas(
     var previousTimelineTime by remember(layer.id) {
         androidx.compose.runtime.mutableFloatStateOf(editor.time)
     }
-    LaunchedEffect(editor.time, editor.playing, layer.id) {
+    LaunchedEffect(editor.time, editor.playing, layer.id, layer.speed) {
         if (editor.playing) {
             // A composition loop wraps the timeline clock. Re-align the decoder
             // once at that boundary; otherwise let Media3 own continuous playback.
