@@ -85,19 +85,10 @@ private fun supportsGles3(context: Context): Boolean = runCatching {
 }.getOrDefault(false)
 
 /**
- * Mali/entry-level GLES drivers on low-memory devices can expose GLES 3 while
- * still failing the native composition path. Prefer the existing Canvas
- * renderer on these devices so basic visual layers remain visible; stronger
- * devices continue using the native GLES3 renderer.
+ * GLES3 is attempted on low-memory devices too. The renderer has a runtime
+ * failure fallback to Canvas; RAM size alone must not force video through the
+ * expensive Bitmap/MediaMetadataRetriever path.
  */
-private fun shouldUseCpuPreview(context: Context): Boolean {
-    val manager = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
-    val memory = ActivityManager.MemoryInfo()
-    manager?.getMemoryInfo(memory)
-    return manager?.isLowRamDevice == true ||
-        memory.totalMem < 3L * 1024L * 1024L * 1024L ||
-        MediaWorkers.isConstrainedDevice
-}
 
 @Composable
 fun PreviewCanvas(
@@ -113,10 +104,9 @@ fun PreviewCanvas(
         onVideoReady(true)
     }
 
-    // Select the constrained-device path before composing any GPU scene data.
-    // This avoids rebuilding active-layer lists, transforms and GPU draw packets
-    // on every playhead tick when the device will use CPU Canvas anyway.
-    if (shouldUseCpuPreview(context) || !supportsGles3(context)) {
+    // Prefer SurfaceTexture + hardware MediaCodec on every GLES3 device.
+    // If the driver/native renderer fails at runtime, switch to Canvas preview.
+    if (!supportsGles3(context)) {
         CpuPreviewCanvas(editor, modifier)
     } else {
         val visualLayers = editor.layers.filter {
@@ -547,6 +537,14 @@ private class CompositionGlRenderer(
     private var cachedCompositionFingerprint = Long.MIN_VALUE
     private var viewportWidth = 1
     private var viewportHeight = 1
+    @Volatile private var gpuFailureReported = false
+
+    private fun reportGpuFailure(error: Throwable) {
+        if (gpuFailureReported) return
+        gpuFailureReported = true
+        Log.e("KineticGpu", "GPU composition failed; switching to Canvas preview", error)
+        Handler(Looper.getMainLooper()).post { onGpuFailure() }
+    }
 
     private data class TextureEntry(val id: Int, val bitmap: Bitmap, val bytes: Long)
     private data class VideoOutput(
@@ -690,11 +688,11 @@ private class CompositionGlRenderer(
             program = 1
             solidProgram = 1
             externalProgram = 1
-        } catch (_: Throwable) {
+        } catch (error: Throwable) {
             program = 0
             solidProgram = 0
             externalProgram = 0
-            Handler(Looper.getMainLooper()).post { onGpuFailure() }
+            reportGpuFailure(error)
         }
         if (program != 0) scene.layers.filter { it.isVideo }.forEach { ensureVideoOutput(it.id) }
     }
@@ -751,6 +749,8 @@ private class CompositionGlRenderer(
                     current.selected?.let { drawSelection(it, scale, offsetX, offsetY) }
                 }
             }
+        } catch (error: Throwable) {
+            reportGpuFailure(error)
         } finally {
             PreviewDiagnostics.recordGlFrame(System.nanoTime() - startedNs)
         }

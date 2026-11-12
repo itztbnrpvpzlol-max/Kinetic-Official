@@ -2,10 +2,12 @@ package com.kinetic.app.engine
 
 import android.content.Context
 import android.media.MediaCodec
+import android.media.MediaCodecList
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.net.Uri
 import android.os.SystemClock
+import android.os.Build
 import android.util.Log
 import android.view.Surface
 import java.util.concurrent.atomic.AtomicInteger
@@ -209,7 +211,8 @@ class AndroidVideoPlayer(
             }.getOrDefault(30)
             val frameDurationNs = (1_000_000_000L / frameRate).coerceIn(8_000_000L, 100_000_000L)
 
-            codec = MediaCodec.createDecoderByType(mime)
+            codec = createPreferredDecoder(mime)
+            Log.i("KineticVideo", "Selected decoder: ${codec.name} for ${mime}")
             codec.configure(format, outputSurface, null, 0)
             codec.start()
 
@@ -305,12 +308,19 @@ class AndroidVideoPlayer(
 
                         val nowNs = SystemClock.elapsedRealtimeNanos()
                         val targetNs = if (render) targetPresentationNs(info.presentationTimeUs, nowNs) else nowNs
-                        if (render && isPlayingNow() && targetNs < nowNs - frameDurationNs) {
+
+                        // Keep the Surface queue shallow. Queueing a long run of
+                        // future frames can stall BufferQueue on entry-level GPUs.
+                        if (render && isPlayingNow() && targetNs > nowNs + 80_000_000L) {
+                            render = waitForPresentationWindow(targetNs, outputSurface)
+                        }
+                        val presentNowNs = SystemClock.elapsedRealtimeNanos()
+                        if (render && isPlayingNow() && targetNs < presentNowNs - frameDurationNs) {
                             render = false
                         }
 
                         if (render) {
-                            codec.releaseOutputBuffer(outputIndex, max(targetNs, nowNs))
+                            codec.releaseOutputBuffer(outputIndex, max(targetNs, presentNowNs))
                             synchronized(lock) {
                                 lastOutputPtsUs = info.presentationTimeUs
                                 if (!playing) stepFramePending = false
@@ -337,6 +347,41 @@ class AndroidVideoPlayer(
                 if (worker === Thread.currentThread()) worker = null
                 if (!released && state.get() != -1) state.set(0)
             }
+        }
+    }
+
+    private fun createPreferredDecoder(mime: String): MediaCodec {
+        val infos = runCatching {
+            MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos.filter { info ->
+                !info.isEncoder && info.supportedTypes.any { it.equals(mime, ignoreCase = true) }
+            }
+        }.getOrDefault(emptyList())
+
+        if (Build.VERSION.SDK_INT >= 29) {
+            val hardware = infos.firstOrNull {
+                runCatching { it.isHardwareAccelerated && !it.isSoftwareOnly }.getOrDefault(false)
+            }
+            if (hardware != null) return MediaCodec.createByCodecName(hardware.name)
+        }
+        return MediaCodec.createDecoderByType(mime)
+    }
+
+    /**
+     * Limit queued future frames. Holding the decoded buffer briefly is better
+     * than filling SurfaceTexture's BufferQueue and producing bursty playback.
+     */
+    private fun waitForPresentationWindow(targetNs: Long, outputSurface: Surface): Boolean {
+        while (targetNs - SystemClock.elapsedRealtimeNanos() > 80_000_000L) {
+            synchronized(lock) {
+                if (stopping || released || surface !== outputSurface ||
+                    pendingSeekUs != null || !playing
+                ) return false
+                lock.wait(5L)
+            }
+        }
+        return synchronized(lock) {
+            !stopping && !released && surface === outputSurface &&
+                pendingSeekUs == null && playing
         }
     }
 
