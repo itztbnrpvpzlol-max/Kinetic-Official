@@ -70,6 +70,7 @@ import androidx.compose.ui.unit.sp
 import com.kinetic.app.data.AppSettings
 import com.kinetic.app.data.AudioEngine
 import com.kinetic.app.data.MediaLoader
+import com.kinetic.app.data.MediaWorkers
 import com.kinetic.app.data.ProjectStore
 import com.kinetic.app.model.EditorState
 import com.kinetic.app.model.Layer
@@ -77,6 +78,9 @@ import com.kinetic.app.model.LayerType
 import com.kinetic.app.model.PropId
 import com.kinetic.app.model.isDescendantOf
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -119,22 +123,42 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                 // Make every source local and seekable before starting transport.
                 // Decode only reusable preview data; never expand whole videos into RAM.
                 val snapshot = editor.layers.filter { it.uri != null }
-                for (layer in snapshot) {
-                    val original = layer.uri ?: continue
-                    val cached = MediaLoader.cacheMedia(ctx, Uri.parse(original))
-                    if (cached.toString() != original) {
-                        editor.updateLayer(layer.id, push = false) { it.copy(uri = cached.toString()) }
-                    }
-                    val current = editor.layers.firstOrNull { it.id == layer.id } ?: continue
-                    when (current.type) {
-                        LayerType.IMAGE -> MediaLoader.bitmapFor(ctx, cached, LayerType.IMAGE, 0f, 1, 720)
-                        LayerType.VIDEO -> {
-                            MediaLoader.bitmapFor(ctx, cached, LayerType.VIDEO, current.srcOffset, 2, 720)
-                            MediaLoader.waveform(ctx, cached, 240)
+                // Stage 1: make all project sources local. File copies are I/O-bound
+                // and remain on Dispatchers.IO, never on the UI thread.
+                val cachedSources = coroutineScope {
+                    snapshot.map { layer ->
+                        async(Dispatchers.IO) {
+                            val original = layer.uri ?: return@async layer.id to null
+                            layer.id to MediaLoader.cacheMedia(ctx, Uri.parse(original))
                         }
-                        LayerType.AUDIO -> MediaLoader.waveform(ctx, cached, 240)
-                        else -> Unit
+                    }.awaitAll().toMap()
+                }
+                cachedSources.forEach { (id, cached) ->
+                    if (cached != null) {
+                        val old = editor.layers.firstOrNull { it.id == id }?.uri
+                        if (old != null && old != cached.toString()) {
+                            editor.updateLayer(id, push = false) { it.copy(uri = cached.toString()) }
+                        }
                     }
+                }
+                // Stage 2: decode reusable thumbnails/waveforms on the bounded
+                // CPU pool. Limit simultaneous decoders to avoid exhausting codec
+                // instances on phones with constrained media hardware.
+                coroutineScope {
+                    snapshot.mapNotNull { layer ->
+                        val cached = cachedSources[layer.id] ?: return@mapNotNull null
+                        async {
+                            when (layer.type) {
+                                LayerType.IMAGE -> MediaLoader.bitmapFor(ctx, cached, LayerType.IMAGE, 0f, 1, 720)
+                                LayerType.VIDEO -> {
+                                    MediaLoader.bitmapFor(ctx, cached, LayerType.VIDEO, layer.srcOffset, 2, 720)
+                                    MediaLoader.waveform(ctx, cached, 240)
+                                }
+                                LayerType.AUDIO -> MediaLoader.waveform(ctx, cached, 240)
+                                else -> Unit
+                            }
+                        }
+                    }.chunked(2).forEach { batch -> batch.awaitAll() }
                 }
                 editor.playing = true
             } catch (error: Throwable) {
@@ -208,7 +232,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
             for (u in uris) {
                 runCatching { ctx.contentResolver.takePersistableUriPermission(u, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION) }
                 val cachedUri = MediaLoader.cacheMedia(ctx, u)
-                val info = withContext(Dispatchers.IO) { MediaLoader.probe(ctx, cachedUri, type) }
+                val info = withContext(MediaWorkers.cpuDispatcher) { MediaLoader.probe(ctx, cachedUri, type) }
                 val name = MediaLoader.displayName(ctx, u)
                 editor.addMedia(type, name, cachedUri.toString(), info.width, info.height, info.length)
             }
@@ -292,7 +316,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                 onImport = { item, trimIn, trimOut ->
                     scope.launch {
                         val cachedUri = MediaLoader.cacheMedia(ctx, item.uri)
-                        val info = withContext(Dispatchers.IO) { MediaLoader.probe(ctx, cachedUri, item.type) }
+                        val info = withContext(MediaWorkers.cpuDispatcher) { MediaLoader.probe(ctx, cachedUri, item.type) }
                         editor.addMediaTrimmed(item.type, item.name, cachedUri.toString(),
                             if (info.width > 0) info.width else item.width,
                             if (info.height > 0) info.height else item.height,

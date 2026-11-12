@@ -5,6 +5,7 @@ import android.net.Uri
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.SystemClock
+import android.os.Process
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
@@ -24,7 +25,7 @@ import kotlin.math.abs
  */
 class AudioEngine(context: Context) {
     private val appContext = context.applicationContext
-    private val playbackThread = HandlerThread("KineticAudioPlayback").apply { start() }
+    private val playbackThread = HandlerThread("KineticAudioPlayback", Process.THREAD_PRIORITY_AUDIO).apply { start() }
     private val handler = Handler(playbackThread.looper)
     private val players = HashMap<String, ExoPlayer>()
     private val playerUris = HashMap<String, String>()
