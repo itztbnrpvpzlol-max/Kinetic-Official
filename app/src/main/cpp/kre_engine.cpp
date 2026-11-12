@@ -29,7 +29,7 @@ public:
         const double stepValue = 1000000.0 / safeFps * safeSpeed;
         const int64_t step = std::max<int64_t>(1, static_cast<int64_t>(std::llround(stepValue)));
         const int64_t base = std::max<int64_t>(0, playheadUs);
-        result.reserve(static_cast<size_t>(count));
+        result.reserve(static_cast<std::size_t>(count));
         for (int i = 0; i < count; ++i) {
             if (i > 0 && step >
                 (std::numeric_limits<int64_t>::max() - base) / static_cast<int64_t>(i)) break;
@@ -46,12 +46,12 @@ class CalculationCache {
     std::mutex mutex_;
     std::unordered_map<uint64_t, Entry> entries_;
     std::list<uint64_t> lru_;
-    size_t bytes_ = 0;
-    size_t budget_ = 2u * 1024u * 1024u;
+    std::size_t bytes_ = 0;
+    std::size_t budget_ = 2u * 1024u * 1024u;
 public:
-    void setBudget(size_t bytes) {
+    void setBudget(std::size_t bytes) {
         std::lock_guard<std::mutex> guard(mutex_);
-        budget_ = std::clamp<size_t>(bytes, 64u * 1024u, 16u * 1024u * 1024u);
+        budget_ = std::clamp<std::size_t>(bytes, 64u * 1024u, 16u * 1024u * 1024u);
         trimLocked();
     }
     bool get(uint64_t key, std::vector<float>& output) {
@@ -65,7 +65,7 @@ public:
     void put(uint64_t key, const float* values, std::size_t count) {
         if (!values || count == 0 || count > 4096) return;
         std::vector<float> copy(values, values + count);
-        const size_t cost = copy.size() * sizeof(float);
+        const std::size_t cost = copy.size() * sizeof(float);
         std::lock_guard<std::mutex> guard(mutex_);
         auto old = entries_.find(key);
         if (old != entries_.end()) {
@@ -83,7 +83,7 @@ public:
         std::lock_guard<std::mutex> guard(mutex_);
         entries_.clear(); lru_.clear(); bytes_ = 0;
     }
-    size_t bytes() {
+    std::size_t bytes() {
         std::lock_guard<std::mutex> guard(mutex_);
         return bytes_;
     }
@@ -114,7 +114,7 @@ extern "C" bool kreGetCalculation(uint64_t key, float* output, std::size_t count
     return true;
 }
 
-extern "C" void krePutCalculation(uint64_t key, const float* values, size_t count) {
+extern "C" void krePutCalculation(uint64_t key, const float* values, std::size_t count) {
     kre::calculations.put(key, values, count);
 }
 
@@ -135,7 +135,7 @@ Java_com_kinetic_app_engine_KreEngine_nativePlanFrames(
 extern "C" JNIEXPORT void JNICALL
 Java_com_kinetic_app_engine_KreEngine_nativeSetCalculationCacheBudget(
         JNIEnv*, jobject, jint bytes) {
-    kre::calculations.setBudget(static_cast<size_t>(std::max(0, bytes)));
+    kre::calculations.setBudget(static_cast<std::size_t>(std::max(0, bytes)));
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
@@ -145,7 +145,7 @@ Java_com_kinetic_app_engine_KreEngine_nativeGetCalculation(
     const jsize count = env->GetArrayLength(output);
     std::vector<float> values;
     if (!kre::calculations.get(static_cast<uint64_t>(fingerprint), values) ||
-        values.size() != static_cast<size_t>(count)) return JNI_FALSE;
+        values.size() != static_cast<std::size_t>(count)) return JNI_FALSE;
     env->SetFloatArrayRegion(output, 0, count, values.data());
     return JNI_TRUE;
 }
@@ -156,7 +156,7 @@ Java_com_kinetic_app_engine_KreEngine_nativePutCalculation(
     if (!input) return;
     const jsize count = env->GetArrayLength(input);
     if (count <= 0 || count > 4096) return;
-    std::vector<float> values(static_cast<size_t>(count));
+    std::vector<float> values(static_cast<std::size_t>(count));
     env->GetFloatArrayRegion(input, 0, count, values.data());
     if (env->ExceptionCheck()) { env->ExceptionClear(); return; }
     kre::calculations.put(static_cast<uint64_t>(fingerprint), values.data(), values.size());
@@ -164,7 +164,7 @@ Java_com_kinetic_app_engine_KreEngine_nativePutCalculation(
 
 extern "C" JNIEXPORT jint JNICALL
 Java_com_kinetic_app_engine_KreEngine_nativeCalculationCacheBytes(JNIEnv*, jobject) {
-    return static_cast<jint>(std::min<size_t>(kre::calculations.bytes(), 0x7fffffff));
+    return static_cast<jint>(std::min<std::size_t>(kre::calculations.bytes(), 0x7fffffff));
 }
 
 extern "C" JNIEXPORT void JNICALL
