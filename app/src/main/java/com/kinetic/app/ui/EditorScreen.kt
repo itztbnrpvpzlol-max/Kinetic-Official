@@ -79,7 +79,6 @@ import com.kinetic.app.data.AudioEngine
 import com.kinetic.app.data.MediaLoader
 import com.kinetic.app.data.MediaWorkers
 import com.kinetic.app.data.PreviewDiagnostics
-import com.kinetic.app.data.TimelineRamCache
 import com.kinetic.app.data.ProjectStore
 import com.kinetic.app.model.COMP_H
 import com.kinetic.app.model.COMP_W
@@ -137,7 +136,6 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
         onDispose {
             playback.release()
             audio.release()
-            TimelineRamCache.clear()
             MediaLoader.releaseAll()
         }
     }
@@ -148,13 +146,11 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                 when {
                     level >= ComponentCallbacks2.TRIM_MEMORY_COMPLETE -> {
                         KreEngine.clearCalculationCache()
-                        TimelineRamCache.invalidate()
                         KreEngine.setCalculationCacheBudget(64 * 1024)
                     }
                     level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW -> {
                         // LRU residency may have changed; discard the old
                         // working-set indicator and rebuild it after pressure.
-                        TimelineRamCache.invalidate()
                         KreEngine.setCalculationCacheBudget(64 * 1024)
                     }
                 }
@@ -162,7 +158,6 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
 
             override fun onLowMemory() {
                 MediaLoader.trimMemory(ComponentCallbacks2.TRIM_MEMORY_COMPLETE)
-                TimelineRamCache.invalidate()
                 KreEngine.clearCalculationCache()
                 KreEngine.setCalculationCacheBudget(64 * 1024)
             }
