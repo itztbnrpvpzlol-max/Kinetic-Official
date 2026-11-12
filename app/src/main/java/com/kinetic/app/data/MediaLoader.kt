@@ -31,8 +31,8 @@ import kotlin.math.max
 object MediaLoader {
     class Info(val length: Float?, val width: Int, val height: Int)
 
-    // A moderate temporal sampling rate for the constrained CPU Canvas preview.
-    const val CPU_PREVIEW_SAMPLE_FPS = 30
+    // A balanced temporal sampling rate for the constrained CPU Canvas preview.
+    const val CPU_PREVIEW_SAMPLE_FPS = 20
 
     // Bitmap memory is expensive on mobile. Keep the preview cache proportional
     // to the app heap instead of allowing a user preference to consume hundreds
@@ -45,7 +45,7 @@ object MediaLoader {
     private val retrieverLocks = ConcurrentHashMap<String, Any>()
     private val retrieverRegistryLock = Any()
     private val retrieverLru = LinkedHashMap<String, Unit>(8, 0.75f, true)
-    @Volatile private var maxCachedRetrievers = if (MediaWorkers.isConstrainedDevice) 1 else 4
+    @Volatile private var maxCachedRetrievers = if (MediaWorkers.isConstrainedDevice) 2 else 4
     private val waveformCache = object : LruCache<String, FloatArray>(if (MediaWorkers.isConstrainedDevice) 2 * 1024 * 1024 else 8 * 1024 * 1024) {
         override fun sizeOf(key: String, value: FloatArray): Int = value.size * 4
     }
@@ -85,9 +85,11 @@ object MediaLoader {
             else -> requested
         }
         cache.resize(minOf(requested, adaptiveLimit).coerceAtLeast(4) * 1024 * 1024)
-        maxCachedRetrievers = if (
-            memoryInfo.lowMemory || availableMb < 160 || MediaWorkers.isConstrainedDevice
-        ) 1 else 4
+        maxCachedRetrievers = when {
+            memoryInfo.lowMemory || availableMb < 160 -> 1
+            MediaWorkers.isConstrainedDevice -> 2
+            else -> 4
+        }
         trimRetrieverCache(maxCachedRetrievers)
     }
 
@@ -617,7 +619,11 @@ object MediaLoader {
     }
 
     private fun videoFrame(ctx: Context, uri: Uri, sec: Float, maxEdge: Int): Bitmap? {
-        val key = uri.toString()
+        val sourceKey = uri.toString()
+        // Use a separate retriever per decoder thread. The live preview and its
+        // one-frame look-ahead can decode concurrently without sharing a native
+        // MediaMetadataRetriever instance across threads.
+        val key = "$sourceKey#${Thread.currentThread().id}"
         val lock = retrieverLocks.computeIfAbsent(key) { Any() }
         return synchronized(lock) {
             val r = obtainRetriever(ctx, uri, key)
