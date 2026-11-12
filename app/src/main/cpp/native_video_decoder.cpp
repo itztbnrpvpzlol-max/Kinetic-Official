@@ -268,12 +268,26 @@ struct NativeVideoDecoder {
             AMediaCodecBufferInfo info{};
             const ssize_t outputIndex = AMediaCodec_dequeueOutputBuffer(codec, &info, 1000);
             if (outputIndex >= 0) {
-                bool render = info.size > 0;
+                // Surface-backed video decoders may report size == 0 because
+                // decoded pixels are delivered to the Surface, not a CPU buffer.
+                // A non-EOS output buffer is still a displayable frame.
+                const bool endOfStream = (info.flags & AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM) != 0;
+                const bool render = !endOfStream;
+                static std::atomic<uint32_t> outputBuffers{0};
                 static std::atomic<uint32_t> renderedFrames{0};
+                const uint32_t outputNumber = ++outputBuffers;
+                if (outputNumber <= 8 || outputNumber % 300 == 0) {
+                    __android_log_print(ANDROID_LOG_INFO, LOG_TAG,
+                        "Codec output #%u pts=%lldus size=%d flags=0x%x render=%d",
+                        outputNumber, (long long)info.presentationTimeUs, info.size,
+                        info.flags, render ? 1 : 0);
+                }
                 if (render) {
                     const uint32_t frameNumber = ++renderedFrames;
                     if (frameNumber == 1 || frameNumber % 300 == 0) {
-                        __android_log_print(ANDROID_LOG_INFO, LOG_TAG, "Decoded video output frame %u pts=%lldus size=%d", frameNumber, (long long)info.presentationTimeUs, info.size);
+                        __android_log_print(ANDROID_LOG_INFO, LOG_TAG,
+                            "Queueing video frame %u pts=%lldus size=%d",
+                            frameNumber, (long long)info.presentationTimeUs, info.size);
                     }
                 }
                 if (render && dropBeforeUs >= 0) {
