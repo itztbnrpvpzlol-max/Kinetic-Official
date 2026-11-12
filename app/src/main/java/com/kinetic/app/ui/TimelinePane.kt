@@ -420,7 +420,7 @@ private fun Clip(editor: EditorState, layer: Layer, pps: Float, selected: Boolea
                 }
             }
         }
-        // // The cyan strip shows cumulative per-clip cache preparation progress.
+        // The cyan strip shows cumulative per-clip cache preparation progress.
         // It is independent of the playhead and does not rewind on scrubbing.
         if (layer.type == LayerType.VIDEO) {
             val ramWindow = TimelineRamCache.windows[layer.id]
@@ -434,7 +434,7 @@ private fun Clip(editor: EditorState, layer: Layer, pps: Float, selected: Boolea
                     (ramWindow.startSec - layer.start) / clipDuration
                 ).coerceIn(0f, 1f)
                 val cachedFraction = (
-                    (ramWindow.cachedUntilSec - ramWindow.startSec) / clipDuration
+                    (ramWindow.preparedUntilSec - ramWindow.startSec) / clipDuration
                 ).coerceIn(0f, 1f - startFraction)
                 if (cachedFraction > 0f) {
                     Box(
