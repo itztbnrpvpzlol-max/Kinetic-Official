@@ -45,6 +45,18 @@ object MediaLoader {
     private val sourceProxyWrites = AtomicInteger()
 
     /**
+     * Keep a rolling minimum of fifteen small source frames across active
+     * video layers. At 240px max edge, even square ARGB frames fit in the
+     * constrained-device 4 MiB minimum cache budget.
+     */
+    fun recommendedPrefetchFrameCount(activeVideoLayers: Int): Int {
+        val layers = activeVideoLayers.coerceAtLeast(1)
+        val worstCaseFrameBytes = 240L * 240L * 4L
+        return (cache.maxSize().toLong() / worstCaseFrameBytes / layers)
+            .toInt().coerceIn(1, 15)
+    }
+
+    /**
      * Keep decoded frames in a bounded RAM LRU. The user preference is only a
      * requested ceiling: the app heap and currently available system memory
      * always win, especially on 2 GB devices.
@@ -199,10 +211,10 @@ object MediaLoader {
         firstFrameTimeSec: Float,
         frameCount: Int = 2,
         sampleFps: Int = 12,
-        maxEdge: Int = 640,
+        maxEdge: Int = 240,
         sourceStepSec: Float = 1f / sampleFps
     ) = withContext(MediaWorkers.cacheDispatcher) {
-        val count = frameCount.coerceIn(1, if (MediaWorkers.isConstrainedDevice) 1 else 4)
+        val count = frameCount.coerceIn(1, 15)
         for (index in 0 until count) {
             currentCoroutineContext().ensureActive()
             bitmapFor(
