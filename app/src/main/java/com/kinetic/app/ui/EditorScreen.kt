@@ -1,6 +1,7 @@
 package com.kinetic.app.ui
 
 import android.net.Uri
+import android.app.ActivityManager
 import android.content.ComponentCallbacks2
 import android.content.res.Configuration
 import android.widget.Toast
@@ -150,6 +151,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                         KreEngine.setCalculationCacheBudget(64 * 1024)
                     }
                     level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW -> {
+                        TimelineRamCache.clear()
                         KreEngine.setCalculationCacheBudget(64 * 1024)
                     }
                 }
@@ -186,6 +188,17 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
             "${it.id}|${it.uri}|${it.start}|${it.duration}|${it.srcOffset}|${it.speed}|${it.visible}|${it.type}"
         }
     ) {
+        val activityManager = ctx.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+        val memoryInfo = ActivityManager.MemoryInfo()
+        runCatching { activityManager?.getMemoryInfo(memoryInfo) }
+        val usesCpuPreview = activityManager?.isLowRamDevice == true ||
+            memoryInfo.totalMem < 3L * 1024L * 1024L * 1024L ||
+            MediaWorkers.isConstrainedDevice
+        if (!usesCpuPreview) {
+            TimelineRamCache.clear()
+            return@LaunchedEffect
+        }
+
         val videoLayers = editor.layers.filter {
             it.visible && it.type == LayerType.VIDEO && it.uri != null
         }
