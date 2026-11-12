@@ -242,7 +242,7 @@ private fun GpuCompositionPreviewCanvas(
                         MediaLoader.bitmapFor(
                             context, Uri.parse(uri), layer.type, sourceTime,
                             sampleFps = 12,
-                            maxEdge = 480
+                            maxEdge = 448
                         )?.let { frames[layer.id] = it }
                     } else frames.remove(layer.id)
                 }
