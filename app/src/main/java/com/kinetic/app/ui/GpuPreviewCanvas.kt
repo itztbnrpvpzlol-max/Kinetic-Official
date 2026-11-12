@@ -445,7 +445,7 @@ private fun GpuVideoPlayerLayer(
         }
     }
 
-    LaunchedEffect(player, layer.id, playback, layer.start, layer.srcOffset, layer.speed) {
+    LaunchedEffect(player, layer.id, playback, layer.start, layer.srcOffset, layer.speed, editor.fps) {
         if (playback != null) {
             val clipStartUs = (layer.start * 1_000_000.0).toLong()
             val sourceOffsetUs = (layer.srcOffset * 1_000_000.0).toLong()
