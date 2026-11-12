@@ -677,8 +677,6 @@ private class CompositionGlRenderer(
     }
 
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
-        GLES20.glClearColor(0.02f, 0.02f, 0.04f, 1f)
-        GLES20.glDisable(GLES20.GL_DEPTH_TEST)
         // A recreated EGL context invalidates every texture/program from the old context.
         textures.clear()
         // The previous EGL context is gone; its GL names must not be deleted in
@@ -714,7 +712,6 @@ private class CompositionGlRenderer(
     override fun onSurfaceChanged(gl: GL10?, width: Int, height: Int) {
         viewportWidth = width.coerceAtLeast(1)
         viewportHeight = height.coerceAtLeast(1)
-        GLES20.glViewport(0, 0, viewportWidth, viewportHeight)
     }
 
     override fun onDrawFrame(gl: GL10?) {
@@ -737,8 +734,9 @@ private class CompositionGlRenderer(
             } else {
                 GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
             }
-            GLES20.glViewport(0, 0, viewportWidth, viewportHeight)
-            GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+            NativeRenderEngine.nativeGlBeginFrame(
+                current.background, viewportWidth, viewportHeight
+            )
             activeTextureIds.clear()
             for (layer in current.layers) if (!layer.isVideo) activeTextureIds.add(layer.id)
             val textureIterator = textures.entries.iterator()
