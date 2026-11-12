@@ -138,7 +138,8 @@ fun CpuPreviewCanvas(editor: EditorState, modifier: Modifier = Modifier) {
     val destinationRects = remember(layerSnapshot) {
         layerSnapshot.associate { it.id to RectF(0f, 0f, it.width, it.height) }
     }
-    val matrixScratch = remember(layerSnapshot) { mutableMapOf<String, Matrix>() }
+    val layerMatrices = remember(layerSnapshot) { mutableMapOf<String, Matrix>() }
+    val matrixScratch = remember(layerSnapshot) { mutableMapOf<Int, Matrix>() }
     val selectionPath = remember { AndroidPath() }
     val selectionPoints = remember { FloatArray(8) }
     val selectionAnchor = remember { FloatArray(2) }
@@ -184,7 +185,9 @@ fun CpuPreviewCanvas(editor: EditorState, modifier: Modifier = Modifier) {
                 if (!l.visible || !l.activeAt(time)) continue
                 val alpha = (l.p(PropId.OPACITY).valueAt(time) * 2.55f).toInt().coerceIn(0, 255)
                 nc.save()
-                nc.concat(matrixScratch.getOrPut(l.id) { Matrix() }.also { matrix -> layerMatrixInto(l, time, byId, matrix, matrixScratch) })
+                val layerMatrix = layerMatrices.getOrPut(l.id) { Matrix() }
+                layerMatrixInto(l, time, byId, layerMatrix, matrixScratch)
+                nc.concat(layerMatrix)
                 if (l.maskEnabled) nc.clipRect(0f, 0f, l.width * 0.8f, l.height * 0.8f)
                 paint.xfermode = blendModes[l.blendMode]
                 paint.colorFilter = if ("Grayscale" in l.effects) grayscaleFilter else null
@@ -225,7 +228,8 @@ fun CpuPreviewCanvas(editor: EditorState, modifier: Modifier = Modifier) {
                 nc.save()
                 nc.translate(ox, oy)
                 nc.scale(s, s)
-                val m = matrixScratch.getOrPut(sel.id) { Matrix() }.also { matrix -> layerMatrixInto(sel, time, byId, matrix, matrixScratch) }
+                val m = layerMatrices.getOrPut(sel.id) { Matrix() }
+                layerMatrixInto(sel, time, byId, m, matrixScratch)
                 val pts = selectionPoints
                 pts[0] = 0f; pts[1] = 0f
                 pts[2] = sel.width; pts[3] = 0f
