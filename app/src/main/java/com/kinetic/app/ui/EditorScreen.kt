@@ -152,7 +152,8 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                         KreEngine.setCalculationCacheBudget(64 * 1024)
                     }
                     level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW -> {
-                        TimelineRamCache.clear()
+                        // Let Android/MediaLoader trim bitmap residency, but
+                        // preserve each clip's sequential scan cursor.
                         KreEngine.setCalculationCacheBudget(64 * 1024)
                     }
                 }
@@ -180,13 +181,15 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
     }
     LaunchedEffect(editor.layers.map { it.id to it.uri }) { audio.prepare(editor.layers) }
 
-    // RAM timeline preview: continuously warm a bounded window of decoded
-    // source frames around the playhead. The exact 12fps/320px keys are also
-    // requested by the constrained-device CPU preview, so playback can reuse
-    // these frames directly. Nothing is transcoded or written to disk.
+    // Persistent per-clip RAM cache pass. The cursor belongs to the clip,
+    // not the playhead: scrubbing and play/pause never move it backwards.
+    // Frames are decoded at the same 12fps/320px keys used by CPU playback.
     LaunchedEffect(
         editor.layers.map {
-            "${it.id}|${it.uri}|${it.start}|${it.duration}|${it.srcOffset}|${it.speed}|${it.visible}|${it.type}"
+            val fingerprint = it.uri?.let { raw ->
+                MediaLoader.mediaCacheFingerprint(Uri.parse(raw))
+            }
+            "${it.id}|${fingerprint}|${it.start}|${it.duration}|${it.srcOffset}|${it.speed}|${it.type}"
         }
     ) {
         val activityManager = ctx.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
@@ -201,66 +204,90 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
         }
 
         val videoLayers = editor.layers.filter {
-            it.visible && it.type == LayerType.VIDEO && it.uri != null
+            it.type == LayerType.VIDEO && it.uri != null
         }
         if (videoLayers.isEmpty()) {
             TimelineRamCache.clear()
             return@LaunchedEffect
         }
-        TimelineRamCache.retain(videoLayers.map { it.id }.toSet())
 
+        val sampleFps = 12
+        val frameEdge = 320
+        val layerIds = videoLayers.map { it.id }.toSet()
+        TimelineRamCache.retain(layerIds)
+
+        for (layer in videoLayers) {
+            val source = Uri.parse(layer.uri ?: continue)
+            val signature = listOf(
+                MediaLoader.mediaCacheFingerprint(source),
+                layer.start,
+                layer.duration,
+                layer.srcOffset,
+                layer.speed,
+                layer.type
+            ).joinToString("|")
+            TimelineRamCache.ensure(
+                layer.id, signature, layer.start, layer.duration, sampleFps
+            )
+        }
+
+        val failedAttempts = mutableMapOf<String, Int>()
+        var nextLayerIndex = 0
         while (true) {
-            val playhead = editor.time
-            val candidates = videoLayers.filter {
-                it.end > playhead && it.start <= playhead + 2.5f
-            }.take(3)
-            TimelineRamCache.retain(candidates.map { it.id }.toSet())
-
-            if (candidates.isEmpty()) {
-                delay(180L)
+            val pendingLayers = videoLayers.filter { layer ->
+                val scan = TimelineRamCache.scan(layer.id)
+                scan != null && scan.nextFrameIndex < scan.totalFrames
+            }
+            if (pendingLayers.isEmpty()) {
+                // Completed clips stay complete. Do not restart a pass just
+                // because the user pauses, seeks, or leaves the playhead still.
+                delay(1_000L)
                 continue
             }
 
-            val frameBudget = MediaLoader.recommendedTimelineCacheFrames(candidates.size, 320)
-            for (layer in candidates) {
-                val source = Uri.parse(layer.uri ?: continue)
-                val startTimeline = maxOf(
-                    layer.start,
-                    playhead - if (editor.playing) 0.25f else 0f
-                )
-                val timelineStep = 1f / 12f
-                val count = minOf(
-                    frameBudget,
-                    ((layer.end - startTimeline).coerceAtLeast(0f) * 12f).toInt() + 1
-                ).coerceAtLeast(1)
-                val targetEnd = minOf(layer.end, startTimeline + (count - 1) * timelineStep)
-                var cachedUntil = startTimeline
-                TimelineRamCache.publish(layer.id, startTimeline, cachedUntil, targetEnd)
+            val layer = pendingLayers[nextLayerIndex % pendingLayers.size]
+            nextLayerIndex++
+            val scan = TimelineRamCache.scan(layer.id) ?: continue
+            val frameIndex = scan.nextFrameIndex
+            val timelineTime = minOf(
+                scan.startSec + frameIndex / sampleFps.toFloat(),
+                scan.endSec
+            )
+            val source = Uri.parse(layer.uri ?: continue)
+            val sourceTime = (
+                (timelineTime - layer.start).coerceAtLeast(0f) *
+                    layer.speed.coerceIn(0.1f, 4f) + layer.srcOffset
+            ).coerceAtLeast(0f)
+            val ready = MediaLoader.hasCachedVideoFrame(
+                source, sourceTime, sampleFps, frameEdge
+            ) || MediaLoader.bitmapFor(
+                ctx, source, LayerType.VIDEO, sourceTime,
+                sampleFps = sampleFps,
+                maxEdge = frameEdge,
+                persistToDisk = false,
+                lowPriorityPrefetch = true
+            ) != null
 
-                for (index in 0 until count) {
-                    val timelineTime = minOf(startTimeline + index * timelineStep, targetEnd)
-                    val sourceTime = (
-                        (timelineTime - layer.start).coerceAtLeast(0f) *
-                            layer.speed.coerceIn(0.1f, 4f) + layer.srcOffset
-                    ).coerceAtLeast(0f)
-                    val alreadyCached = MediaLoader.hasCachedVideoFrame(
-                        source, sourceTime, sampleFps = 12, maxEdge = 320
-                    )
-                    val ready = alreadyCached || MediaLoader.bitmapFor(
-                        ctx, source, LayerType.VIDEO, sourceTime,
-                        sampleFps = 12, maxEdge = 320,
-                        persistToDisk = false, lowPriorityPrefetch = true
-                    ) != null
-                    if (!ready) break
-
-                    cachedUntil = timelineTime
-                    TimelineRamCache.publish(layer.id, startTimeline, cachedUntil, targetEnd)
-                    // Don't spend time filling a window that playback has
-                    // already passed; the next pass will follow the playhead.
-                    if (editor.playing && editor.time > timelineTime + 0.35f) break
+            val failureKey = "${layer.id}:${frameIndex}"
+            if (ready) {
+                failedAttempts.remove(failureKey)
+                TimelineRamCache.markPrepared(layer.id, frameIndex, timelineTime)
+            } else {
+                val attempts = (failedAttempts[failureKey] ?: 0) + 1
+                if (attempts >= 3) {
+                    // A corrupt/unreadable frame must not block the rest of
+                    // this clip's cache pass forever.
+                    failedAttempts.remove(failureKey)
+                    TimelineRamCache.markPrepared(layer.id, frameIndex, timelineTime)
+                } else {
+                    failedAttempts[failureKey] = attempts
+                    delay(120L)
                 }
             }
-            delay(if (editor.playing) 80L else 250L)
+
+            // Yield frequently; the cache dispatcher is already lowest priority,
+            // and this keeps live preview/audio responsive on four-core phones.
+            delay(if (editor.playing) 20L else 45L)
         }
     }
 
