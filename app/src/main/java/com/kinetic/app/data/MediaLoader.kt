@@ -225,39 +225,109 @@ object MediaLoader {
         maxEdge: Int = 960,
         persistToDisk: Boolean = true,
         lowPriorityPrefetch: Boolean = false
-    ): Bitmap? = withContext(if (lowPriorityPrefetch) MediaWorkers.cacheDispatcher else MediaWorkers.previewDispatcher) {
-        val bucket = if (type == LayerType.VIDEO) (timeSec * sampleFps.toFloat()).toInt() else 0
-        val sourceKey = mediaCacheIdentity(uri)
-        val key = if (type == LayerType.IMAGE) "$sourceKey@image@$maxEdge" else "$sourceKey@$sampleFps@$maxEdge@$bucket"
-        synchronized(key.intern()) {
-            val hit = cache.get(key)
-            if (hit != null) return@synchronized hit
-            val diskFile = if (persistToDisk) previewFrameFile(ctx, key, type) else null
-            val diskBitmap = diskFile?.takeIf { it.isFile }?.let { BitmapFactory.decodeFile(it.absolutePath) }
-            val bmp = diskBitmap ?: try {
-                if (type == LayerType.IMAGE) decodeImage(ctx, uri, maxEdge) else videoFrame(ctx, uri, bucket / sampleFps.toFloat(), maxEdge)
-            } catch (e: Exception) {
-                null
-            }
-            if (bmp != null) {
-                cache.put(key, bmp)
-                if (diskFile != null && diskBitmap == null) {
-                    runCatching {
-                        diskFile.parentFile?.mkdirs()
-                        FileOutputStream(diskFile).use { output ->
-                            val format = if (type == LayerType.IMAGE) Bitmap.CompressFormat.PNG else Bitmap.CompressFormat.JPEG
-                            bmp.compress(format, 86, output)
-                        }
-                        // Keep source proxy frames bounded; the OS may also evict
-                        // this cache directory when device storage gets tight.
-                        if (sourceProxyWrites.incrementAndGet() % 32 == 0) {
-                            trimPreviewDiskCache(ctx)
+    ): Bitmap? {
+        val requestNs = System.nanoTime()
+        return withContext(if (lowPriorityPrefetch) MediaWorkers.cacheDispatcher else MediaWorkers.previewDispatcher) {
+            val workerStartNs = System.nanoTime()
+            val bucket = if (type == LayerType.VIDEO) (timeSec * sampleFps.toFloat()).toInt() else 0
+            val sourceKey = mediaCacheIdentity(uri)
+            val key = if (type == LayerType.IMAGE) "$sourceKey@image@$maxEdge" else "$sourceKey@$sampleFps@$maxEdge@$bucket"
+            synchronized(key.intern()) {
+                val hit = cache.get(key)
+                if (hit != null) {
+                    if (!lowPriorityPrefetch) {
+                        PreviewDiagnostics.recordCpuFrameRequest(
+                            ramHit = true, diskHit = false, decodeNs = 0L,
+                            queueNs = workerStartNs - requestNs
+                        )
+                    }
+                    return@synchronized hit
+                }
+
+                val diskFile = if (persistToDisk) previewFrameFile(ctx, key, type) else null
+                val diskBitmap = diskFile?.takeIf { it.isFile }?.let { BitmapFactory.decodeFile(it.absolutePath) }
+                val decodeStartedNs = System.nanoTime()
+                val bmp = diskBitmap ?: try {
+                    if (type == LayerType.IMAGE) decodeImage(ctx, uri, maxEdge)
+                    else videoFrame(ctx, uri, bucket / sampleFps.toFloat(), maxEdge)
+                } catch (e: Exception) {
+                    null
+                }
+                val decodeDurationNs = if (diskBitmap == null) {
+                    System.nanoTime() - decodeStartedNs
+                } else 0L
+
+                if (!lowPriorityPrefetch) {
+                    PreviewDiagnostics.recordCpuFrameRequest(
+                        ramHit = false,
+                        diskHit = diskBitmap != null,
+                        decodeNs = decodeDurationNs,
+                        queueNs = workerStartNs - requestNs
+                    )
+                }
+
+                if (bmp != null) {
+                    cache.put(key, bmp)
+                    if (diskFile != null && diskBitmap == null) {
+                        runCatching {
+                            diskFile.parentFile?.mkdirs()
+                            FileOutputStream(diskFile).use { output ->
+                                val format = if (type == LayerType.IMAGE) Bitmap.CompressFormat.PNG else Bitmap.CompressFormat.JPEG
+                                bmp.compress(format, 86, output)
+                            }
+                            if (sourceProxyWrites.incrementAndGet() % 32 == 0) {
+                                trimPreviewDiskCache(ctx)
+                            }
                         }
                     }
                 }
+                bmp
             }
-            bmp
         }
+    }
+
+    /**
+     * Warm a bounded set of exact preview buckets around the paused playhead.
+     * This is a working set, not a whole-clip scan: old frames may leave the LRU
+     * as the user moves to another part of the composition.
+     */
+    suspend fun prefetchVideoFrameWindow(
+        ctx: Context,
+        uri: Uri,
+        centerTimeSec: Float,
+        beforeFrames: Int,
+        afterFrames: Int,
+        sampleFps: Int = 12,
+        maxEdge: Int = 320,
+        minimumTimeSec: Float = 0f,
+        maximumTimeSec: Float = Float.POSITIVE_INFINITY
+    ): Int = withContext(MediaWorkers.cacheDispatcher) {
+        val fps = sampleFps.coerceAtLeast(1)
+        val before = beforeFrames.coerceIn(0, 8)
+        val after = afterFrames.coerceIn(0, 12)
+        val step = 1f / fps.toFloat()
+        val times = (0..(before + after)).map { index ->
+            (centerTimeSec + (index - before) * step)
+                .coerceIn(minimumTimeSec.coerceAtLeast(0f), maximumTimeSec)
+        }.distinctBy { (it * fps).toInt() }
+
+        for (time in times) {
+            currentCoroutineContext().ensureActive()
+            bitmapFor(
+                ctx, uri, LayerType.VIDEO, time,
+                sampleFps = fps,
+                maxEdge = maxEdge,
+                persistToDisk = false,
+                lowPriorityPrefetch = true
+            )
+        }
+
+        var residentPrefix = 0
+        for (time in times) {
+            if (!hasCachedVideoFrame(uri, time, fps, maxEdge)) break
+            residentPrefix++
+        }
+        residentPrefix
     }
 
     /**
