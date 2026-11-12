@@ -1,6 +1,9 @@
 package com.kinetic.app.data
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.setValue
 
 /**
  * Describes the small RAM working set nearest a clip's current playhead.
@@ -16,6 +19,8 @@ object TimelineRamCache {
     )
 
     val windows = mutableStateMapOf<String, Window>()
+    var generation by mutableIntStateOf(0)
+        private set
     private val signatures = mutableMapOf<String, String>()
 
     fun setWindow(
@@ -38,6 +43,11 @@ object TimelineRamCache {
             start + (end - start) * (ready.toFloat() / total.toFloat())
         }
         windows[layerId] = Window(start, preparedUntil, end, ready, total)
+    }
+
+    fun invalidate() {
+        windows.clear()
+        generation++
     }
 
     fun clearWindow(layerId: String) {
