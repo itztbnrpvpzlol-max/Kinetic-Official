@@ -69,7 +69,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kinetic.app.data.AppSettings
 import com.kinetic.app.data.AudioEngine
-import com.kinetic.app.data.CompositionFrameCache
 import com.kinetic.app.data.MediaLoader
 import com.kinetic.app.data.MediaWorkers
 import com.kinetic.app.data.PreviewDiagnostics
@@ -123,7 +122,6 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
     val projectStore = remember { ProjectStore(ctx) }
     LaunchedEffect(editor.settings.previewMemoryMb, editor.settings.frameCacheDiskMb) {
         MediaLoader.configureCache(editor.settings.previewMemoryMb)
-        CompositionFrameCache.configure(editor.settings.previewMemoryMb)
     }
     LaunchedEffect(editor.layers.map { it.id to it.uri }) { audio.prepare(editor.layers) }
 
@@ -153,80 +151,8 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
             }
     }
 
-    val cachePriorityFrame = if (editor.playing) -1 else (editor.time * editor.fps).toInt()
-    LaunchedEffect(
-        editor.settings.autoPreviewCache,
-        editor.settings.frameCacheDiskMb,
-        editor.settings.previewQualityIndex,
-        editor.playing,
-        cachePriorityFrame,
-        editor.layers,
-        editor.duration,
-        editor.fps,
-        editor.projectId
-    ) {
-        if (editor.playing) return@LaunchedEffect
-        // Debounce rapid scrubbing so the worker starts from the final playhead
-        // position instead of repeatedly restarting during a drag.
-        delay(500)
-
-        val snapshot = editor.layers.toList()
-        val visualCount = snapshot.count {
-            it.visible && it.type != LayerType.AUDIO &&
-                it.type != LayerType.NULL && it.type != LayerType.ADJUSTMENT
-        }
-        if (visualCount == 0) return@LaunchedEffect
-
-        val qualityScale = resolvePreviewScale(ctx, editor.settings.previewQualityIndex, visualCount)
-        val frameWidth = (COMP_W * qualityScale).toInt().coerceAtLeast(240)
-        val frameHeight = (COMP_H * qualityScale).toInt().coerceAtLeast(135)
-        val frameCount = kotlin.math.ceil(editor.duration * editor.fps)
-            .toInt().coerceAtLeast(1)
-        val startFrame = (editor.time * editor.fps).toInt().coerceIn(0, frameCount - 1)
-
-        // Disabling automatic caching stops new renders but still allows already
-        // rendered frames on disk to be reused by preview playback.
-        if (!editor.settings.autoPreviewCache) {
-            for (frameIndex in 0 until frameCount) {
-                val frameTime = frameIndex / editor.fps.toFloat()
-                val key = withContext(MediaWorkers.cpuDispatcher) {
-                    CompositionFrameCache.frameKey(
-                        editor.projectId, snapshot, frameTime, editor.fps, frameWidth, frameHeight
-                    )
-                }
-                val cached = withContext(Dispatchers.IO) { CompositionFrameCache.isCached(ctx, key) }
-                if (cached) editor.markFrameCached(frameIndex, key)
-            }
-            return@LaunchedEffect
-        }
-
-        // Work outward from the playhead like an editor RAM preview: completed
-        // frames are immediately available while the remaining frames render.
-        for (offset in 0 until frameCount) {
-            val frameIndex = (startFrame + offset) % frameCount
-            val frameTime = frameIndex / editor.fps.toFloat()
-            val key = withContext(MediaWorkers.cpuDispatcher) {
-                CompositionFrameCache.frameKey(
-                    editor.projectId, snapshot, frameTime, editor.fps, frameWidth, frameHeight
-                )
-            }
-            val cached = withContext(Dispatchers.IO) { CompositionFrameCache.isCached(ctx, key) }
-            if (cached) {
-                editor.markFrameCached(frameIndex, key)
-            } else {
-                if (!CompositionFrameCache.hasCapacity(ctx, editor.settings.frameCacheDiskMb)) continue
-                val renderedKey = CompositionFrameCache.renderAndStore(
-                    ctx, editor.projectId, snapshot, frameTime, editor.fps,
-                    frameWidth, frameHeight, editor.settings.frameCacheDiskMb
-                ) ?: continue
-                editor.markFrameCached(frameIndex, renderedKey)
-            }
-            // Yield briefly between idle-cache frames. The dedicated background
-            // workers are priority-limited, so a long fixed sleep only delays cache fill.
-            val priorityWindow = (editor.fps * if (MediaWorkers.isConstrainedDevice) 3f else 6f).toInt()
-            delay(if (offset < priorityWindow) 4 else 28)
-        }
-    }
+    // Timeline composition-frame caching is intentionally disabled. It was
+    // competing with preview decoding and making scrubbing/playback less responsive.
 
     LaunchedEffect(editor.layers, editor.duration, editor.resolution, editor.projectName) {
         delay(400)
@@ -731,41 +657,6 @@ private fun PreviewDiagnosticsBadge(playing: Boolean, modifier: Modifier = Modif
             fontSize = 9.sp,
             maxLines = 1
         )
-    }
-}
-
-@Composable
-private fun CompositionCacheOverlay(progress: Float, modifier: Modifier = Modifier) {
-    Box(
-        modifier.fillMaxSize().background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.62f)),
-        contentAlignment = Alignment.Center
-    ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(
-                "Preparing composition cache",
-                color = KColors.Text,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.SemiBold
-            )
-            Spacer(Modifier.height(10.dp))
-            Box(
-                Modifier.width(190.dp).height(4.dp).clip(CircleShape)
-                    .background(KColors.Line)
-            ) {
-                Box(
-                    Modifier.fillMaxWidth(progress.coerceIn(0f, 1f))
-                        .fillMaxHeight().background(KColors.Accent)
-                )
-            }
-            Spacer(Modifier.height(7.dp))
-            Text(
-                "${(progress.coerceIn(0f, 1f) * 100).toInt()}%",
-                color = KColors.Muted,
-                fontSize = 11.sp
-            )
-            Spacer(Modifier.height(8.dp))
-            Text("Tap Play to cancel", color = KColors.Muted, fontSize = 10.sp)
-        }
     }
 }
 
