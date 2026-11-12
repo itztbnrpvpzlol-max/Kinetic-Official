@@ -211,9 +211,6 @@ private fun Ruler(editor: EditorState, pps: Float, contentW: Dp, centerGutter: D
     val textPaint = remember {
         Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF8D8BA3.toInt() }
     }
-    val readyFrames = remember(editor.cachedFrames.size, editor.cachedFrames.keys.toList()) {
-        editor.cachedFrames.keys.sorted()
-    }
     Canvas(
         Modifier
             .width(contentW)
@@ -231,30 +228,6 @@ private fun Ruler(editor: EditorState, pps: Float, contentW: Dp, centerGutter: D
         val secs = (size.width / dens / pps).toInt() + 1
         val tick = Color(0xFF34344A)
         val originX = centerGutter.toPx()
-        // AE-style green cache indicator: only frames with a completed rendered
-        // composition bitmap are marked. Adjacent ready frames are drawn as runs.
-        if (readyFrames.isNotEmpty()) {
-            var runStart = readyFrames.first()
-            var runEnd = runStart
-            fun drawReadyRun(start: Int, end: Int) {
-                val left = originX + start * pps * dens / editor.fps
-                val right = originX + (end + 1) * pps * dens / editor.fps
-                drawRect(
-                    Color(0xFF39D98A),
-                    Offset(left, 1.dp.toPx()),
-                    Size((right - left).coerceAtLeast(1f), 3.dp.toPx())
-                )
-            }
-            readyFrames.drop(1).forEach { frame ->
-                if (frame == runEnd + 1) runEnd = frame
-                else {
-                    drawReadyRun(runStart, runEnd)
-                    runStart = frame
-                    runEnd = frame
-                }
-            }
-            drawReadyRun(runStart, runEnd)
-        }
         val endX = originX + editor.duration * pps * dens
         if (endX < size.width) drawRect(Color(0x55000000), Offset(endX, 0f), Size(size.width - endX, size.height))
         for (s in 0..secs) {
