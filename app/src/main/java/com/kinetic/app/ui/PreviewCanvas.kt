@@ -1,6 +1,7 @@
 package com.kinetic.app.ui
 
 import android.graphics.Bitmap
+import android.graphics.Matrix
 import android.graphics.DashPathEffect
 import android.graphics.ColorMatrix
 import android.graphics.ColorMatrixColorFilter
@@ -31,7 +32,7 @@ import com.kinetic.app.model.COMP_W
 import com.kinetic.app.model.EditorState
 import com.kinetic.app.model.LayerType
 import com.kinetic.app.model.PropId
-import com.kinetic.app.model.layerMatrix
+import com.kinetic.app.model.layerMatrixInto
 import android.graphics.Path as AndroidPath
 
 private class CpuPreviewClock {
@@ -48,7 +49,7 @@ fun CpuPreviewCanvas(editor: EditorState, modifier: Modifier = Modifier) {
         it.uri != null && (it.type == LayerType.IMAGE || it.type == LayerType.VIDEO)
     }
     val mediaLayerSignature = mediaLayers.map {
-        "${it.id}|${it.uri}|${it.type}|${it.start}|${it.duration}|${it.srcOffset}|${it.speed}"
+        "${it.id}|${it.uri}|${it.type}|${it.start}|${it.duration}|${it.srcOffset}|${it.speed}|${it.visible}"
     }
 
     // Observe the master clock outside composition. Updating this volatile
@@ -75,7 +76,7 @@ fun CpuPreviewCanvas(editor: EditorState, modifier: Modifier = Modifier) {
 
             for (layer in mediaLayers) {
                 val rawUri = layer.uri ?: continue
-                if (!layer.activeAt(timelineTime)) {
+                if (!layer.visible || !layer.activeAt(timelineTime)) {
                     lastRequests.remove(layer.id)
                     bitmaps.remove(layer.id)
                     continue
@@ -132,6 +133,25 @@ fun CpuPreviewCanvas(editor: EditorState, modifier: Modifier = Modifier) {
     // The RAM cache warmer is owned by EditorScreen and fills only the current
     // playhead working set while paused. Playback requests use the same keys.
     
+    val layerSnapshot = editor.layers
+    val layerLookup = remember(layerSnapshot) { layerSnapshot.associateBy { it.id } }
+    val destinationRects = remember(layerSnapshot) {
+        layerSnapshot.associate { it.id to RectF(0f, 0f, it.width, it.height) }
+    }
+    val matrixScratch = remember { mutableMapOf<String, Matrix>() }
+    val selectionPath = remember { AndroidPath() }
+    val selectionPoints = remember { FloatArray(8) }
+    val selectionAnchor = remember { FloatArray(2) }
+    val grayscaleFilter = remember {
+        ColorMatrixColorFilter(ColorMatrix().apply { setSaturation(0f) })
+    }
+    val blendModes = remember {
+        mapOf(
+            "Multiply" to PorterDuffXfermode(PorterDuff.Mode.MULTIPLY),
+            "Screen" to PorterDuffXfermode(PorterDuff.Mode.SCREEN),
+            "Add" to PorterDuffXfermode(PorterDuff.Mode.ADD)
+        )
+    }
     val paint = remember { Paint(Paint.ANTI_ALIAS_FLAG).apply { isFilterBitmap = true } }
     val textPaint = remember {
         Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -148,8 +168,8 @@ fun CpuPreviewCanvas(editor: EditorState, modifier: Modifier = Modifier) {
         val ox = (size.width - COMP_W * s) / 2f
         val oy = (size.height - COMP_H * s) / 2f
         val time = editor.time
-        val layers = editor.layers
-        val byId = layers.associateBy { it.id }
+        val layers = layerSnapshot
+        val byId = layerLookup
         val selId = editor.selectedId
 
         drawIntoCanvas { c ->
@@ -164,21 +184,16 @@ fun CpuPreviewCanvas(editor: EditorState, modifier: Modifier = Modifier) {
                 if (!l.visible || !l.activeAt(time)) continue
                 val alpha = (l.p(PropId.OPACITY).valueAt(time) * 2.55f).toInt().coerceIn(0, 255)
                 nc.save()
-                nc.concat(layerMatrix(l, time, byId))
+                nc.concat(matrixScratch.getOrPut(l.id) { Matrix() }.also { matrix -> layerMatrixInto(l, time, byId, matrix, matrixScratch) })
                 if (l.maskEnabled) nc.clipRect(0f, 0f, l.width * 0.8f, l.height * 0.8f)
-                paint.xfermode = when (l.blendMode) {
-                    "Multiply" -> PorterDuffXfermode(PorterDuff.Mode.MULTIPLY)
-                    "Screen" -> PorterDuffXfermode(PorterDuff.Mode.SCREEN)
-                    "Add" -> PorterDuffXfermode(PorterDuff.Mode.ADD)
-                    else -> null
-                }
-                paint.colorFilter = if ("Grayscale" in l.effects) ColorMatrixColorFilter(ColorMatrix().apply { setSaturation(0f) }) else null
+                paint.xfermode = blendModes[l.blendMode]
+                paint.colorFilter = if ("Grayscale" in l.effects) grayscaleFilter else null
                 when (l.type) {
                     LayerType.IMAGE, LayerType.VIDEO -> {
                         val bmp = bitmaps[l.id]
                         paint.alpha = alpha
                         if (bmp != null) {
-                            nc.drawBitmap(bmp, null, RectF(0f, 0f, l.width, l.height), paint)
+                            nc.drawBitmap(bmp, null, destinationRects[l.id] ?: RectF(0f, 0f, l.width, l.height), paint)
                         } else {
                             paint.color = 0xFF24242F.toInt(); paint.alpha = alpha
                             nc.drawRect(0f, 0f, l.width, l.height, paint)
@@ -190,13 +205,8 @@ fun CpuPreviewCanvas(editor: EditorState, modifier: Modifier = Modifier) {
                     }
                     LayerType.TEXT -> {
                         textPaint.color = l.color; textPaint.alpha = alpha
-                        textPaint.xfermode = when (l.blendMode) {
-                            "Multiply" -> PorterDuffXfermode(PorterDuff.Mode.MULTIPLY)
-                            "Screen" -> PorterDuffXfermode(PorterDuff.Mode.SCREEN)
-                            "Add" -> PorterDuffXfermode(PorterDuff.Mode.ADD)
-                            else -> null
-                        }
-                        textPaint.colorFilter = if ("Grayscale" in l.effects) ColorMatrixColorFilter(ColorMatrix().apply { setSaturation(0f) }) else null
+                        textPaint.xfermode = blendModes[l.blendMode]
+                        textPaint.colorFilter = if ("Grayscale" in l.effects) grayscaleFilter else null
                         nc.drawText(l.text, l.width / 2f, l.height / 2f + 40f, textPaint)
                     }
                     else -> Unit
@@ -210,22 +220,28 @@ fun CpuPreviewCanvas(editor: EditorState, modifier: Modifier = Modifier) {
             nc.restore()
 
             // selection overlay (not clipped to the composition)
-            val sel = layers.firstOrNull { it.id == selId }
+            val sel = byId[selId]
             if (sel != null && sel.visible && sel.activeAt(time) && sel.type != LayerType.AUDIO) {
                 nc.save()
                 nc.translate(ox, oy)
                 nc.scale(s, s)
-                val m = layerMatrix(sel, time, byId)
-                val pts = floatArrayOf(0f, 0f, sel.width, 0f, sel.width, sel.height, 0f, sel.height)
+                val m = matrixScratch.getOrPut(sel.id) { Matrix() }.also { matrix -> layerMatrixInto(sel, time, byId, matrix, matrixScratch) }
+                val pts = selectionPoints
+                pts[0] = 0f; pts[1] = 0f
+                pts[2] = sel.width; pts[3] = 0f
+                pts[4] = sel.width; pts[5] = sel.height
+                pts[6] = 0f; pts[7] = sel.height
                 m.mapPoints(pts)
                 outline.strokeWidth = 2f / s
                 outline.pathEffect =
                     if (sel.type == LayerType.ADJUSTMENT) DashPathEffect(floatArrayOf(14f / s, 10f / s), 0f) else null
-                val path = AndroidPath()
-                path.moveTo(pts[0], pts[1]); path.lineTo(pts[2], pts[3])
-                path.lineTo(pts[4], pts[5]); path.lineTo(pts[6], pts[7]); path.close()
-                nc.drawPath(path, outline)
-                val a = floatArrayOf(sel.p(PropId.ANCHOR_X).valueAt(time), sel.p(PropId.ANCHOR_Y).valueAt(time))
+                selectionPath.reset()
+                selectionPath.moveTo(pts[0], pts[1]); selectionPath.lineTo(pts[2], pts[3])
+                selectionPath.lineTo(pts[4], pts[5]); selectionPath.lineTo(pts[6], pts[7]); selectionPath.close()
+                nc.drawPath(selectionPath, outline)
+                val a = selectionAnchor
+                a[0] = sel.p(PropId.ANCHOR_X).valueAt(time)
+                a[1] = sel.p(PropId.ANCHOR_Y).valueAt(time)
                 m.mapPoints(a)
                 outline.pathEffect = null
                 nc.drawCircle(a[0], a[1], 7f / s, outline)
