@@ -44,7 +44,9 @@ object CompositionFrameCache {
 
     @Synchronized
     fun configure(memoryMb: Int) {
-        memoryLimitBytes = memoryMb.coerceIn(16, 256) * 1024 * 1024
+        val heapBudgetMb = (Runtime.getRuntime().maxMemory() / (1024L * 1024L) / 8L)
+            .toInt().coerceIn(16, 128)
+        memoryLimitBytes = memoryMb.coerceIn(16, 256).coerceAtMost(heapBudgetMb) * 1024 * 1024
         memory.resize(memoryLimitBytes)
         knownDiskBytes = -1L
     }
