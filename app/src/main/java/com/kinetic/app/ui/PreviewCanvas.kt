@@ -37,92 +37,49 @@ import android.graphics.Path as AndroidPath
 fun CpuPreviewCanvas(editor: EditorState, modifier: Modifier = Modifier) {
     val ctx = LocalContext.current
     val bitmaps = remember { mutableStateMapOf<String, Bitmap>() }
-    val fps = editor.fps.coerceIn(1, 60)
-    val latestTimelineTime = rememberUpdatedState(editor.time)
-    val latestPlaying = rememberUpdatedState(editor.playing)
 
-    // One decoder coroutine per layer requests the newest composition frame.
-    // It never queues one decode for every missed tick: if decoding falls behind,
-    // it skips straight to the latest master-clock frame on the next iteration.
-    for (layer in editor.layers) {
-        val uri = layer.uri
-        if (uri != null && (layer.type == LayerType.IMAGE || layer.type == LayerType.VIDEO)) {
-            key(layer.id) {
-                DisposableEffect(layer.id) {
-                    onDispose { bitmaps.remove(layer.id) }
+    // load image / video frames for layers that are visible at the playhead
+    val t = editor.time
+    for (l in editor.layers) {
+        val uri = l.uri
+        if (uri != null && (l.type == LayerType.IMAGE || l.type == LayerType.VIDEO)) {
+            val active = l.activeAt(t)
+            val src = ((t - l.start).coerceAtLeast(0f) * l.speed + l.srcOffset).coerceAtLeast(0f)
+            // Decode video preview frames at a bounded rate. Scrubbing and playback
+            // share the same bucket size so toggling transport doesn't invalidate cache.
+            val bucket = if (!active) -1 else if (l.type == LayerType.VIDEO) (src * 12f).toInt() else 0
+            key(l.id) {
+                DisposableEffect(l.id) {
+                    onDispose { bitmaps.remove(l.id) }
                 }
-                val source = Uri.parse(uri)
-                LaunchedEffect(
-                    uri, layer.type, layer.start, layer.duration,
-                    layer.srcOffset, layer.speed, fps
-                ) {
-                    if (layer.type == LayerType.IMAGE) {
-                        val bitmap = MediaLoader.bitmapFor(
-                            ctx, source, LayerType.IMAGE, 0f,
-                            sampleFps = fps, maxEdge = 640,
-                            persistToDisk = true
+                // Track the newest requested bucket independently of this
+                // coroutine. MediaMetadataRetriever calls can block while a
+                // previous decode finishes; never publish that stale result
+                // after the playhead has already advanced.
+                val latestBucket = rememberUpdatedState(bucket)
+                val playbackSource = Uri.parse(uri)
+                val frameEdge = if (editor.playing && l.type == LayerType.VIDEO) 320 else 640
+                LaunchedEffect(uri, bucket, editor.playing) {
+                    if (bucket >= 0) {
+                        val frame = MediaLoader.bitmapFor(
+                            ctx, playbackSource, l.type, src, 12, frameEdge,
+                            persistToDisk = !editor.playing
                         )
-                        if (bitmap != null) bitmaps[layer.id] = bitmap
-                    } else {
-                        var lastBucket = Int.MIN_VALUE
-                        var lastFrameEdge = -1
-                        var wasActive = false
-                        while (true) {
-                            val timelineTime = latestTimelineTime.value
-                            val active = layer.activeAt(timelineTime)
-                            if (!active) {
-                                if (wasActive) bitmaps.remove(layer.id)
-                                wasActive = false
-                                lastBucket = Int.MIN_VALUE
-                                kotlinx.coroutines.delay(16L)
-                                continue
-                            }
-
-                            wasActive = true
-                            val sourceTime = (
-                                (timelineTime - layer.start).coerceAtLeast(0f) *
-                                    layer.speed + layer.srcOffset
-                            ).coerceAtLeast(0f)
-                            val requestedBucket = (sourceTime * fps).toInt()
-                            val frameEdge = if (latestPlaying.value) 320 else 640
-
-                            if (requestedBucket != lastBucket || frameEdge != lastFrameEdge) {
-                                val frame = MediaLoader.bitmapFor(
-                                    ctx, source, LayerType.VIDEO, sourceTime,
-                                    sampleFps = fps, maxEdge = frameEdge,
-                                    persistToDisk = !latestPlaying.value
-                                )
-                                val currentTime = latestTimelineTime.value
-                                val currentSourceTime = (
-                                    (currentTime - layer.start).coerceAtLeast(0f) *
-                                        layer.speed + layer.srcOffset
-                                ).coerceAtLeast(0f)
-                                val currentBucket = (currentSourceTime * fps).toInt()
-                                // Publish a recent decoded frame while forward playback
-                                // catches up, but reject results from an old seek position.
-                                val acceptableLag = maxOf(3, fps / 4)
-                                if (frame != null &&
-                                    currentBucket >= requestedBucket &&
-                                    currentBucket - requestedBucket <= acceptableLag
-                                ) {
-                                    bitmaps[layer.id] = frame
-                                }
-                                lastBucket = requestedBucket
-                                lastFrameEdge = frameEdge
-                            }
-
-                            kotlinx.coroutines.delay(maxOf(1L, 1000L / fps))
+                        if (latestBucket.value == bucket && frame != null) {
+                            bitmaps[l.id] = frame
                         }
+                    } else {
+                        bitmaps.remove(l.id)
                     }
                 }
             }
         }
     }
 
-    // The background RAM warmer remains a low-priority 12fps scan. Live preview
-    // follows the composition frame rate and drops obsolete requests instead
-    // of building a backlog when the device cannot decode every frame in time.
-
+    // EditorScreen owns the shared RAM timeline warmer. This canvas requests
+    // the same 12fps/320px keys so cached frames are reused without a second
+    // competing prefetch loop.
+    
     val paint = remember { Paint(Paint.ANTI_ALIAS_FLAG).apply { isFilterBitmap = true } }
     val textPaint = remember {
         Paint(Paint.ANTI_ALIAS_FLAG).apply {
