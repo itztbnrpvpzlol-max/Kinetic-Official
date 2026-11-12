@@ -216,11 +216,11 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
         // scrubbing and rebuild a small playhead-centred window in the idle worker.
         if (editor.playing) return@LaunchedEffect
 
-        snapshotFlow { (editor.time * 2f).toInt() }
+        snapshotFlow { (editor.time * 4f).toInt() }
             .distinctUntilChanged()
             .collectLatest { halfSecondBucket ->
                 delay(220L)
-                val playhead = (halfSecondBucket / 2f).coerceAtLeast(0f)
+                val playhead = (halfSecondBucket / 4f).coerceAtLeast(0f)
                 val activeLayers = videoLayers.filter { layer ->
                     playhead >= layer.start && playhead < layer.end
                 }
