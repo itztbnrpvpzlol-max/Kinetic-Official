@@ -235,7 +235,8 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
             }
         }
         PreviewToolsBar(editor, onAddLayer = { showLayers = true }, onTogglePreview = { previewExpanded = !previewExpanded },
-            onPlay = { togglePlayback() }, preparing = preparingPlayback)
+            onPlay = { togglePlayback() }, preparing = preparingPlayback,
+            onQuality = { editor.settings.updatePreviewQuality(it) })
         if (!previewExpanded) {
             TimelinePane(editor, Modifier.weight(1f))
             val activeLayer = editor.selected
@@ -577,12 +578,28 @@ private fun AlightDock(active: String, onSelect: (String) -> Unit) {
 
 @Composable
 private fun PreviewToolsBar(editor: EditorState, onAddLayer: () -> Unit, onTogglePreview: () -> Unit,
-    onPlay: () -> Unit, preparing: Boolean) {
-    Row(Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceEvenly) {
+    onPlay: () -> Unit, preparing: Boolean, onQuality: (Int) -> Unit) {
+    var qualityMenu by remember { mutableStateOf(false) }
+    Row(Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 4.dp).horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
         PreviewTool(IconKind.UNDO, editor.canUndo) { editor.undo() }
         PreviewTool(IconKind.REDO, editor.canRedo) { editor.redo() }
         PreviewTool(IconKind.BACK) { editor.playing = false; editor.seek(0f) }
         PreviewTool(if (editor.playing) IconKind.PAUSE else IconKind.PLAY, enabled = !preparing, onClick = onPlay)
+        Box {
+            Box(Modifier.size(42.dp).clip(RoundedCornerShape(9.dp)).clickable { qualityMenu = true },
+                contentAlignment = Alignment.Center) {
+                Text(AppSettings.PREVIEW_QUALITIES[editor.settings.previewQualityIndex].uppercase(),
+                    color = KColors.Accent, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+            }
+            DropdownMenu(expanded = qualityMenu, onDismissRequest = { qualityMenu = false }, containerColor = KColors.Surface2) {
+                AppSettings.PREVIEW_QUALITIES.forEachIndexed { index, label ->
+                    DropdownMenuItem(
+                        text = { Text(label, color = if (index == editor.settings.previewQualityIndex) KColors.Accent else KColors.Text) },
+                        onClick = { qualityMenu = false; onQuality(index) }
+                    )
+                }
+            }
+        }
         PreviewTool(IconKind.NEXT) { editor.playing = false; editor.seek(editor.duration) }
         PreviewTool(IconKind.PLUS, onClick = onAddLayer)
         PreviewTool(if (editor.playing) IconKind.FIT else IconKind.FULLSCREEN, onClick = onTogglePreview)

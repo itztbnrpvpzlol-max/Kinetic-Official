@@ -186,7 +186,7 @@ private fun HardwareVideoLayer(
     val sourceTime = ((editor.time - layer.start).coerceAtLeast(0f) * layer.speed + layer.srcOffset)
         .coerceAtLeast(0f)
     val sourcePositionMs = (sourceTime * 1000f).toLong()
-    LaunchedEffect(editor.playing, layer.id, layer.speed) {
+    LaunchedEffect(editor.playing, layer.id, layer.speed, player) {
         if (editor.playing) {
             player.seekTo(sourcePositionMs)
             player.play()
@@ -197,7 +197,7 @@ private fun HardwareVideoLayer(
     val previousTimelineTime = remember(layer.id) {
         androidx.compose.runtime.mutableFloatStateOf(editor.time)
     }
-    LaunchedEffect(editor.time, editor.playing, layer.id) {
+    LaunchedEffect(editor.time, editor.playing, layer.id, player) {
         if (editor.playing) {
             if (editor.time + 0.05f < previousTimelineTime.floatValue) player.seekTo(sourcePositionMs)
         } else {
