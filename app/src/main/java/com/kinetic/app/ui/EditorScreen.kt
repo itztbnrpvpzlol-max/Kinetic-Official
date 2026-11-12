@@ -168,9 +168,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
         onDispose { ctx.applicationContext.unregisterComponentCallbacks(callbacks) }
     }
     val projectStore = remember { ProjectStore(ctx) }
-    LaunchedEffect(editor.settings.previewMemoryMb, editor.playing) {
-        // Re-evaluate available RAM when the editor returns to active use.
-        MediaLoader.configureCache(ctx, editor.settings.previewMemoryMb)
+    LaunchedEffect(editor.playing) {
         KreEngine.setCalculationCacheBudget(
             if (MediaWorkers.isConstrainedDevice) 512 * 1024 else 2 * 1024 * 1024
         )
