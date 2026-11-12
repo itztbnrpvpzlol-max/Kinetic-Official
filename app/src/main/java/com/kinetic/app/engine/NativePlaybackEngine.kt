@@ -78,6 +78,14 @@ class NativePlaybackEngine {
         return fallbackPositionNow()
     }
 
+    /** Frame index sampled directly from the authoritative native monotonic clock. */
+    fun positionFrame(fps: Float): Long {
+        if (released) return 0L
+        val safeFps = fps.coerceIn(1f, 240f)
+        if (handle != 0L) return nativePositionFrame(handle, safeFps.toDouble()).coerceAtLeast(0L)
+        return kotlin.math.floor(positionSeconds().toDouble() * safeFps).toLong().coerceAtLeast(0L)
+    }
+
     fun isPlaying(): Boolean {
         if (released) return false
         if (handle != 0L) return nativeIsPlaying(handle)
@@ -120,6 +128,7 @@ class NativePlaybackEngine {
     private external fun nativePlay(handle: Long)
     private external fun nativePause(handle: Long)
     private external fun nativePosition(handle: Long): Double
+    private external fun nativePositionFrame(handle: Long, fps: Double): Long
     private external fun nativeIsPlaying(handle: Long): Boolean
     private external fun nativeRelease(handle: Long)
 }
