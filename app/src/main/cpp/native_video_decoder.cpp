@@ -41,6 +41,8 @@ struct NativeVideoDecoder {
     int64_t lastPtsUs = 0;
     int64_t anchorNs = 0;
     double speed = 1.0;
+    int64_t frameDurationNs = 33'333'333;
+    uint64_t droppedLateFrames = 0;
 
     NativeVideoDecoder(int sourceFd, int64_t sourceOffset, int64_t sourceLength,
                        ANativeWindow* output, int64_t startUs, double playbackSpeed)
@@ -158,6 +160,10 @@ struct NativeVideoDecoder {
             }
         } else {
             __android_log_print(ANDROID_LOG_WARN, LOG_TAG, "Invalid video dimensions %dx%d", videoWidth, videoHeight);
+        }
+        int32_t frameRate = 0;
+        if (AMediaFormat_getInt32(format, AMEDIAFORMAT_KEY_FRAME_RATE, &frameRate) && frameRate > 0) {
+            frameDurationNs = std::clamp<int64_t>(1'000'000'000LL / frameRate, 8'000'000LL, 100'000'000LL);
         }
         const char* mime = nullptr;
         const bool hasMime = AMediaFormat_getString(format, AMEDIAFORMAT_KEY_MIME, &mime) && mime;
@@ -309,8 +315,28 @@ struct NativeVideoDecoder {
                         (info.presentationTimeUs - anchorPtsUs) * 1000.0 / rate);
                     lastPtsUs = info.presentationTimeUs;
                 }
+
+                // Real-time preview is better served by the newest frame than
+                // by presenting an increasingly stale queue. If decoding has
+                // fallen more than one source-frame interval behind the clock,
+                // discard this decoded output and keep draining toward live time.
+                const int64_t nowNs = monotonicNs();
+                if (render && targetNs < nowNs - frameDurationNs) {
+                    AMediaCodec_releaseOutputBuffer(codec, static_cast<size_t>(outputIndex), false);
+                    ++droppedLateFrames;
+                    if (droppedLateFrames <= 5 || droppedLateFrames % 120 == 0) {
+                        __android_log_print(ANDROID_LOG_INFO, LOG_TAG,
+                            "Auto frame-skip: dropped %llu late frames (latest pts=%lldus, late by %lldms)",
+                            static_cast<unsigned long long>(droppedLateFrames),
+                            (long long)info.presentationTimeUs,
+                            (long long)((nowNs - targetNs) / 1'000'000LL));
+                    }
+                    continue;
+                }
+
                 if (render) {
-                    AMediaCodec_releaseOutputBufferAtTime(codec, static_cast<size_t>(outputIndex), targetNs);
+                    AMediaCodec_releaseOutputBufferAtTime(
+                        codec, static_cast<size_t>(outputIndex), std::max(targetNs, nowNs));
                 } else {
                     AMediaCodec_releaseOutputBuffer(codec, static_cast<size_t>(outputIndex), false);
                 }
