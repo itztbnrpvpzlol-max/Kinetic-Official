@@ -162,23 +162,18 @@ private fun LivePreviewCanvas(
 @Composable
 private fun rememberPlaybackUri(uri: String?, playing: Boolean): Uri? {
     val context = LocalContext.current.applicationContext
-    var proxy by remember(uri) { mutableStateOf<Uri?>(null) }
-    LaunchedEffect(uri, playing) {
-        if (!playing) {
-            proxy = null
-            return@LaunchedEffect
-        }
-        val source = uri?.let(Uri::parse) ?: return@LaunchedEffect
-        // Playback always decodes the prepared 360p/3 Mbps proxy. Paused
-        // scrubbing returns to the original source for full-quality inspection.
-        proxy = PreviewProxyStore.findExisting(
+    // Resolve synchronously: the play action has already awaited this cache,
+    // so the decoder is created against the proxy from its very first frame.
+    return remember(uri, playing) {
+        val source = uri?.let(Uri::parse) ?: return@remember null
+        if (!playing) source
+        else PreviewProxyStore.findExisting(
             context,
             source,
             PreviewProxyStore.PLAYBACK_PROXY_HEIGHT,
             PreviewProxyStore.PLAYBACK_PROXY_BITRATE
-        )
+        ) ?: source
     }
-    return if (playing) proxy ?: uri?.let(Uri::parse) else uri?.let(Uri::parse)
 }
 
 internal fun resolvePreviewScale(context: Context, qualityIndex: Int, activeLayers: Int): Float {
