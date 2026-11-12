@@ -7,6 +7,7 @@ import android.graphics.Canvas as AndroidCanvas
 import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.RectF
+import android.graphics.SurfaceTexture
 import android.graphics.Typeface
 import android.opengl.GLES20
 import android.opengl.GLSurfaceView
