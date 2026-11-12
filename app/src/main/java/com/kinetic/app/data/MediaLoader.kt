@@ -65,6 +65,22 @@ object MediaLoader {
     }
 
     /**
+     * Number of 320px preview frames that can fit in the current RAM LRU when
+     * shared across the visible video layers. This deliberately budgets for
+     * worst-case square RGBA frames and leaves eviction headroom.
+     */
+    fun recommendedTimelineCacheFrames(
+        activeVideoLayers: Int,
+        maxEdge: Int = 320
+    ): Int {
+        val layers = activeVideoLayers.coerceAtLeast(1)
+        val edge = maxEdge.coerceIn(160, 640).toLong()
+        val worstCaseFrameBytes = edge * edge * 4L
+        return (cache.maxSize().toLong() / worstCaseFrameBytes / layers)
+            .toInt().coerceIn(4, 48)
+    }
+
+    /**
      * Keep decoded frames in a bounded RAM LRU. The user preference is only a
      * requested ceiling: the app heap and currently available system memory
      * always win, especially on 2 GB devices.
