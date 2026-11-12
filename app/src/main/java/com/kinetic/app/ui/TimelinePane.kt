@@ -72,7 +72,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kinetic.app.data.MediaLoader
 import com.kinetic.app.data.MediaWorkers
-import com.kinetic.app.data.TimelineRamCache
 import com.kinetic.app.model.EditorState
 import com.kinetic.app.model.fmt
 import com.kinetic.app.model.Layer
@@ -359,7 +358,6 @@ private fun Clip(editor: EditorState, layer: Layer, pps: Float, selected: Boolea
     val ctx = LocalContext.current
     val dens = LocalDensity.current.density
     val shape = RoundedCornerShape(8.dp)
-    val cacheWindow = if (layer.type == LayerType.VIDEO) TimelineRamCache.windows[layer.id] else null
     var thumbnails by remember(
         layer.uri, layer.type, layer.duration, layer.srcOffset, layer.speed
     ) { mutableStateOf<List<Bitmap>>(emptyList()) }
@@ -458,55 +456,7 @@ private fun Clip(editor: EditorState, layer: Layer, pps: Float, selected: Boolea
                     }
             )
         }
-        if (cacheWindow != null && layer.speed > 0f && !editor.playing) {
-            Box(
-                Modifier.align(Alignment.TopEnd).padding(4.dp)
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(Color.Black.copy(alpha = 0.58f))
-                    .padding(horizontal = 5.dp, vertical = 2.dp)
-            ) {
-                Text(
-                    "RAM ${cacheWindow.readyFrames}/${cacheWindow.totalFrames}",
-                    color = Color(0xFF8AF0C1),
-                    fontSize = 8.sp,
-                    maxLines = 1
-                )
-            }
-            Canvas(
-                Modifier.align(Alignment.BottomCenter)
-                    .fillMaxWidth().height(4.dp).padding(horizontal = 5.dp)
-            ) {
-                val speed = layer.speed.coerceAtLeast(0.1f)
-                val duration = layer.duration.coerceAtLeast(0.001f)
-                val startX = (((cacheWindow.startSec - layer.srcOffset) / speed) / duration)
-                    .coerceIn(0f, 1f) * size.width
-                val endX = (((cacheWindow.targetEndSec - layer.srcOffset) / speed) / duration)
-                    .coerceIn(0f, 1f) * size.width
-                val barHeight = size.height
-                val radius = CornerRadius(barHeight / 2f)
-                val barWidth = (endX - startX).coerceAtLeast(0f)
-                if (barWidth > 0f) {
-                    drawRoundRect(
-                        color = Color(0x884C466B),
-                        topLeft = Offset(startX, 0f),
-                        size = Size(barWidth, barHeight),
-                        cornerRadius = radius
-                    )
-                }
-                val tickWidth = 4.dp.toPx().coerceAtMost(size.width)
-                cacheWindow.readyTimesSec.forEach { sourceTime ->
-                    val x = ((((sourceTime - layer.srcOffset) / speed) / duration)
-                        .coerceIn(0f, 1f) * size.width)
-                    val left = (x - tickWidth / 2f).coerceIn(0f, (size.width - tickWidth).coerceAtLeast(0f))
-                    drawRoundRect(
-                        color = Color(0xFF8AF0C1),
-                        topLeft = Offset(left, 0f),
-                        size = Size(tickWidth, barHeight),
-                        cornerRadius = radius
-                    )
-                }
-            }
-        }
+
     }
 }
 

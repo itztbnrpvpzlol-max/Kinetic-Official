@@ -29,7 +29,6 @@ import androidx.compose.ui.platform.LocalContext
 import com.kinetic.app.data.MediaLoader
 import com.kinetic.app.data.MediaWorkers
 import com.kinetic.app.data.PreviewDiagnostics
-import com.kinetic.app.data.TimelineRamCache
 import com.kinetic.app.model.COMP_H
 import com.kinetic.app.model.COMP_W
 import com.kinetic.app.model.EditorState
@@ -61,72 +60,6 @@ fun CpuPreviewCanvas(editor: EditorState, modifier: Modifier = Modifier) {
         snapshotFlow { editor.time to editor.playing }.collect { (time, playing) ->
             previewClock.timeSec = time
             previewClock.playing = playing
-        }
-    }
-
-    // Keep a small RAM-only frame window centered on the paused playhead.
-    // Wait briefly for scrubbing to settle, then cancel obsolete cache work if
-    // the user moves again. The center sample is always decoded first.
-    LaunchedEffect(mediaLayerSignature, editor.playing) {
-        if (editor.playing) return@LaunchedEffect
-        snapshotFlow { editor.time }.collectLatest { centerTimelineTime ->
-            delay(60L)
-            val activeVideoLayers = mediaLayers.filter {
-                it.type == LayerType.VIDEO && it.visible && it.activeAt(centerTimelineTime)
-            }
-            TimelineRamCache.retain(mediaLayers.map { it.id }.toSet())
-
-            for (layer in activeVideoLayers) {
-                val rawUri = layer.uri ?: continue
-                val uri = Uri.parse(rawUri)
-                val sourceTime = (
-                    (centerTimelineTime - layer.start).coerceAtLeast(0f) *
-                        layer.speed + layer.srcOffset
-                    ).coerceAtLeast(0f)
-                val fps = MediaLoader.CPU_PREVIEW_SAMPLE_FPS
-                val edge = if (MediaWorkers.isConstrainedDevice) 320 else 640
-                val frameBudget = MediaLoader
-                    .recommendedPrefetchFrameCount(activeVideoLayers.size, edge)
-                    .coerceIn(1, 5)
-                // On this device, sequential forward decode is much cheaper
-                // than seeking backward and rebuilding the codec session.
-                val beforeFrames = 0
-                val afterFrames = (frameBudget - 1).coerceAtMost(4)
-                val minimumTime = layer.srcOffset.coerceAtLeast(0f)
-                val maximumTime = if (layer.srcLength.isFinite()) {
-                    (layer.srcLength - 0.05f).coerceAtLeast(minimumTime)
-                } else {
-                    Float.POSITIVE_INFINITY
-                }
-                val windowStart = sourceTime.coerceAtLeast(minimumTime)
-                val windowEnd = (sourceTime + afterFrames / fps.toFloat())
-                    .coerceAtMost(maximumTime)
-                val signature = rawUri + "|" + layer.srcOffset + "|" + layer.srcLength + "|" + fps + "|" + edge
-
-                val readyTimes = MediaLoader.prefetchVideoFrameWindow(
-                    ctx = ctx,
-                    uri = uri,
-                    centerTimeSec = sourceTime,
-                    beforeFrames = beforeFrames,
-                    afterFrames = afterFrames,
-                    sampleFps = fps,
-                    maxEdge = edge,
-                    minimumTimeSec = minimumTime,
-                    maximumTimeSec = maximumTime
-                )
-                TimelineRamCache.setWindow(
-                    layerId = layer.id,
-                    signature = signature,
-                    startSec = windowStart,
-                    targetEndSec = windowEnd,
-                    readyTimesSec = readyTimes,
-                    totalFrames = beforeFrames + afterFrames + 1
-                )
-            }
-
-            val activeIds = activeVideoLayers.map { it.id }.toSet()
-            mediaLayers.filter { it.type == LayerType.VIDEO && it.id !in activeIds }
-                .forEach { TimelineRamCache.clearWindow(it.id) }
         }
     }
 
