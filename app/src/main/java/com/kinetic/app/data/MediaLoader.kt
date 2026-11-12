@@ -42,7 +42,7 @@ object MediaLoader {
     private val retrieverLocks = ConcurrentHashMap<String, Any>()
     private val retrieverRegistryLock = Any()
     private val retrieverLru = LinkedHashMap<String, Unit>(8, 0.75f, true)
-    private val maxCachedRetrievers = if (MediaWorkers.isConstrainedDevice) 1 else 4
+    @Volatile private var maxCachedRetrievers = if (MediaWorkers.isConstrainedDevice) 1 else 4
     private val waveformCache = object : LruCache<String, FloatArray>(if (MediaWorkers.isConstrainedDevice) 2 * 1024 * 1024 else 8 * 1024 * 1024) {
         override fun sizeOf(key: String, value: FloatArray): Int = value.size * 4
     }
@@ -90,16 +90,19 @@ object MediaLoader {
             level >= android.content.ComponentCallbacks2.TRIM_MEMORY_COMPLETE -> {
                 cache.resize(4 * 1024 * 1024)
                 cache.evictAll()
+                maxCachedRetrievers = 1
             }
             level >= android.content.ComponentCallbacks2.TRIM_MEMORY_BACKGROUND -> {
                 val reduced = (cache.maxSize() / 4).coerceAtLeast(2 * 1024 * 1024)
                 cache.resize(reduced)
                 cache.trimToSize(reduced)
+                maxCachedRetrievers = 1
             }
             level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW -> {
                 val reduced = (cache.maxSize() / 2).coerceAtLeast(2 * 1024 * 1024)
                 cache.resize(reduced)
                 cache.trimToSize(reduced)
+                maxCachedRetrievers = if (MediaWorkers.isConstrainedDevice) 1 else 2
             }
         }
         when {
