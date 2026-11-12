@@ -626,6 +626,7 @@ private fun DockToolControls(
     tool: String, editor: EditorState, layer: Layer,
     onClose: () -> Unit, onExtractAudio: () -> Unit
 ) {
+    val displayTime = rememberEditorDisplayTime(editor)
     var sliderEditing by remember(tool, layer.id) { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 28.dp)) {
         Text(tool, color = KColors.Text, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
@@ -657,7 +658,7 @@ private fun DockToolControls(
             }
             "Blending", "Blend modes" -> {
                 if (tool == "Blending") {
-                    val opacity = layer.p(PropId.OPACITY).valueAt(editor.time).coerceIn(0f, 100f)
+                    val opacity = layer.p(PropId.OPACITY).valueAt(displayTime).coerceIn(0f, 100f)
                     Text("Opacity  ·  ${opacity.toInt()}%", color = KColors.Text, fontSize = 14.sp)
                     Slider(value = opacity, onValueChange = { if (!sliderEditing) { editor.beginEdit(); sliderEditing = true }; editor.setPropValue(layer.id, PropId.OPACITY, it) }, onValueChangeFinished = { sliderEditing = false }, valueRange = 0f..100f)
                 }
@@ -685,14 +686,29 @@ private fun ResizeHandle(density: Float, onHeight: (Float) -> Unit) {
 }
 
 @Composable
+private fun rememberEditorDisplayTime(editor: EditorState): Float {
+    val displayed = remember(editor) { mutableFloatStateOf(0f) }
+    LaunchedEffect(editor, editor.playing) {
+        displayed.floatValue = editor.time
+        // Freeze secondary property/control UI while playing. The preview has
+        // its own draw-phase clock; these controls catch up immediately on pause.
+        if (!editor.playing) {
+            snapshotFlow { editor.time }.collect { displayed.floatValue = it }
+        }
+    }
+    return displayed.floatValue
+}
+
+@Composable
 private fun AlightCutBar(editor: EditorState, layer: Layer) {
-    val inside = editor.time > layer.start + editor.frame && editor.time < layer.end - editor.frame
+    val displayTime = rememberEditorDisplayTime(editor)
+    val inside = displayTime > layer.start + editor.frame && displayTime < layer.end - editor.frame
     Row(Modifier.fillMaxWidth().height(42.dp).padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
         if (inside) {
             CutAction("Split", IconKind.SPLIT, Modifier.weight(1f)) { editor.splitSelected() }
             CutAction("Trim start", IconKind.CUT, Modifier.weight(1f)) { editor.trimLeft(layer.id, editor.time - layer.start) }
             CutAction("Trim end", IconKind.CUT, Modifier.weight(1f)) { editor.moveLayerEndToPlayhead(layer.id) }
-        } else if (editor.time < layer.start) {
+        } else if (displayTime < layer.start) {
             CutAction("Move to playhead", IconKind.PREV, Modifier.weight(1f)) { editor.moveLayerStartToPlayhead(layer.id) }
         } else {
             CutAction("Extend to playhead", IconKind.NEXT, Modifier.weight(1f)) { editor.extendLayerToPlayhead(layer.id) }
@@ -782,13 +798,17 @@ private fun PreviewDiagnosticsBadge(playing: Boolean, modifier: Modifier = Modif
         }
     }
     if (playing) {
-        val glLabel = if (snapshot.glFps > 0f) {
-            "GL ${snapshot.glFps.toInt()} fps · ${"%.1f".format(snapshot.glSubmitMs)} ms"
-        } else {
-            "Video preview"
+        val previewLabel = when {
+            snapshot.cpuDrawFps > 0f -> {
+                "CPU ${snapshot.cpuDrawFps.toInt()}fps · draw ${"%.1f".format(snapshot.cpuDrawMs)}ms · dec ${"%.1f".format(snapshot.cpuDecodeMs)}ms · RAM ${snapshot.cpuRamHitPercent}%"
+            }
+            snapshot.glFps > 0f -> {
+                "GL ${snapshot.glFps.toInt()}fps · submit ${"%.1f".format(snapshot.glSubmitMs)}ms"
+            }
+            else -> "Preview warming"
         }
         Text(
-            "$glLabel · dropped ${snapshot.droppedVideoFrames}",
+            "$previewLabel · dropped ${snapshot.droppedVideoFrames}",
             modifier = modifier.clip(RoundedCornerShape(7.dp))
                 .background(KColors.Row.copy(alpha = 0.92f))
                 .padding(horizontal = 8.dp, vertical = 5.dp),
@@ -839,6 +859,7 @@ private fun EditPanel(
     editor: EditorState, layer: Layer, tab: Int, onTab: (Int) -> Unit, onCollapse: () -> Unit,
     onRename: () -> Unit, onParent: () -> Unit, modifier: Modifier = Modifier
 ) {
+    val displayTime = rememberEditorDisplayTime(editor)
     var menu by remember { mutableStateOf(false) }
     val shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp)
     Column(
@@ -854,14 +875,14 @@ private fun EditPanel(
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, containerColor = KColors.Surface2) {
                     DropdownMenuItem(text = { Text(if (layer.type == LayerType.TEXT) "Edit text" else "Rename", color = KColors.Text) }, onClick = { menu = false; onRename() })
                     DropdownMenuItem(text = { Text("Duplicate", color = KColors.Text) }, onClick = { menu = false; editor.duplicate(layer.id) })
-                    if (editor.time > layer.start + editor.frame && editor.time < layer.end - editor.frame) {
+                    if (displayTime > layer.start + editor.frame && displayTime < layer.end - editor.frame) {
                         DropdownMenuItem(text = { Text("Split at playhead", color = KColors.Text) }, onClick = { menu = false; editor.splitSelected() })
                         DropdownMenuItem(text = { Text("Trim end to playhead", color = KColors.Text) }, onClick = { menu = false; editor.moveLayerEndToPlayhead(layer.id) })
                     }
-                    if (editor.time < layer.start) {
+                    if (displayTime < layer.start) {
                         DropdownMenuItem(text = { Text("Move layer to playhead", color = KColors.Text) }, onClick = { menu = false; editor.moveLayerStartToPlayhead(layer.id) })
                     }
-                    if (editor.time > layer.end) {
+                    if (displayTime > layer.end) {
                         DropdownMenuItem(text = { Text("Extend to playhead", color = KColors.Text) }, onClick = { menu = false; editor.extendLayerToPlayhead(layer.id) })
                     }
                     DropdownMenuItem(text = { Text("Parent", color = KColors.Text) }, onClick = { menu = false; onParent() })
