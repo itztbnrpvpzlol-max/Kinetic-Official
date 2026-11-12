@@ -211,10 +211,8 @@ class AndroidVideoPlayer(
             }.getOrDefault(30)
             val frameDurationNs = (1_000_000_000L / frameRate).coerceIn(8_000_000L, 100_000_000L)
 
-            codec = createPreferredDecoder(mime)
+            codec = createPreferredDecoder(mime, format, outputSurface)
             Log.i("KineticVideo", "Selected decoder: ${codec.name} for ${mime}")
-            codec.configure(format, outputSurface, null, 0)
-            codec.start()
 
             synchronized(lock) {
                 if (stopping || released) return
@@ -225,6 +223,7 @@ class AndroidVideoPlayer(
             var inputEos = false
             var outputEos = false
             var dropBeforeUs = -1L
+            val info = MediaCodec.BufferInfo()
 
             while (true) {
                 var seekTargetUs = -1L
@@ -287,7 +286,6 @@ class AndroidVideoPlayer(
                     }
                 }
 
-                val info = MediaCodec.BufferInfo()
                 when (val outputIndex = codec.dequeueOutputBuffer(info, 5_000L)) {
                     MediaCodec.INFO_TRY_AGAIN_LATER -> Unit
                     MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> Unit
@@ -350,20 +348,68 @@ class AndroidVideoPlayer(
         }
     }
 
-    private fun createPreferredDecoder(mime: String): MediaCodec {
+    private fun createPreferredDecoder(mime: String, format: MediaFormat, outputSurface: Surface): MediaCodec {
         val infos = runCatching {
             MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos.filter { info ->
                 !info.isEncoder && info.supportedTypes.any { it.equals(mime, ignoreCase = true) }
             }
         }.getOrDefault(emptyList())
+        val width = runCatching { format.getInteger(MediaFormat.KEY_WIDTH) }.getOrDefault(0)
+        val height = runCatching { format.getInteger(MediaFormat.KEY_HEIGHT) }.getOrDefault(0)
+        val frameRate = runCatching { format.getInteger(MediaFormat.KEY_FRAME_RATE) }.getOrDefault(0)
 
-        if (Build.VERSION.SDK_INT >= 29) {
-            val hardware = infos.firstOrNull {
-                runCatching { it.isHardwareAccelerated && !it.isSoftwareOnly }.getOrDefault(false)
+        // Try hardware decoders in the platform preferred order, validating
+        // this source format before committing to a codec instance.
+        for (info in infos) {
+            val hardware = if (Build.VERSION.SDK_INT >= 29) {
+                runCatching { info.isHardwareAccelerated && !info.isSoftwareOnly }.getOrDefault(false)
+            } else {
+                val name = info.name.lowercase()
+                !name.contains("google") && !name.contains("android") && !name.contains("software")
             }
-            if (hardware != null) return MediaCodec.createByCodecName(hardware.name)
+            if (!hardware) continue
+            val capabilities = runCatching { info.getCapabilitiesForType(mime) }.getOrNull()
+            if (capabilities != null) {
+                if (!runCatching { capabilities.isFormatSupported(format) }.getOrDefault(true)) continue
+                val video = capabilities.videoCapabilities
+                if (video != null && width > 0 && height > 0) {
+                    if (!runCatching { video.isSizeSupported(width, height) }.getOrDefault(true)) continue
+                    if (frameRate > 0 && !runCatching {
+                        video.areSizeAndRateSupported(width, height, frameRate.toDouble())
+                    }.getOrDefault(true)) continue
+                }
+            }
+
+            val latencyAttempts = if (Build.VERSION.SDK_INT >= 30) listOf(true, false) else listOf(false)
+            for (lowLatency in latencyAttempts) {
+                var candidate: MediaCodec? = null
+                try {
+                    if (Build.VERSION.SDK_INT >= 30) format.setInteger("low-latency", if (lowLatency) 1 else 0)
+                    candidate = MediaCodec.createByCodecName(info.name)
+                    candidate.configure(format, outputSurface, null, 0)
+                    candidate.start()
+                    Log.i("KineticVideo", "Using hardware decoder ${info.name}; lowLatency=$lowLatency")
+                    return candidate
+                } catch (error: Exception) {
+                    Log.w("KineticVideo", "Decoder ${info.name} rejected; lowLatency=$lowLatency", error)
+                    runCatching { candidate?.stop() }
+                    runCatching { candidate?.release() }
+                }
+            }
         }
-        return MediaCodec.createDecoderByType(mime)
+
+        if (Build.VERSION.SDK_INT >= 30) runCatching { format.setInteger("low-latency", 0) }
+        val fallback = MediaCodec.createDecoderByType(mime)
+        try {
+            fallback.configure(format, outputSurface, null, 0)
+            fallback.start()
+            Log.i("KineticVideo", "Using platform fallback decoder ${fallback.name}")
+            return fallback
+        } catch (error: Exception) {
+            runCatching { fallback.stop() }
+            runCatching { fallback.release() }
+            throw error
+        }
     }
 
     /**
