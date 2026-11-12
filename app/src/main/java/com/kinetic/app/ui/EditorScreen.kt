@@ -145,20 +145,22 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                 // CPU pool. Limit simultaneous decoders to avoid exhausting codec
                 // instances on phones with constrained media hardware.
                 coroutineScope {
-                    snapshot.mapNotNull { layer ->
-                        val cached = cachedSources[layer.id] ?: return@mapNotNull null
-                        async {
-                            when (layer.type) {
-                                LayerType.IMAGE -> MediaLoader.bitmapFor(ctx, cached, LayerType.IMAGE, 0f, 1, 720)
-                                LayerType.VIDEO -> {
-                                    MediaLoader.bitmapFor(ctx, cached, LayerType.VIDEO, layer.srcOffset, 2, 720)
-                                    MediaLoader.waveform(ctx, cached, 240)
+                    snapshot.chunked(2).forEach { batch ->
+                        batch.mapNotNull { layer ->
+                            val cached = cachedSources[layer.id] ?: return@mapNotNull null
+                            async {
+                                when (layer.type) {
+                                    LayerType.IMAGE -> MediaLoader.bitmapFor(ctx, cached, LayerType.IMAGE, 0f, 1, 720)
+                                    LayerType.VIDEO -> {
+                                        MediaLoader.bitmapFor(ctx, cached, LayerType.VIDEO, layer.srcOffset, 2, 720)
+                                        MediaLoader.waveform(ctx, cached, 240)
+                                    }
+                                    LayerType.AUDIO -> MediaLoader.waveform(ctx, cached, 240)
+                                    else -> Unit
                                 }
-                                LayerType.AUDIO -> MediaLoader.waveform(ctx, cached, 240)
-                                else -> Unit
                             }
-                        }
-                    }.chunked(2).forEach { batch -> batch.awaitAll() }
+                        }.awaitAll()
+                    }
                 }
                 editor.playing = true
             } catch (error: Throwable) {

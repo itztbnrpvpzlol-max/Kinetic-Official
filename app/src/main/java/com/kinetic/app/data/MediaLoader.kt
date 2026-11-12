@@ -8,7 +8,6 @@ import android.media.MediaCodec
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.os.SystemClock
-import android.os.Process
 import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
 import android.net.Uri
@@ -17,36 +16,12 @@ import android.util.LruCache
 import com.kinetic.app.model.LayerType
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.util.concurrent.Executors
-import java.util.concurrent.ThreadFactory
-import kotlinx.coroutines.asCoroutineDispatcher
 import java.util.concurrent.ConcurrentHashMap
 import java.io.File
 import java.io.FileOutputStream
 import java.security.MessageDigest
 import kotlin.math.abs
 import kotlin.math.max
-
-/**
- * A small CPU worker pool for expensive media operations.
- *
- * Keep one logical core available where possible so Compose, audio scheduling,
- * and Android system work remain responsive. Work is bounded instead of
- * spawning a thread for every thumbnail or waveform request.
- */
-object MediaWorkers {
-    val workerCount: Int = (Runtime.getRuntime().availableProcessors() - 1).coerceIn(1, 4)
-
-    val cpuDispatcher: CoroutineContext = Executors.newFixedThreadPool(
-        workerCount,
-        ThreadFactory { task ->
-            Thread({
-                Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND)
-                task.run()
-            }, "KineticMediaWorker").apply { isDaemon = true }
-        }
-    ).asCoroutineDispatcher()
-}
 
 object MediaLoader {
     class Info(val length: Float?, val width: Int, val height: Int)
