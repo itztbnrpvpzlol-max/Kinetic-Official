@@ -69,9 +69,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kinetic.app.data.AppSettings
 import com.kinetic.app.data.AudioEngine
+import com.kinetic.app.data.CompositionFrameCache
 import com.kinetic.app.data.MediaLoader
 import com.kinetic.app.data.MediaWorkers
 import com.kinetic.app.data.ProjectStore
+import com.kinetic.app.model.COMP_H
+import com.kinetic.app.model.COMP_W
 import com.kinetic.app.model.EditorState
 import com.kinetic.app.model.Layer
 import com.kinetic.app.model.LayerType
@@ -123,22 +126,59 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
     val audio = remember { AudioEngine(ctx) }
     DisposableEffect(Unit) { onDispose { audio.release(); MediaLoader.releaseAll() } }
     val projectStore = remember { ProjectStore(ctx) }
-    LaunchedEffect(editor.settings.previewMemoryMb) { MediaLoader.configureCache(editor.settings.previewMemoryMb) }
+    LaunchedEffect(editor.settings.previewMemoryMb, editor.settings.frameCacheDiskMb) {
+        MediaLoader.configureCache(editor.settings.previewMemoryMb)
+        CompositionFrameCache.configure(editor.settings.previewMemoryMb, editor.settings.frameCacheDiskMb)
+    }
     LaunchedEffect(editor.layers.map { it.id to it.uri }) { audio.prepare(editor.layers) }
 
-    LaunchedEffect(editor.settings.autoPreviewCache, editor.playing, editor.layers.map {
-        "${it.id}|${it.uri}|${it.duration}|${it.srcOffset}|${it.speed}"
-    }) {
-        if (!editor.settings.autoPreviewCache || editor.playing) return@LaunchedEffect
-        for (layer in editor.layers) {
-            if (layer.type != LayerType.VIDEO || layer.uri == null) continue
-            MediaLoader.cacheVideoPreviewFrames(
-                ctx, Uri.parse(layer.uri), layer.duration, layer.srcOffset, layer.speed
-            ) { progress ->
-                withContext(Dispatchers.Main.immediate) {
-                    editor.cacheProgress[layer.id] = progress
-                }
+    LaunchedEffect(
+        editor.settings.autoPreviewCache,
+        editor.settings.frameCacheDiskMb,
+        editor.settings.previewQualityIndex,
+        editor.playing,
+        editor.layers,
+        editor.duration,
+        editor.fps,
+        editor.projectId
+    ) {
+        if (editor.playing) return@LaunchedEffect
+        editor.clearCachedFrameMarks()
+        if (!editor.settings.autoPreviewCache) return@LaunchedEffect
+
+        val snapshot = editor.layers.toList()
+        val visualCount = snapshot.count {
+            it.visible && it.type != LayerType.AUDIO &&
+                it.type != LayerType.NULL && it.type != LayerType.ADJUSTMENT
+        }
+        if (visualCount == 0) return@LaunchedEffect
+
+        val qualityScale = resolvePreviewScale(ctx, editor.settings.previewQualityIndex, visualCount)
+        val frameWidth = (COMP_W * qualityScale).toInt().coerceAtLeast(240)
+        val frameHeight = (COMP_H * qualityScale).toInt().coerceAtLeast(135)
+        val frameCount = kotlin.math.ceil(editor.duration * editor.fps)
+            .toInt().coerceAtLeast(1)
+        val startFrame = (editor.time * editor.fps).toInt().coerceIn(0, frameCount - 1)
+
+        // Work outward from the playhead like an editor RAM preview: completed
+        // frames are immediately available while the remaining frames render.
+        for (offset in 0 until frameCount) {
+            val frameIndex = (startFrame + offset) % frameCount
+            val frameTime = frameIndex / editor.fps.toFloat()
+            val key = CompositionFrameCache.frameKey(
+                editor.projectId, snapshot, frameTime, editor.fps, frameWidth, frameHeight
+            )
+            if (CompositionFrameCache.isCached(ctx, key)) {
+                editor.markFrameCached(frameIndex, key)
+            } else {
+                if (!CompositionFrameCache.hasCapacity(ctx, editor.settings.frameCacheDiskMb)) break
+                val renderedKey = CompositionFrameCache.renderAndStore(
+                    ctx, editor.projectId, snapshot, frameTime, editor.fps,
+                    frameWidth, frameHeight, editor.settings.frameCacheDiskMb
+                ) ?: break
+                editor.markFrameCached(frameIndex, renderedKey)
             }
+            if (offset % 2 == 0) delay(1)
         }
     }
 
