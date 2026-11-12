@@ -1,37 +1,26 @@
 package com.kinetic.app.ui
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Slider
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.material3.Text
 import com.kinetic.app.model.EditorState
 import com.kinetic.app.model.Layer
 import com.kinetic.app.model.LayerType
@@ -41,166 +30,126 @@ import kotlin.math.abs
 
 @Composable
 fun PropertiesList(editor: EditorState, layer: Layer, onParent: () -> Unit) {
-    val byId = editor.layers.associateBy { it.id }
-    Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState())
-            .padding(horizontal = 14.dp, vertical = 12.dp)
-    ) {
-        Text("LAYER", color = KColors.Muted, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.3.sp)
-        Spacer(Modifier.height(8.dp))
-        Column(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
-                .background(KColors.Surface2).border(1.dp, KColors.Line, RoundedCornerShape(14.dp))
-                .padding(horizontal = 14.dp, vertical = 10.dp)
-        ) {
-            Row(
-                Modifier.fillMaxWidth().height(38.dp).clickable(onClick = onParent),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text("Parent layer", color = KColors.Text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                    Text("Layer hierarchy", color = KColors.Muted, fontSize = 10.sp)
+    var tab by remember(layer.id) { mutableStateOf(0) }
+    Column(Modifier.fillMaxSize().background(Color(0xFF080809))) {
+        Row(Modifier.fillMaxWidth().height(44.dp).padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            PropertyTab("Attributes", tab == 0) { tab = 0 }
+            PropertyTab("Anchor & Align", tab == 1) { tab = 1 }
+        }
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 8.dp, vertical = 5.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            if (tab == 0) {
+                PropertyGroup("Position") {
+                    AxisValue(editor, layer, PropId.POS_X, "X")
+                    AxisValue(editor, layer, PropId.POS_Y, "Y")
                 }
-                Text(layer.parentId?.let { byId[it]?.name } ?: "None",
-                    color = KColors.Accent, fontSize = 12.sp, maxLines = 1)
-            }
-            if (layer.type != LayerType.AUDIO) {
-                Box(Modifier.fillMaxWidth().height(1.dp).background(KColors.Line))
-                Row(Modifier.fillMaxWidth().height(42.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Link scale", color = KColors.Text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                        Text("Keep horizontal and vertical scale together", color = KColors.Muted, fontSize = 10.sp)
+                if (layer.type != LayerType.AUDIO) {
+                    PropertyGroup("Scale (%)") {
+                        AxisValue(editor, layer, PropId.SCALE_X, "X")
+                        AxisValue(editor, layer, PropId.SCALE_Y, "Y")
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                            SmallAction(if (layer.scaleLinked) "LINKED" else "LINK", layer.scaleLinked) { editor.toggleScaleLink(layer.id) }
+                        }
                     }
-                    Box(
-                        Modifier.clip(RoundedCornerShape(8.dp))
-                            .background(if (layer.scaleLinked) KColors.Accent.copy(alpha = 0.18f) else KColors.Surface)
-                            .border(1.dp, if (layer.scaleLinked) KColors.Accent.copy(alpha = 0.55f) else KColors.Line, RoundedCornerShape(8.dp))
-                            .clickable { editor.toggleScaleLink(layer.id) }
-                            .padding(horizontal = 10.dp, vertical = 6.dp)
-                    ) {
-                        Text(if (layer.scaleLinked) "LINKED" else "UNLINKED",
-                            color = if (layer.scaleLinked) KColors.Accent else KColors.Muted,
-                            fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                    PropertyGroup("Rotation") { AxisValue(editor, layer, PropId.ROTATION, "Z") }
+                }
+                PropertyGroup("Opacity (%)") { AxisValue(editor, layer, PropId.OPACITY, "") }
+            } else {
+                if (layer.type != LayerType.AUDIO) {
+                    PropertyGroup("Anchor Point") {
+                        AxisValue(editor, layer, PropId.ANCHOR_X, "X")
+                        AxisValue(editor, layer, PropId.ANCHOR_Y, "Y")
+                    }
+                }
+                PropertyGroup("Layer alignment") {
+                    Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Parent layer", color = KColors.Text, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            Text("Attach this layer to another layer", color = KColors.Muted, fontSize = 9.sp)
+                        }
+                        SmallAction(layer.parentId?.let { id -> editor.layers.firstOrNull { it.id == id }?.name } ?: "None", false, onParent)
                     }
                 }
             }
-        }
-
-        Spacer(Modifier.height(16.dp))
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text("TRANSFORM", color = KColors.Muted, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.3.sp)
-            Spacer(Modifier.weight(1f))
-            Text("AT ${fmt("%.2f", editor.time)}s", color = KColors.Accent, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-        }
-        Spacer(Modifier.height(8.dp))
-        if (layer.type == LayerType.AUDIO) {
-            Column(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(KColors.Surface2)
-                    .padding(16.dp)
-            ) {
-                Text("No transform controls", color = KColors.Text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                Text("Audio layers use their own volume and playback controls.", color = KColors.Muted, fontSize = 11.sp)
-            }
-        } else {
-            PropId.values().forEach { id -> PropertyControlCard(editor, layer, id) }
         }
     }
 }
 
 @Composable
-private fun PropertyControlCard(editor: EditorState, layer: Layer, id: PropId) {
+private fun PropertyTab(label: String, selected: Boolean, onClick: () -> Unit) {
+    Column(Modifier.width(160.dp).fillMaxSize().clickable(onClick = onClick), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+        Text(label, color = if (selected) Color(0xFF36C96B) else KColors.Muted, fontSize = 13.sp, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal)
+        Spacer(Modifier.height(7.dp))
+        Box(Modifier.fillMaxWidth().height(2.dp).background(if (selected) Color(0xFF36C96B) else Color.Transparent))
+    }
+}
+
+@Composable
+private fun PropertyGroup(title: String, content: @Composable () -> Unit) {
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(11.dp)).background(Color(0xFF222224))
+        .border(1.dp, Color(0xFF29292D), RoundedCornerShape(11.dp)).padding(horizontal = 10.dp, vertical = 7.dp)) {
+        Text(title, color = KColors.Text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(bottom = 3.dp))
+        content()
+    }
+}
+
+@Composable
+private fun AxisValue(editor: EditorState, layer: Layer, id: PropId, axis: String) {
     val prop = layer.p(id)
     val value = prop.valueAt(editor.time)
-    val selected = editor.selectedProp == id
-    val atKey = prop.keys.any { abs(it.t - editor.time) <= editor.frame / 2f }
-    val range = when (id) {
-        PropId.OPACITY -> 0f..100f
-        PropId.ROTATION -> -360f..360f
-        PropId.SCALE_X, PropId.SCALE_Y -> 0f..300f
-        else -> -1000f..1000f
+    var typing by remember(layer.id, id) { mutableStateOf(false) }
+    Row(Modifier.fillMaxWidth().height(47.dp), verticalAlignment = Alignment.CenterVertically) {
+        if (axis.isNotEmpty()) Box(Modifier.width(22.dp), contentAlignment = Alignment.CenterStart) {
+            Text(axis, color = KColors.Muted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+        }
+        Column(Modifier.weight(1f)) { ValueRuler(editor, layer, id, value) }
+        Box(Modifier.width(70.dp).height(35.dp).clip(RoundedCornerShape(7.dp)).background(Color(0xFF09090A))
+            .border(1.dp, Color(0xFF151518), RoundedCornerShape(7.dp)).clickable { typing = true }, contentAlignment = Alignment.Center) {
+            Text(id.format(value), color = if (prop.animated) Color(0xFF36C96B) else Color.White, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+        }
+        Box(Modifier.size(30.dp).clickable { editor.toggleKeyAtTime(layer.id, id) }, contentAlignment = Alignment.Center) {
+            KIcon(if (prop.keys.any { abs(it.t - editor.time) <= editor.frame / 2f }) IconKind.DIAMOND_FILLED else IconKind.DIAMOND,
+                if (prop.animated) KColors.Accent else KColors.Muted, Modifier.size(15.dp))
+        }
     }
-    var editing by remember(layer.id, id) { mutableStateOf(false) }
-    Column(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(13.dp))
-            .background(if (selected) KColors.RowSel else KColors.Surface2)
-            .border(1.dp, if (selected) KColors.Accent.copy(alpha = 0.45f) else KColors.Line, RoundedCornerShape(13.dp))
-            .clickable { editor.selectProp(id) }
-            .padding(horizontal = 12.dp, vertical = 9.dp)
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text(id.label, color = KColors.Text, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                Text(if (prop.animated) "KEYFRAMED" else "STATIC", color = KColors.Muted, fontSize = 8.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp)
+    if (typing) TextInputDialog(title = id.label, initial = fmt("%.2f", value), onDone = { input ->
+        input.trim().toFloatOrNull()?.let { editor.beginEdit(); editor.setPropValue(layer.id, id, it) }
+        typing = false
+    }, onDismiss = { typing = false })
+}
+
+@Composable
+private fun ValueRuler(editor: EditorState, layer: Layer, id: PropId, value: Float) {
+    val density = LocalDensity.current.density
+    Canvas(Modifier.fillMaxWidth().height(38.dp).pointerInput(layer.id, id) {
+        detectHorizontalDragGestures(onDragStart = { editor.beginEdit() }) { change, drag ->
+            change.consume()
+            val step = when (id) {
+                PropId.POS_X, PropId.POS_Y, PropId.ANCHOR_X, PropId.ANCHOR_Y -> 1.5f
+                PropId.ROTATION -> 0.5f
+                else -> 0.35f
             }
-            Box(
-                Modifier.clip(RoundedCornerShape(7.dp)).background(KColors.Surface)
-                    .clickable { editor.selectProp(id) }.padding(horizontal = 10.dp, vertical = 6.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(id.format(value), color = KColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-            }
-            Box(Modifier.size(34.dp).clickable { editor.toggleStopwatch(layer.id, id) }, contentAlignment = Alignment.Center) {
-                KIcon(IconKind.STOPWATCH, if (prop.animated) KColors.Accent else KColors.Muted, Modifier.size(17.dp))
-            }
-            Box(Modifier.size(30.dp).clickable { editor.toggleKeyAtTime(layer.id, id) }, contentAlignment = Alignment.Center) {
-                KIcon(if (atKey) IconKind.DIAMOND_FILLED else IconKind.DIAMOND,
-                    if (atKey) KColors.Accent else KColors.Muted, Modifier.size(17.dp))
-            }
+            val current = editor.layers.firstOrNull { it.id == layer.id }?.p(id)?.valueAt(editor.time) ?: value
+            editor.setPropValue(layer.id, id, current + drag / density * step)
         }
-        if (editor.settings.afterEffectsScrubbing) {
-            ScrubValue(editor, layer, id, value)
-        } else {
-            Slider(
-                value = value.coerceIn(range),
-                onValueChange = {
-                    if (!editing) { editor.beginEdit(); editing = true }
-                    editor.setPropValue(layer.id, id, it)
-                },
-                onValueChangeFinished = { editing = false },
-                valueRange = range
-            )
+    }) {
+        val center = size.width * 0.5f
+        val baseline = size.height - 7.dp.toPx()
+        val minor = Color(0xFF48484D)
+        for (i in -18..18) {
+            val x = center + i * 5.dp.toPx()
+            val major = i % 5 == 0
+            drawLine(minor, Offset(x, baseline - if (major) 13.dp.toPx() else 7.dp.toPx()), Offset(x, baseline), if (major) 1.3.dp.toPx() else 0.8.dp.toPx())
         }
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(28.dp).clickable(enabled = prop.animated) { editor.jumpKey(layer.id, id, -1) }, contentAlignment = Alignment.Center) {
-                KIcon(IconKind.PREV, if (prop.animated) KColors.Muted else KColors.Dim, Modifier.size(14.dp))
-            }
-            Text("${prop.keys.size} keyframes", color = KColors.Muted, fontSize = 9.sp, modifier = Modifier.weight(1f))
-            Box(Modifier.size(28.dp).clickable(enabled = prop.animated) { editor.jumpKey(layer.id, id, 1) }, contentAlignment = Alignment.Center) {
-                KIcon(IconKind.NEXT, if (prop.animated) KColors.Muted else KColors.Dim, Modifier.size(14.dp))
-            }
-        }
+        drawLine(Color(0xFF36C96B), Offset(center, 3.dp.toPx()), Offset(center, baseline + 1.dp.toPx()), 2.dp.toPx())
+        drawCircle(Color(0xFF36C96B), 3.dp.toPx(), Offset(center, 4.dp.toPx()))
     }
 }
 
 @Composable
-private fun ScrubValue(editor: EditorState, layer: Layer, id: PropId, value: Float) {
-    val dens = LocalDensity.current.density
-    var typing by remember { mutableStateOf(false) }
-    Box(
-        Modifier.fillMaxWidth().height(30.dp).clip(RoundedCornerShape(8.dp))
-            .background(KColors.Surface)
-            .pointerInput(layer.id, id) {
-                detectHorizontalDragGestures(onDragStart = { editor.beginEdit() }) { change, dx ->
-                    change.consume()
-                    val cur = editor.layers.firstOrNull { it.id == layer.id }?.p(id)?.valueAt(editor.time)
-                    if (cur != null) editor.setPropValue(layer.id, id,
-                        cur + dx / dens * id.scrubStep * editor.settings.scrubMultiplier)
-                }
-            }
-            .clickable { typing = true },
-        contentAlignment = Alignment.Center
-    ) {
-        Text(id.format(value), color = KColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-    }
-    if (typing) {
-        TextInputDialog(
-            title = id.label,
-            initial = fmt("%.2f", value),
-            onDone = { input ->
-                input.trim().toFloatOrNull()?.let { editor.beginEdit(); editor.setPropValue(layer.id, id, it) }
-                typing = false
-            },
-            onDismiss = { typing = false }
-        )
+private fun SmallAction(label: String, active: Boolean, onClick: () -> Unit) {
+    Box(Modifier.clip(RoundedCornerShape(6.dp)).background(if (active) KColors.Accent.copy(alpha = 0.18f) else Color(0xFF0A0A0B))
+        .border(1.dp, if (active) KColors.Accent else KColors.Line, RoundedCornerShape(6.dp)).clickable(onClick = onClick)
+        .padding(horizontal = 9.dp, vertical = 7.dp)) {
+        Text(label, color = if (active) KColors.Accent else KColors.Text, fontSize = 9.sp, fontWeight = FontWeight.Bold, maxLines = 1)
     }
 }

@@ -84,12 +84,6 @@ fun SettingsScreen(settings: AppSettings, onBack: () -> Unit, onOpenMpvTest: () 
                 Text("Clear", color = KColors.Accent, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
             }
 
-            Section("Properties")
-            ChoiceRow("Interaction style", listOf("After Effects", "Alight Motion"), if (settings.afterEffectsScrubbing) 0 else 1) { settings.updateAfterEffectsScrubbing(it == 0) }
-            if (settings.afterEffectsScrubbing) {
-                ChoiceRow("Scrub sensitivity", AppSettings.SENSITIVITY, settings.sensitivity) { settings.updateSensitivity(it) }
-            }
-
             Spacer(Modifier.height(24.dp))
             Text("Kinetic 0.2", color = KColors.Dim, fontSize = 12.sp)
         }
