@@ -133,7 +133,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
         for (layer in editor.layers) {
             if (layer.type != LayerType.VIDEO || layer.uri == null) continue
             MediaLoader.cacheVideoPreviewFrames(
-                ctx, Uri.parse(layer.uri), layer.duration, layer.srcOffset
+                ctx, Uri.parse(layer.uri), layer.duration, layer.srcOffset, layer.speed
             ) { progress ->
                 withContext(Dispatchers.Main.immediate) {
                     editor.cacheProgress[layer.id] = progress
