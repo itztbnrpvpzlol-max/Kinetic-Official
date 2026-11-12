@@ -250,6 +250,7 @@ private class MpvTestController(context: Context) {
     @Volatile private var initialized = false
     @Volatile private var surfaceAttached = false
     @Volatile private var pendingPath: String? = null
+    @Volatile private var currentPath: String? = null
 
     @Synchronized
     fun initialize(hwdec: String) {
@@ -269,7 +270,7 @@ private class MpvTestController(context: Context) {
 
     @Synchronized
     fun reconfigure(hwdec: String) {
-        val path = pendingPath
+        val path = currentPath ?: pendingPath
         destroyInstance()
         pendingPath = path
         initialize(hwdec)
@@ -289,6 +290,7 @@ private class MpvTestController(context: Context) {
 
     @Synchronized
     fun load(path: String) {
+        currentPath = path
         pendingPath = path
         if (initialized && surfaceAttached) {
             player?.command(arrayOf("loadfile", path, "replace"))
