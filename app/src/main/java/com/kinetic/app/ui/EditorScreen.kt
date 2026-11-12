@@ -76,7 +76,6 @@ import com.kinetic.app.data.AudioEngine
 import com.kinetic.app.data.MediaLoader
 import com.kinetic.app.data.MediaWorkers
 import com.kinetic.app.data.PreviewDiagnostics
-import com.kinetic.app.data.PreviewProxyStore
 import com.kinetic.app.data.ProjectStore
 import com.kinetic.app.model.COMP_H
 import com.kinetic.app.model.COMP_W
@@ -107,7 +106,6 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
     var previewHeight by remember { mutableFloatStateOf(210f) }
     var dockTool by remember { mutableStateOf("Select") }
     var showToolSheet by remember { mutableStateOf(false) }
-    var isPreparingPlayback by remember { mutableStateOf(false) }
     LaunchedEffect(editor.selectedId) {
         dockTool = if (editor.selectedId == null) "Select" else "Properties"
         showToolSheet = false
@@ -122,47 +120,10 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
         MediaLoader.cacheVideoPreviewFrames(ctx, source, durationSec) { }
     }
 
-    // Playback does not start until every visible video has a ready 360p proxy.
-    // That gives the decoder a warm, predictable source instead of letting it
-    // fall behind while trying to decode original-resolution media.
+    // Playback starts immediately from original media; thumbnail caching is
+    // independent and does not block the transport.
     fun togglePlayback() {
-        if (editor.playing) {
-            editor.playing = false
-            return
-        }
-        if (isPreparingPlayback) return
-        scope.launch {
-            isPreparingPlayback = true
-            val sources = editor.layers
-                .filter { it.visible && it.type == LayerType.VIDEO && it.uri != null }
-                .mapNotNull { it.uri }
-                .distinct()
-            if (sources.isNotEmpty()) {
-                Toast.makeText(ctx, "Preparing 360p playback cache…", Toast.LENGTH_SHORT).show()
-            }
-            var failed = 0
-            try {
-                for (source in sources) {
-                    val proxy = PreviewProxyStore.getOrCreate(
-                        ctx,
-                        Uri.parse(source),
-                        PreviewProxyStore.PLAYBACK_PROXY_HEIGHT,
-                        PreviewProxyStore.PLAYBACK_PROXY_BITRATE
-                    )
-                    if (proxy == null) failed++
-                }
-                if (failed > 0) {
-                    Toast.makeText(
-                        ctx,
-                        "$failed clip(s) could not be cached; using original media",
-                        Toast.LENGTH_LONG
-                    ).show()
-                }
-                editor.playing = true
-            } finally {
-                isPreparingPlayback = false
-            }
-        }
+        editor.playing = !editor.playing
     }
     BackHandler { leave() }
     BackHandler(enabled = previewExpanded) { previewExpanded = false }
@@ -211,24 +172,6 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
         )
     }
     LaunchedEffect(editor.layers.map { it.id to it.uri }) { audio.prepare(editor.layers) }
-
-    // Prepare playback proxies while idle, including when a saved project is
-    // reopened. The play action below awaits these same cache entries.
-    LaunchedEffect(editor.layers.map { it.id to it.uri }, editor.playing) {
-        if (editor.playing) return@LaunchedEffect
-        val sources = editor.layers
-            .filter { it.visible && it.type == LayerType.VIDEO && it.uri != null }
-            .mapNotNull { it.uri }
-            .distinct()
-        for (source in sources) {
-            PreviewProxyStore.getOrCreate(
-                ctx,
-                Uri.parse(source),
-                PreviewProxyStore.PLAYBACK_PROXY_HEIGHT,
-                PreviewProxyStore.PLAYBACK_PROXY_BITRATE
-            )
-        }
-    }
 
     // Keep a very small RAM look-ahead window warm during playback. The
     // cache worker runs at the lowest thread priority, so live frame decoding
@@ -310,42 +253,8 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
             var lastAudioSyncMs = 0L
             audio.sync(editor.layers, editor.time, true)
 
-            fun previewCacheReadyAt(timelineTime: Float): Boolean {
-                val activeVideos = editor.layers.filter {
-                    it.visible && it.type == LayerType.VIDEO && it.uri != null &&
-                        it.activeAt(timelineTime)
-                }
-                return activeVideos.all { layer ->
-                    val original = Uri.parse(layer.uri!!)
-                    val source = PreviewProxyStore.findExisting(
-                        ctx,
-                        original,
-                        PreviewProxyStore.PLAYBACK_PROXY_HEIGHT,
-                        PreviewProxyStore.PLAYBACK_PROXY_BITRATE
-                    ) ?: original
-                    val speed = layer.speed.coerceIn(0.1f, 4f)
-                    val sourceTime = (
-                        (timelineTime - layer.start).coerceAtLeast(0f) * speed + layer.srcOffset
-                    ).coerceAtLeast(0f)
-                    MediaLoader.hasCachedVideoFrame(source, sourceTime, 12, 360)
-                }
-            }
-
-            var waitingForPreviewCache = false
             while (editor.playing) {
-                if (!playback.isPlaying()) {
-                    if (!waitingForPreviewCache) break
-                    val heldTime = playback.positionSeconds()
-                        .coerceIn(0f, editor.duration.coerceAtLeast(0f))
-                    if (heldTime >= editor.duration - 0.01f) break
-                    val nextProbeTime = (
-                        (heldTime * uiFps).toInt() + 1
-                    ) / uiFps.toFloat()
-                    if (previewCacheReadyAt(nextProbeTime)) {
-                        playback.play()
-                        waitingForPreviewCache = false
-                    } else {
-                        delay(16L)
+                delay(16L)
                         continue
                     }
                 }
@@ -353,22 +262,6 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                 delay(16L)
                 val transportTime = playback.positionSeconds()
                     .coerceIn(0f, editor.duration.coerceAtLeast(0f))
-
-                // On constrained devices, hold the master clock at a frame
-                // boundary until the exact 360p proxy frame is in the RAM/disk
-                // cache. Audio pauses with it; once the cache is ready, both
-                // resume from the same master-clock position.
-                if (MediaWorkers.isConstrainedDevice && playback.isPlaying()) {
-                    val nextProbeTime = (
-                        (transportTime * uiFps).toInt() + 1
-                    ) / uiFps.toFloat()
-                    if (!previewCacheReadyAt(nextProbeTime)) {
-                        playback.pause()
-                        waitingForPreviewCache = true
-                        audio.sync(editor.layers, transportTime, false)
-                        continue
-                    }
-                }
 
                 val nextFrame = playback.positionFrame(uiFps.toFloat())
                     .coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
