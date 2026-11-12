@@ -26,6 +26,7 @@ object NativeRenderEngine {
 
     /** Initializes the native OpenGL ES 3.x composition renderer on the GL thread. */
     external fun nativeGlInit(): Boolean
+    external fun nativeGlBeginFrame(backgroundArgb: Int, width: Int, height: Int)
     external fun nativeGlDrawTexture(
         textureId: Int, vertices: FloatArray, alpha: Float, gray: Float, blendMode: Int
     )
