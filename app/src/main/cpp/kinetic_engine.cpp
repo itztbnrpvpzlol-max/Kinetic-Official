@@ -103,6 +103,7 @@ struct PlaybackClock {
     double speed = 1.0;
     bool looping = false;
     bool playing = false;
+    uint64_t generation = 1;
     std::chrono::steady_clock::time_point anchor = std::chrono::steady_clock::now();
 
     double positionLocked(std::chrono::steady_clock::time_point now) {
@@ -114,6 +115,7 @@ struct PlaybackClock {
                 next = std::fmod(next, durationSeconds);
                 positionSeconds = next;
                 anchor = now;
+                ++generation;
             } else {
                 positionSeconds = durationSeconds;
                 playing = false;
@@ -146,6 +148,7 @@ Java_com_kinetic_app_engine_NativePlaybackEngine_nativeConfigure(
         clock->positionSeconds = std::min(clock->positionSeconds, clock->durationSeconds);
     }
     clock->anchor = now;
+    ++clock->generation;
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -157,6 +160,7 @@ Java_com_kinetic_app_engine_NativePlaybackEngine_nativeSeek(
     const double upper = clock->durationSeconds > 0.0 ? clock->durationSeconds : 1.0e12;
     clock->positionSeconds = std::clamp(static_cast<double>(position), 0.0, upper);
     clock->anchor = std::chrono::steady_clock::now();
+    ++clock->generation;
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -169,6 +173,7 @@ Java_com_kinetic_app_engine_NativePlaybackEngine_nativePlay(JNIEnv*, jobject, jl
     }
     clock->anchor = std::chrono::steady_clock::now();
     clock->playing = clock->durationSeconds <= 0.0 || clock->positionSeconds < clock->durationSeconds || clock->looping;
+    ++clock->generation;
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -180,6 +185,7 @@ Java_com_kinetic_app_engine_NativePlaybackEngine_nativePause(JNIEnv*, jobject, j
     clock->positionSeconds = clock->positionLocked(now);
     clock->playing = false;
     clock->anchor = now;
+    ++clock->generation;
 }
 
 extern "C" JNIEXPORT jdouble JNICALL
@@ -200,6 +206,26 @@ Java_com_kinetic_app_engine_NativePlaybackEngine_nativePositionFrame(
     const double safeFps = std::clamp(fps, 1.0, 240.0);
     const double frame = std::floor(position * safeFps + 1.0e-7);
     return static_cast<jlong>(std::max(0.0, frame));
+}
+
+extern "C" JNIEXPORT jlongArray JNICALL
+Java_com_kinetic_app_engine_NativePlaybackEngine_nativeClockSnapshot(JNIEnv* env, jobject, jlong handle) {
+    auto* clock = reinterpret_cast<PlaybackClock*>(handle);
+    jlong values[5] = {0, 0, 1'000'000, 0, 0};
+    if (clock != nullptr) {
+        std::lock_guard<std::mutex> lock(clock->mutex);
+        const auto now = std::chrono::steady_clock::now();
+        const double position = clock->positionLocked(now);
+        const auto nowNs = std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count();
+        values[0] = static_cast<jlong>(std::max(0.0, position) * 1'000'000.0);
+        values[1] = static_cast<jlong>(nowNs);
+        values[2] = static_cast<jlong>(std::clamp(clock->speed, 0.1, 4.0) * 1'000'000.0);
+        values[3] = clock->playing ? 1 : 0;
+        values[4] = static_cast<jlong>(clock->generation);
+    }
+    jlongArray result = env->NewLongArray(5);
+    if (result) env->SetLongArrayRegion(result, 0, 5, values);
+    return result;
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
