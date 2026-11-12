@@ -505,7 +505,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                     scope.launch {
                         val cachedUri = MediaLoader.cacheMedia(ctx, item.uri)
                         val info = withContext(MediaWorkers.cpuDispatcher) { MediaLoader.probe(ctx, cachedUri, item.type) }
-                        if (item.type == LayerType.VIDEO) prepareVideoPreview(cachedUri)
+                        if (item.type == LayerType.VIDEO) prepareVideoPreview(cachedUri, item.duration ?: 0f)
                         editor.addMediaTrimmed(item.type, item.name, cachedUri.toString(),
                             if (info.width > 0) info.width else item.width,
                             if (info.height > 0) info.height else item.height,
