@@ -147,12 +147,16 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
             .fillMaxWidth()
             .onSizeChanged { paneW = it.width }
             .pointerInput(Unit) { detectPinch { z -> pps = (pps * z).coerceIn(18f, 400f) } }
-            .pointerInput(pps, paneW) {
-                detectDragGestures { change, drag ->
-                    if (change.position.x > leftPx) {
+            .pointerInput(pps, paneW, leftPx) {
+                var timelineDrag = false
+                detectDragGestures(
+                    onDragStart = { origin -> timelineDrag = origin.x > leftPx + 12f * dens },
+                    onDragEnd = { timelineDrag = false },
+                    onDragCancel = { timelineDrag = false }
+                ) { change, drag ->
+                    if (timelineDrag) {
                         change.consume()
                         hScroll.dispatchRawDelta(-drag.x)
-                        val viewW = (paneW - leftPx).coerceAtLeast(1f)
                         val centeredTime = (hScroll.value / dens) / pps
                         editor.seek(centeredTime.coerceAtLeast(0f))
                     }
