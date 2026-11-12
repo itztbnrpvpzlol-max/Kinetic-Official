@@ -383,7 +383,8 @@ private fun GpuVideoPlayerLayer(
     }
 
     LaunchedEffect(player, layer.id) {
-        while (true) {
+        var waitedMs = 0
+        while (waitedMs < 10_000) {
             when (player.decoderState()) {
                 1 -> break
                 -1 -> {
@@ -393,6 +394,11 @@ private fun GpuVideoPlayerLayer(
                 }
             }
             kotlinx.coroutines.delay(50L)
+            waitedMs += 50
+        }
+        if (waitedMs >= 10_000 && player.decoderState() == 0) {
+            Log.w("KineticVideo", "Hardware decoder startup timed out for layer ${layer.id}; using bitmap fallback")
+            onDecoderFailed(layer.id)
         }
     }
 
