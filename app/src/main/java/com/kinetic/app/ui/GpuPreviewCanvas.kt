@@ -550,8 +550,10 @@ private fun GpuCompositionPreviewCanvas(
     val frames = remember { mutableStateMapOf<String, Bitmap>() }
     val textTextures = remember { mutableMapOf<String, Pair<Int, Bitmap>>() }
     val videoLayers = editor.layers.filter {
-        it.visible && it.activeAt(editor.time) && it.type == LayerType.VIDEO && it.uri != null
+        it.visible && it.activeAt(editor.time) && it.type == LayerType.VIDEO && it.uri != null &&
+            !it.maskEnabled && it.effects.isEmpty() && it.blendMode == "Normal"
     }
+    val textureVideoIds = videoLayers.mapTo(HashSet<String>()) { it.id }
 
     LaunchedEffect(editor.layers.map { it.id }) {
         val currentIds = editor.layers.mapTo(HashSet<String>()) { it.id }
@@ -559,21 +561,31 @@ private fun GpuCompositionPreviewCanvas(
         stale.forEach { textTextures.remove(it) }
     }
 
-    // Video is no longer sampled into 12-fps bitmaps here. It is decoded by
-    // Media3/MediaCodec and presented through TextureView, avoiding repeated
-    // MediaMetadataRetriever work and CPU bitmap uploads during playback.
+    // Simple video layers use Media3/MediaCodec and TextureView. Layers that
+    // require bitmap-only masks/effects/blends retain the compatibility renderer.
     for (layer in editor.layers) {
         val uri = layer.uri
-        if (uri != null && layer.type == LayerType.IMAGE) {
+        val needsBitmap = layer.type == LayerType.IMAGE ||
+            (layer.type == LayerType.VIDEO && layer.id !in textureVideoIds)
+        if (uri != null && needsBitmap) {
+            val active = layer.activeAt(editor.time)
+            val sourceTime = ((editor.time - layer.start).coerceAtLeast(0f) *
+                layer.speed + layer.srcOffset).coerceAtLeast(0f)
+            val bucket = if (!active) -1 else if (layer.type == LayerType.VIDEO) {
+                (sourceTime * 12f).toInt()
+            } else 0
             key(layer.id) {
                 DisposableEffect(layer.id) {
                     onDispose { frames.remove(layer.id) }
                 }
-                LaunchedEffect(uri) {
-                    MediaLoader.bitmapFor(
-                        context, Uri.parse(uri), LayerType.IMAGE, 0f, 1,
-                        (1920f * qualityScale).toInt().coerceIn(240, 1920)
-                    )?.let { frames[layer.id] = it }
+                LaunchedEffect(uri, bucket, qualityScale) {
+                    if (bucket >= 0) {
+                        MediaLoader.bitmapFor(
+                            context, Uri.parse(uri), layer.type, sourceTime,
+                            if (qualityScale >= 0.75f) 12 else if (qualityScale >= 0.45f) 8 else 5,
+                            (1920f * qualityScale).toInt().coerceIn(240, 1920)
+                        )?.let { frames[layer.id] = it }
+                    } else frames.remove(layer.id)
                 }
             }
         }
@@ -584,9 +596,9 @@ private fun GpuCompositionPreviewCanvas(
     for (layer in editor.layers.asReversed()) {
         if (!layer.visible || !layer.activeAt(editor.time) || layer.type == LayerType.AUDIO ||
             layer.type == LayerType.NULL || layer.type == LayerType.ADJUSTMENT ||
-            layer.type == LayerType.VIDEO) continue
+            (layer.type == LayerType.VIDEO && layer.id in textureVideoIds)) continue
         val bitmap = when (layer.type) {
-            LayerType.IMAGE -> frames[layer.id]
+            LayerType.IMAGE, LayerType.VIDEO -> frames[layer.id]
             LayerType.TEXT, LayerType.SHAPE -> {
                 val signature = if (layer.type == LayerType.TEXT)
                     layer.text.hashCode() * 31 + layer.color
