@@ -33,6 +33,8 @@ class FfmpegVideoPlayer(
     }
     private val pendingClockSync = AtomicReference<ClockSync?>(null)
     private val clockSyncQueued = AtomicBoolean(false)
+    private val pendingSeekRequest = AtomicReference<Long?>(null)
+    private val seekTaskQueued = AtomicBoolean(false)
     private var mpv: MPVLib? = null
     private var sourceDescriptor: ParcelFileDescriptor? = null
     @Volatile private var fallback: AndroidVideoPlayer? = null
@@ -98,17 +100,15 @@ class FfmpegVideoPlayer(
     fun updatePositionHint(targetMs: Long) {
         if (released) return
         pendingSeekMs = targetMs.coerceAtLeast(0L)
-        postToDecoder { fallback?.updatePositionHint(pendingSeekMs) }
+        val backup = fallback ?: return
+        postToDecoder { if (fallback === backup) backup.updatePositionHint(pendingSeekMs) }
     }
 
     fun seekTo(targetMs: Long) {
         if (released) return
         pendingSeekMs = targetMs.coerceAtLeast(0L)
-        postToDecoder {
-            val backup = fallback
-            if (backup != null) backup.seekTo(pendingSeekMs)
-            else if (loaded) seekMpv(pendingSeekMs)
-        }
+        pendingSeekRequest.set(pendingSeekMs)
+        scheduleSeek()
     }
 
     fun setSpeed(value: Float) {
@@ -197,6 +197,29 @@ class FfmpegVideoPlayer(
             decoderExecutor.execute {
                 if (!released) block()
             }
+        }
+    }
+
+    private fun scheduleSeek() {
+        if (released || !seekTaskQueued.compareAndSet(false, true)) return
+        runCatching {
+            decoderExecutor.execute {
+                try {
+                    // Drain only the newest requested position. A long exact
+                    // seek must not leave dozens of stale scrub seeks queued.
+                    while (!released) {
+                        val target = pendingSeekRequest.getAndSet(null) ?: break
+                        val backup = fallback
+                        if (backup != null) backup.seekTo(target)
+                        else if (loaded) seekMpv(target)
+                    }
+                } finally {
+                    seekTaskQueued.set(false)
+                    if (pendingSeekRequest.get() != null) scheduleSeek()
+                }
+            }
+        }.onFailure {
+            seekTaskQueued.set(false)
         }
     }
 
@@ -352,7 +375,7 @@ class FfmpegVideoPlayer(
         player.attachSurface(outputSurface)
         player.setSpeed(speed)
         player.updatePositionHint(pendingSeekMs)
-        player.seekTo(pendingSeekMs)
+        player.seekTo(pendingSeekRequest.getAndSet(null) ?: pendingSeekMs)
         if (lastPlaying) player.play() else player.pause()
     }
 
