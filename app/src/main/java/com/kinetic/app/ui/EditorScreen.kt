@@ -265,8 +265,8 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
 
     BoxWithConstraints(Modifier.fillMaxSize().background(KColors.Bg)) {
         val compactHeight = maxHeight < 520.dp
-        val maxPreviewHeight = (maxHeight.value * 0.48f).coerceAtLeast(120f)
-        val adaptivePreviewHeight = previewHeight.coerceIn(120f, maxPreviewHeight)
+        val maxPreviewHeight = (maxHeight.value * if (compactHeight) 0.30f else 0.48f).coerceAtLeast(100f)
+        val adaptivePreviewHeight = previewHeight.coerceIn(100f, maxPreviewHeight)
         Column(Modifier.widthIn(max = 1440.dp).fillMaxSize().align(Alignment.Center)
             .statusBarsPadding().navigationBarsPadding()) {
         TopBar(editor, onMenuHome = { leave() }, onOpenSettings = {
@@ -286,7 +286,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                 PreviewDiagnosticsBadge(editor.playing, Modifier.align(Alignment.BottomEnd).padding(8.dp))
                 }
             Box(Modifier.fillMaxWidth().height(10.dp).background(KColors.Bg).pointerInput(Unit) {
-                detectVerticalDragGestures { change, drag -> change.consume(); previewHeight = (previewHeight + drag / density).coerceIn(120f, maxPreviewHeight) }
+                detectVerticalDragGestures { change, drag -> change.consume(); previewHeight = (previewHeight + drag / density).coerceIn(100f, maxPreviewHeight) }
             }, contentAlignment = Alignment.Center) {
                 Box(Modifier.width(44.dp).height(4.dp).clip(CircleShape).background(KColors.Muted))
             }
@@ -302,8 +302,8 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
             TimelinePane(editor, Modifier.weight(1f))
             val activeLayer = editor.selected
             if (activeLayer != null) {
-                AlightCutBar(editor, activeLayer)
                 if (!compactHeight) {
+                    AlightCutBar(editor, activeLayer)
                     ResizeHandle(density) { panelHeight = it }
                     val adaptivePanelHeight = panelHeight.coerceAtMost((maxHeight.value * 0.38f).coerceAtLeast(130f))
                     EditPanel(editor, activeLayer, panelTab, { panelTab = it }, { editor.select(null) },
