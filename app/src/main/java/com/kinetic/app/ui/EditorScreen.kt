@@ -320,7 +320,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                 }
 
                 val now = SystemClock.elapsedRealtime()
-                if (now - lastAudioSyncMs >= 50L) {
+                if (now - lastAudioSyncMs >= 33L) {
                     audio.sync(editor.layers, transportTime, playback.isPlaying())
                     lastAudioSyncMs = now
                 }
