@@ -321,19 +321,19 @@ Java_com_kinetic_app_engine_NativeRenderEngine_nativeGlInit(JNIEnv*, jobject) {
     // KRE uses GLSL ES 3.00 exclusively; no ES 2 shader fallback is
     // silently accepted after requesting an ES 3.x context.
     static const char* vertex =
-        "#version 300 es\\n"
+        "#version 300 es\n"
         "in vec2 aPosition; in vec2 aTexCoord; out vec2 vTexCoord;"
         "void main(){ gl_Position=vec4(aPosition,0.0,1.0); vTexCoord=aTexCoord; }";
     static const char* textureFragment =
-        "#version 300 es\\n"
+        "#version 300 es\n"
         "precision mediump float; uniform sampler2D uTexture; uniform float uAlpha;"
         "uniform float uGray; in vec2 vTexCoord; out vec4 fragColor;"
         "void main(){ vec4 c=texture(uTexture,vTexCoord);"
         "if(uGray>0.5){ float y=dot(c.rgb,vec3(0.299,0.587,0.114)); c.rgb=vec3(y); }"
         "fragColor=vec4(c.rgb*uAlpha,c.a*uAlpha); }";
     static const char* externalFragment =
-        "#version 300 es\\n"
-        "#extension GL_OES_EGL_image_external_essl3 : require\\n"
+        "#version 300 es\n"
+        "#extension GL_OES_EGL_image_external_essl3 : require\n"
         "precision mediump float; uniform samplerExternalOES uTexture; uniform float uAlpha;"
         "uniform float uGray; uniform mat4 uTexMatrix; in vec2 vTexCoord; out vec4 fragColor;"
         "void main(){ vec2 uv=(uTexMatrix*vec4(vTexCoord,0.0,1.0)).xy;"
@@ -341,10 +341,10 @@ Java_com_kinetic_app_engine_NativeRenderEngine_nativeGlInit(JNIEnv*, jobject) {
         "if(uGray>0.5){ float y=dot(c.rgb,vec3(0.299,0.587,0.114)); c.rgb=vec3(y); }"
         "fragColor=vec4(c.rgb*uAlpha,c.a*uAlpha); }";
     static const char* solidVertex =
-        "#version 300 es\\n"
+        "#version 300 es\n"
         "in vec2 aPosition; void main(){ gl_Position=vec4(aPosition,0.0,1.0); }";
     static const char* solidFragment =
-        "#version 300 es\\n"
+        "#version 300 es\n"
         "precision mediump float; uniform vec4 uColor; out vec4 fragColor;"
         "void main(){ fragColor=uColor; }";
 
