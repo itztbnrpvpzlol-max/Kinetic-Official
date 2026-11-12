@@ -350,13 +350,27 @@ private fun Clip(editor: EditorState, layer: Layer, pps: Float, selected: Boolea
     val ctx = LocalContext.current
     val dens = LocalDensity.current.density
     val shape = RoundedCornerShape(8.dp)
-    val thumb by produceState<Bitmap?>(null, layer.uri) {
+    val thumbnails by produceState<List<Bitmap>>(emptyList(), layer.uri, layer.type, layer.duration, layer.srcOffset, layer.speed) {
         val u = layer.uri
-        value = if (u != null && (layer.type == LayerType.IMAGE || layer.type == LayerType.VIDEO)) {
-            MediaLoader.bitmapFor(ctx, Uri.parse(u), layer.type, 0f, 5, 320)
-        } else null
+        value = if (u == null || (layer.type != LayerType.IMAGE && layer.type != LayerType.VIDEO)) {
+            emptyList()
+        } else if (layer.type == LayerType.IMAGE) {
+            listOfNotNull(MediaLoader.bitmapFor(ctx, Uri.parse(u), LayerType.IMAGE, 0f, 1, 320))
+        } else {
+            // Four representative frames make a video clip read as a video strip
+            // instead of stretching one still frame across its entire duration.
+            val fractions = floatArrayOf(0f, 0.25f, 0.5f, 0.75f)
+            buildList {
+                for (fraction in fractions) {
+                    var sourceTime = layer.srcOffset + layer.duration * fraction * layer.speed
+                    if (layer.srcLength.isFinite()) {
+                        sourceTime = sourceTime.coerceAtMost((layer.srcLength - 0.05f).coerceAtLeast(0f))
+                    }
+                    MediaLoader.bitmapFor(ctx, Uri.parse(u), LayerType.VIDEO, sourceTime, 2, 240)?.let(::add)
+                }
+            }
+        }
     }
-    val img = remember(thumb) { thumb?.asImageBitmap() }
     val dashed = layer.type == LayerType.ADJUSTMENT || layer.type == LayerType.NULL
 
     Box(
@@ -385,11 +399,18 @@ private fun Clip(editor: EditorState, layer: Layer, pps: Float, selected: Boolea
                 )
             }
     ) {
-        if (img != null) {
-            Image(
-                bitmap = img, contentDescription = null, contentScale = ContentScale.Crop,
-                alpha = 0.45f, modifier = Modifier.fillMaxSize()
-            )
+        if (thumbnails.isNotEmpty()) {
+            Row(Modifier.fillMaxSize()) {
+                thumbnails.forEach { bitmap ->
+                    Image(
+                        bitmap = bitmap.asImageBitmap(),
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        alpha = 0.45f,
+                        modifier = Modifier.weight(1f).fillMaxHeight()
+                    )
+                }
+            }
         }
         if (layer.type == LayerType.AUDIO) Waveform(layer.id)
         Row(
