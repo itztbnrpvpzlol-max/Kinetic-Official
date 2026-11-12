@@ -35,13 +35,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
-import androidx.media3.common.C
-import androidx.media3.common.MediaItem
-import androidx.media3.common.Player
-import androidx.media3.common.TrackSelectionParameters
-import androidx.media3.exoplayer.ExoPlayer
-import android.view.TextureView
-import android.graphics.SurfaceTexture
 import android.view.Surface
 import android.opengl.GLES11Ext
 import java.util.concurrent.ConcurrentHashMap
@@ -145,20 +138,6 @@ private fun LivePreviewCanvas(
     GpuCompositionPreviewCanvas(editor, modifier, qualityScale)
 }
 
-private fun applyPlaybackDecodeLimit(player: ExoPlayer, playing: Boolean, qualityScale: Float) {
-    // Keep decoder selection aligned with the actual preview/proxy resolution.
-    val maxHeight = if (playing) (COMP_H * qualityScale).toInt().coerceAtLeast(240) else Int.MAX_VALUE
-    val maxWidth = if (playing) (COMP_W * qualityScale).toInt().coerceAtLeast(240) else Int.MAX_VALUE
-    val maxBitrate = if (!playing) Int.MAX_VALUE else when {
-        maxHeight <= 360 -> 2_000_000
-        maxHeight <= 540 -> 3_000_000
-        else -> 5_000_000
-    }
-    player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
-        .setMaxVideoSize(maxWidth, maxHeight)
-        .setMaxVideoBitrate(maxBitrate)
-        .build()
-}
 @Composable
 private fun rememberPlaybackUri(uri: String?, qualityScale: Float, playing: Boolean): Uri? {
     val context = LocalContext.current.applicationContext
