@@ -26,16 +26,21 @@ public:
         const int count = std::clamp(requested, 1, 20);
         const double safeFps = std::clamp(fps, 1.0, 120.0);
         const double safeSpeed = std::clamp(speed, 0.1, 4.0);
-        const double stepValue = 1000000.0 / safeFps * safeSpeed;
+        const long double stepValue = 1000000.0L /
+            static_cast<long double>(safeFps) * static_cast<long double>(safeSpeed);
         const int64_t step = std::max<int64_t>(1, static_cast<int64_t>(std::llround(stepValue)));
         const int64_t base = std::max<int64_t>(0, playheadUs);
         result.reserve(static_cast<std::size_t>(count));
         for (int i = 0; i < count; ++i) {
-            if (i > 0 && step >
-                (std::numeric_limits<int64_t>::max() - base) / static_cast<int64_t>(i)) break;
-            const int64_t pts = base + step * static_cast<int64_t>(i);
+            const int64_t index = static_cast<int64_t>(i);
+            if (index > 0 && step >
+                (std::numeric_limits<int64_t>::max() - base) / index) break;
+            const int64_t pts = base + step * index;
             if (durationUs > 0 && pts >= durationUs) break;
-            result.push_back({pts, 0, i == 0 ? 100 : (i < 5 ? 80 : 50)});
+            // Priority is explicit: current frame first, then immediate
+            // playback horizon, then farther look-ahead work.
+            const int priority = i == 0 ? 100 : (i <= 2 ? 90 : (i <= 5 ? 70 : 40));
+            result.push_back({pts, 0, priority});
         }
         return result;
     }
