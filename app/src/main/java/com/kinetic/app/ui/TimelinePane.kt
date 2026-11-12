@@ -357,20 +357,21 @@ private fun Clip(editor: EditorState, layer: Layer, pps: Float, selected: Boolea
     val ctx = LocalContext.current
     val dens = LocalDensity.current.density
     val shape = RoundedCornerShape(8.dp)
-    val thumbnails by produceState<List<Bitmap>>(
-        emptyList(), layer.uri, layer.type, layer.duration, layer.srcOffset, layer.speed, editor.playing
+    var thumbnails by remember(
+        layer.uri, layer.type, layer.duration, layer.srcOffset, layer.speed
+    ) { mutableStateOf<List<Bitmap>>(emptyList()) }
+    LaunchedEffect(
+        layer.uri, layer.type, layer.duration, layer.srcOffset, layer.speed, editor.playing
     ) {
-        // Timeline artwork is non-urgent. Keep existing thumbnails during
-        // playback and resume generation after transport stops.
-        if (editor.playing) return@produceState
+        // Keep the last strip visible while playing; defer only new thumbnail
+        // work until pause instead of clearing the timeline artwork.
+        if (editor.playing) return@LaunchedEffect
         val u = layer.uri
-        value = if (u == null || (layer.type != LayerType.IMAGE && layer.type != LayerType.VIDEO)) {
+        thumbnails = if (u == null || (layer.type != LayerType.IMAGE && layer.type != LayerType.VIDEO)) {
             emptyList()
         } else if (layer.type == LayerType.IMAGE) {
             listOfNotNull(MediaLoader.bitmapFor(ctx, Uri.parse(u), LayerType.IMAGE, 0f, 1, 320, lowPriorityPrefetch = true))
         } else {
-            // Four representative frames make a video clip read as a video strip
-            // instead of stretching one still frame across its entire duration.
             val fractions = floatArrayOf(0f, 0.25f, 0.5f, 0.75f)
             buildList {
                 for (fraction in fractions) {
