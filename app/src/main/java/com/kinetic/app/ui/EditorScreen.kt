@@ -148,12 +148,13 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                 when {
                     level >= ComponentCallbacks2.TRIM_MEMORY_COMPLETE -> {
                         KreEngine.clearCalculationCache()
-                        TimelineRamCache.clear()
+                        TimelineRamCache.invalidate()
                         KreEngine.setCalculationCacheBudget(64 * 1024)
                     }
                     level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW -> {
-                        // Let Android/MediaLoader trim bitmap residency, but
-                        // preserve each clip's sequential scan cursor.
+                        // LRU residency may have changed; discard the old
+                        // working-set indicator and rebuild it after pressure.
+                        TimelineRamCache.invalidate()
                         KreEngine.setCalculationCacheBudget(64 * 1024)
                     }
                 }
