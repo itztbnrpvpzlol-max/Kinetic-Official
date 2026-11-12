@@ -183,14 +183,15 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
 
     // Persistent per-clip RAM cache pass. The cursor belongs to the clip,
     // not the playhead: scrubbing and play/pause never move it backwards.
-    // Background RAM warming stays at 12fps/320px; live preview follows composition FPS.
+    // On constrained devices, warm 12fps/320px frames while paused; live playback takes priority.
     LaunchedEffect(
         editor.layers.map {
             val fingerprint = it.uri?.let { raw ->
                 MediaLoader.mediaCacheFingerprint(Uri.parse(raw))
             }
             "${it.id}|${fingerprint}|${it.start}|${it.duration}|${it.srcOffset}|${it.speed}|${it.type}"
-        }
+        },
+        editor.playing
     ) {
         val activityManager = ctx.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
         val memoryInfo = ActivityManager.MemoryInfo()
@@ -234,6 +235,13 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
         val failedAttempts = mutableMapOf<String, Int>()
         var nextLayerIndex = 0
         while (true) {
+            // Live preview owns the decoder while transport is running.
+            // TimelineRamCache keeps its cursor and resumes from here on pause.
+            if (editor.playing) {
+                delay(100L)
+                continue
+            }
+
             val pendingLayers = videoLayers.filter { layer ->
                 val scan = TimelineRamCache.scan(layer.id)
                 scan != null && scan.nextFrameIndex < scan.totalFrames
@@ -285,9 +293,8 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                 }
             }
 
-            // Yield frequently; the cache dispatcher is already lowest priority,
-            // and this keeps live preview/audio responsive on four-core phones.
-            delay(if (editor.playing) 20L else 45L)
+            // Keep cache generation deliberately idle-friendly while paused.
+            delay(45L)
         }
     }
 
