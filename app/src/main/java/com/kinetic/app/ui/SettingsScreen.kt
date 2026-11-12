@@ -65,7 +65,6 @@ fun SettingsScreen(settings: AppSettings, onBack: () -> Unit, onOpenMpvTest: () 
 
             Section("Preview & performance")
             ChoiceRow("Preview quality", AppSettings.PREVIEW_QUALITIES, settings.previewQualityIndex) { settings.updatePreviewQuality(it) }
-            ChoiceRow("Media bitmap cache", AppSettings.PREVIEW_MEMORY_MB.map { "$it MB" }, settings.previewMemoryIndex) { settings.updatePreviewMemory(it) }
             Row(
                 Modifier.fillMaxWidth().clickable(onClick = onOpenMpvTest).padding(vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically
