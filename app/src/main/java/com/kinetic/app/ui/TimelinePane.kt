@@ -80,6 +80,7 @@ import com.kinetic.app.model.isDescendantOf
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.roundToInt
+import kotlinx.coroutines.flow.sample
 import kotlin.random.Random
 
 private val LEFT_W = 176.dp
@@ -124,15 +125,20 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
     val contentW = centerGutter + (contentSec * pps).dp + centerGutter + LEFT_W + 48.dp
 
     // Center the playhead under the preview transport's play control.
-    LaunchedEffect(editor.time, pps, paneW) {
-        if (paneW > leftPx) {
-            // Keep the playhead centered with a non-suspending delta update.
-            // scrollTo() on every transport frame repeatedly enters the scroll
-            // mutation pipeline and can compete with gestures and layout.
-            val target = (editor.time * pps * dens).coerceAtLeast(0f)
-            val delta = target - hScroll.value.toFloat()
-            if (kotlin.math.abs(delta) > 0.5f) hScroll.dispatchRawDelta(delta)
-        }
+    // During playback, cap timeline auto-scroll to 20 Hz. The preview clock
+    // remains independent; forcing a horizontal-scroll mutation on every
+    // decoded frame repeatedly invalidates the timeline viewport and competes
+    // with composition rendering on low-memory devices.
+    LaunchedEffect(editor.playing, pps, paneW) {
+        snapshotFlow { editor.time }
+            .let { times -> if (editor.playing) times.sample(50L) else times }
+            .collect { time ->
+                if (paneW > leftPx) {
+                    val target = (time * pps * dens).coerceAtLeast(0f)
+                    val delta = target - hScroll.value.toFloat()
+                    if (kotlin.math.abs(delta) > 0.5f) hScroll.dispatchRawDelta(delta)
+                }
+            }
     }
 
     Box(
