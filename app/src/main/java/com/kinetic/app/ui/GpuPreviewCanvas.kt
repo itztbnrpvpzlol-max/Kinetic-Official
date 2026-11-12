@@ -10,7 +10,6 @@ import android.graphics.RectF
 import android.graphics.SurfaceTexture
 import android.graphics.Typeface
 import android.opengl.GLES20
-import android.opengl.GLES30
 import android.opengl.GLSurfaceView
 import android.opengl.GLUtils
 import android.os.Handler
@@ -478,16 +477,7 @@ private class CompositionGlRenderer(
     private val identityTextureMatrix = FloatArray(16) {
         if (it % 5 == 0) 1f else 0f
     }
-    private val compositeBlitVertices = floatArrayOf(
-        -1f, 1f, 0f, 0f,
-        -1f, -1f, 0f, 1f,
-        1f, 1f, 1f, 0f,
-        1f, -1f, 1f, 1f
-    )
-    private var compositeFramebuffer = 0
-    private var compositeTexture = 0
-    private var compositeWidth = 0
-    private var compositeHeight = 0
+    private var compositionCacheAllocated = false
     private var cachedCompositionFingerprint = Long.MIN_VALUE
     private var viewportWidth = 1
     private var viewportHeight = 1
@@ -586,105 +576,38 @@ private class CompositionGlRenderer(
         return hash
     }
 
-    /** A single bounded GPU composition slot; resized or invalidated with the EGL surface. */
+    /** The native engine owns one byte-budgeted composition framebuffer. */
     private fun ensureCompositeTarget(width: Int, height: Int): Boolean {
-        // Bound the extra GPU allocation on 2 GB devices and unusual large surfaces.
         val cacheBudgetBytes = if (MediaWorkers.isConstrainedDevice) {
             8L * 1024L * 1024L
         } else {
             16L * 1024L * 1024L
         }
-        if (width <= 0 || height <= 0 || width.toLong() * height.toLong() * 4L > cacheBudgetBytes) {
-            releaseCompositeTarget()
-            return false
-        }
-        if (compositeFramebuffer != 0 && compositeTexture != 0 &&
-            compositeWidth == width && compositeHeight == height) return true
-
-        releaseCompositeTarget()
-        val textures = IntArray(1)
-        val framebuffers = IntArray(1)
-        GLES30.glGenTextures(1, textures, 0)
-        GLES30.glGenFramebuffers(1, framebuffers, 0)
-        if (textures[0] == 0 || framebuffers[0] == 0) {
-            if (textures[0] != 0) GLES30.glDeleteTextures(1, textures, 0)
-            if (framebuffers[0] != 0) GLES30.glDeleteFramebuffers(1, framebuffers, 0)
-            return false
-        }
-
-        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, textures[0])
-        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_LINEAR)
-        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_LINEAR)
-        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_CLAMP_TO_EDGE)
-        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_T, GLES30.GL_CLAMP_TO_EDGE)
-        GLES30.glTexImage2D(
-            GLES30.GL_TEXTURE_2D, 0, GLES30.GL_RGBA8, width, height, 0,
-            GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, null
+        val ready = NativeRenderEngine.nativeGlEnsureCompositionCache(
+            width, height, cacheBudgetBytes
         )
-        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, framebuffers[0])
-        GLES30.glFramebufferTexture2D(
-            GLES30.GL_FRAMEBUFFER, GLES30.GL_COLOR_ATTACHMENT0,
-            GLES30.GL_TEXTURE_2D, textures[0], 0
-        )
-        val complete = GLES30.glCheckFramebufferStatus(GLES30.GL_FRAMEBUFFER) ==
-            GLES30.GL_FRAMEBUFFER_COMPLETE
-        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
-        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
-        if (!complete) {
-            GLES30.glDeleteFramebuffers(1, framebuffers, 0)
-            GLES30.glDeleteTextures(1, textures, 0)
-            return false
-        }
-        compositeFramebuffer = framebuffers[0]
-        compositeTexture = textures[0]
-        compositeWidth = width
-        compositeHeight = height
-        cachedCompositionFingerprint = Long.MIN_VALUE
-        return true
+        compositionCacheAllocated = ready
+        if (!ready) cachedCompositionFingerprint = Long.MIN_VALUE
+        return ready
     }
 
     private fun releaseCompositeTarget() {
-        if (compositeFramebuffer != 0) {
-            GLES30.glDeleteFramebuffers(1, intArrayOf(compositeFramebuffer), 0)
+        if (compositionCacheAllocated) {
+            NativeRenderEngine.nativeGlReleaseCompositionCache()
         }
-        if (compositeTexture != 0) {
-            GLES30.glDeleteTextures(1, intArrayOf(compositeTexture), 0)
-        }
-        compositeFramebuffer = 0
-        compositeTexture = 0
-        compositeWidth = 0
-        compositeHeight = 0
+        compositionCacheAllocated = false
         cachedCompositionFingerprint = Long.MIN_VALUE
     }
 
-    private fun presentCompositeTarget() {
-        GLES30.glBindFramebuffer(GLES30.GL_READ_FRAMEBUFFER, compositeFramebuffer)
-        GLES30.glBindFramebuffer(GLES30.GL_DRAW_FRAMEBUFFER, 0)
-        GLES30.glBlitFramebuffer(
-            0, 0, compositeWidth, compositeHeight,
-            0, 0, viewportWidth, viewportHeight,
-            GLES30.GL_COLOR_BUFFER_BIT, GLES30.GL_NEAREST
-        )
-        val blitError = GLES30.glGetError()
-        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
-        if (blitError != GLES30.GL_NO_ERROR) {
-            // Some EGL default surfaces have a blit-incompatible format.
-            // Sample the cached texture through the renderer's GLES shader instead.
-            NativeRenderEngine.nativeGlDrawTexture(
-                compositeTexture, compositeBlitVertices, 1f, 0f, 0
-            )
-        }
-    }
+    private fun presentCompositeTarget(): Boolean =
+        NativeRenderEngine.nativeGlPresentCompositionCache(viewportWidth, viewportHeight)
 
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
         // A recreated EGL context invalidates every texture/program from the old context.
         textures.clear()
         // The previous EGL context is gone; its GL names must not be deleted in
         // the new context, only forgotten.
-        compositeFramebuffer = 0
-        compositeTexture = 0
-        compositeWidth = 0
-        compositeHeight = 0
+        compositionCacheAllocated = false
         cachedCompositionFingerprint = Long.MIN_VALUE
         videoOutputs.values.forEach { output -> runCatching { output.surface.release(); output.texture.release() } }
         videoOutputs.clear()
@@ -723,19 +646,16 @@ private class CompositionGlRenderer(
             val fingerprint = sceneFingerprint(current, videoSignature)
             // Never add an offscreen pass to active playback. The composition
             // cache is used for paused redraws and released when playback starts.
-            if (!current.cacheAllowed && compositeFramebuffer != 0) releaseCompositeTarget()
-            val cacheReady = current.cacheAllowed && ensureCompositeTarget(viewportWidth, viewportHeight)
+            if (!current.cacheAllowed && compositionCacheAllocated) releaseCompositeTarget()
+            var cacheReady = current.cacheAllowed &&
+                ensureCompositeTarget(viewportWidth, viewportHeight)
             if (cacheReady && fingerprint == cachedCompositionFingerprint) {
-                presentCompositeTarget()
-                return
-            }
-            if (cacheReady) {
-                GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, compositeFramebuffer)
-            } else {
-                GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+                if (presentCompositeTarget()) return
+                releaseCompositeTarget()
+                cacheReady = false
             }
             NativeRenderEngine.nativeGlBeginFrame(
-                current.background, viewportWidth, viewportHeight
+                current.background, viewportWidth, viewportHeight, cacheReady
             )
             activeTextureIds.clear()
             for (layer in current.layers) if (!layer.isVideo) activeTextureIds.add(layer.id)
@@ -757,7 +677,16 @@ private class CompositionGlRenderer(
             current.selected?.let { drawSelection(it, scale, offsetX, offsetY) }
             if (cacheReady) {
                 cachedCompositionFingerprint = fingerprint
-                presentCompositeTarget()
+                if (!presentCompositeTarget()) {
+                    // If the driver's framebuffer blit path fails, release the
+                    // cache and redraw directly to the window rather than blanking.
+                    releaseCompositeTarget()
+                    NativeRenderEngine.nativeGlBeginFrame(
+                        current.background, viewportWidth, viewportHeight, false
+                    )
+                    drawComposition(current.layers)
+                    current.selected?.let { drawSelection(it, scale, offsetX, offsetY) }
+                }
             }
         } finally {
             PreviewDiagnostics.recordGlFrame(System.nanoTime() - startedNs)
