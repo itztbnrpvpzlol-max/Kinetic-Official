@@ -116,7 +116,7 @@ class AudioEngine(context: Context) {
         @Volatile private var lastSeekMs = 0L
         @Volatile private var lastSyncMs = 0L
         @Volatile private var sampleRate = 48_000
-        @Volatile private var channelCount = 2
+        @Volatile private var pcmChannelCount = 2
         @Volatile private var bytesPerSample = 2
         @Volatile private var appliedSpeed = Float.NaN
         @Volatile private var startHeadFrames = 0L
@@ -305,7 +305,7 @@ class AudioEngine(context: Context) {
             val channelMask = if (channelCount == 1) AudioFormat.CHANNEL_OUT_MONO else AudioFormat.CHANNEL_OUT_STEREO
             val minBuffer = AudioTrack.getMinBufferSize(rate, channelMask, encoding)
                 .takeIf { it > 0 } ?: (rate / 5 * channelCount * 2)
-            channelCount = channelCount
+            pcmChannelCount = channelCount
             bytesPerSample = when (encoding) {
                 AudioFormat.ENCODING_PCM_FLOAT -> 4
                 AudioFormat.ENCODING_PCM_8BIT -> 1
@@ -351,7 +351,7 @@ class AudioEngine(context: Context) {
                 if (presentationTimeUs < targetUs) {
                     val deltaUs = targetUs - presentationTimeUs
                     val framesToSkip = (deltaUs * sampleRate + 999_999L) / 1_000_000L
-                    val bytesToSkip = framesToSkip * channelCount * bytesPerSample
+                    val bytesToSkip = framesToSkip * pcmChannelCount * bytesPerSample
                     if (bytesToSkip >= size) return
                     val skip = bytesToSkip.toInt().coerceAtLeast(0)
                     buffer.position((buffer.position() + skip).coerceAtMost(buffer.limit()))
