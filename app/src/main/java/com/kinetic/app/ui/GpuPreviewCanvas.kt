@@ -15,6 +15,7 @@ import android.opengl.GLUtils
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.util.Log
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -39,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import android.view.Surface
 import android.opengl.GLES11Ext
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import com.kinetic.app.data.MediaLoader
@@ -398,13 +400,21 @@ private fun GpuVideoPlayerLayer(
 private class GpuPreviewSurfaceView(context: Context, onGpuFailure: () -> Unit) : GLSurfaceView(context) {
     private val mainHandler = Handler(Looper.getMainLooper())
     private val attachedPlayers = ConcurrentHashMap<String, com.kinetic.app.engine.NativeVideoPlayer>()
+    private val frameNotifications = AtomicInteger(0)
     @Volatile private var videoLayerIds: Set<String> = emptySet()
     private val gpuRenderer = CompositionGlRenderer(
         onGpuFailure = onGpuFailure,
         onVideoSurfaceAvailable = { id, surface ->
-            mainHandler.post { attachedPlayers[id]?.attachSurface(surface) }
+            mainHandler.post {
+                Log.i("KineticVideo", "GL output Surface ready for layer $id")
+                attachedPlayers[id]?.attachSurface(surface)
+            }
         },
-        onFrameAvailable = { requestRender() }
+        onFrameAvailable = {
+            val count = frameNotifications.incrementAndGet()
+            if (count <= 5) Log.i("KineticVideo", "SurfaceTexture frame notification #$count")
+            requestRender()
+        }
     )
     init {
         setEGLContextClientVersion(2)
@@ -510,10 +520,12 @@ private class CompositionGlRenderer(
         GLES20.glDeleteTextures(1, intArrayOf(output.textureId), 0)
     }
     private fun refreshVideoFrames() {
-        videoOutputs.values.forEach { output ->
-            runCatching {
+        videoOutputs.forEach { (id, output) ->
+            try {
                 output.texture.updateTexImage()
                 output.texture.getTransformMatrix(output.transform)
+            } catch (error: Throwable) {
+                Log.e("KineticVideo", "updateTexImage failed for layer $id", error)
             }
         }
     }
