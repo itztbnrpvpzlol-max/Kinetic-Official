@@ -107,6 +107,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
     var previewHeight by remember { mutableFloatStateOf(210f) }
     var dockTool by remember { mutableStateOf("Select") }
     var showToolSheet by remember { mutableStateOf(false) }
+    var isPreparingPlayback by remember { mutableStateOf(false) }
     LaunchedEffect(editor.selectedId) {
         dockTool = if (editor.selectedId == null) "Select" else "Properties"
         showToolSheet = false
@@ -114,46 +115,54 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
 
     fun leave() { if (editor.layers.isEmpty()) onExit() else showLeave = true }
 
-    // Build the lightweight H.264 playback proxy BEFORE a video becomes a
-    // timeline layer. This keeps full-resolution source decoding out of the
-    // first playback attempt on low-memory devices.
-    suspend fun prepareVideoPreview(source: Uri) {
-        val scale = resolvePreviewScale(
-            ctx, editor.settings.previewQualityIndex,
-            editor.layers.count {
-                it.visible && it.type != LayerType.AUDIO &&
-                    it.type != LayerType.NULL && it.type != LayerType.ADJUSTMENT
-            } + 1
-        )
-        val targetHeight = when {
-            scale <= 0.40f -> 360
-            scale <= 0.60f -> 540
-            else -> 720
-        }
-        if (scale < 0.99f) {
-            runCatching { PreviewProxyStore.getOrCreate(ctx, source, targetHeight) }
-        }
-        // Warm the same source URI, time buckets and resolution used by the
-        // bitmap fallback renderer. The decoder-backed primary video path
-        // remains SurfaceTexture based and does not copy frames into bitmaps.
-        val activeVideoCount = editor.layers.count {
-            it.visible && it.type == LayerType.VIDEO && it.activeAt(editor.time)
-        } + 1
-        val frameEdge = 448
-        MediaLoader.prefetchUpcomingVideoFrames(
-            ctx,
-            source,
-            firstFrameTimeSec = 0f,
-            frameCount = MediaLoader.recommendedPrefetchFrameCount(activeVideoCount, frameEdge),
-            sampleFps = 12,
-            maxEdge = frameEdge,
-            sourceStepSec = 1f / 12f
-        )
+    // Fill the persistent, low-resolution timeline thumbnail cache after
+    // import. This runs in the low-priority cache worker and never blocks the UI.
+    suspend fun prepareVideoPreview(source: Uri, durationSec: Float) {
+        if (durationSec <= 0f) return
+        MediaLoader.cacheVideoPreviewFrames(ctx, source, durationSec) { }
     }
 
-    // Playback uses the live composition renderer with a bounded source-frame look-ahead cache.
+    // Playback does not start until every visible video has a ready 360p proxy.
+    // That gives the decoder a warm, predictable source instead of letting it
+    // fall behind while trying to decode original-resolution media.
     fun togglePlayback() {
-        editor.playing = !editor.playing
+        if (editor.playing) {
+            editor.playing = false
+            return
+        }
+        if (isPreparingPlayback) return
+        scope.launch {
+            isPreparingPlayback = true
+            val sources = editor.layers
+                .filter { it.visible && it.type == LayerType.VIDEO && it.uri != null }
+                .mapNotNull { it.uri }
+                .distinct()
+            if (sources.isNotEmpty()) {
+                Toast.makeText(ctx, "Preparing 360p playback cache…", Toast.LENGTH_SHORT).show()
+            }
+            var failed = 0
+            try {
+                for (source in sources) {
+                    val proxy = PreviewProxyStore.getOrCreate(
+                        ctx,
+                        Uri.parse(source),
+                        PreviewProxyStore.PLAYBACK_PROXY_HEIGHT,
+                        PreviewProxyStore.PLAYBACK_PROXY_BITRATE
+                    )
+                    if (proxy == null) failed++
+                }
+                if (failed > 0) {
+                    Toast.makeText(
+                        ctx,
+                        "$failed clip(s) could not be cached; using original media",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+                editor.playing = true
+            } finally {
+                isPreparingPlayback = false
+            }
+        }
     }
     BackHandler { leave() }
     BackHandler(enabled = previewExpanded) { previewExpanded = false }
@@ -203,30 +212,22 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
     }
     LaunchedEffect(editor.layers.map { it.id to it.uri }) { audio.prepare(editor.layers) }
 
-    // Build actual low-resolution video copies while the editor is idle. The
-    // original files remain untouched and are still used by audio/export paths.
-    LaunchedEffect(
-        editor.layers.map { it.id to it.uri },
-        editor.settings.previewQualityIndex,
-        editor.playing
-    ) {
+    // Prepare playback proxies while idle, including when a saved project is
+    // reopened. The play action below awaits these same cache entries.
+    LaunchedEffect(editor.layers.map { it.id to it.uri }, editor.playing) {
         if (editor.playing) return@LaunchedEffect
-        val scale = resolvePreviewScale(
-            ctx,
-            editor.settings.previewQualityIndex,
-            editor.layers.count { it.visible && it.type != LayerType.AUDIO &&
-                it.type != LayerType.NULL && it.type != LayerType.ADJUSTMENT }
-        )
-        if (scale >= 0.99f) return@LaunchedEffect
-        val targetHeight = when {
-            scale <= 0.40f -> 360
-            scale <= 0.60f -> 540
-            else -> 720
+        val sources = editor.layers
+            .filter { it.visible && it.type == LayerType.VIDEO && it.uri != null }
+            .mapNotNull { it.uri }
+            .distinct()
+        for (source in sources) {
+            PreviewProxyStore.getOrCreate(
+                ctx,
+                Uri.parse(source),
+                PreviewProxyStore.PLAYBACK_PROXY_HEIGHT,
+                PreviewProxyStore.PLAYBACK_PROXY_BITRATE
+            )
         }
-        editor.layers.filter { it.visible && it.type == LayerType.VIDEO && it.uri != null }
-            .forEach { layer ->
-                PreviewProxyStore.getOrCreate(ctx, Uri.parse(layer.uri!!), targetHeight)
-            }
     }
 
     // Keep a very small RAM look-ahead window warm during playback. The
@@ -348,10 +349,12 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                 val cachedUri = MediaLoader.cacheMedia(ctx, u)
                 val info = withContext(MediaWorkers.cpuDispatcher) { MediaLoader.probe(ctx, cachedUri, type) }
                 val name = MediaLoader.displayName(ctx, u)
-                if (type == LayerType.VIDEO) prepareVideoPreview(cachedUri)
-                // Only expose the layer to playback after its low-res proxy
-                // has been prepared (or the source has safely fallen back).
                 editor.addMedia(type, name, cachedUri.toString(), info.width, info.height, info.length)
+                if (type == LayerType.VIDEO) {
+                    scope.launch {
+                        runCatching { prepareVideoPreview(cachedUri, info.length ?: 0f) }
+                    }
+                }
             }
         }
     }
