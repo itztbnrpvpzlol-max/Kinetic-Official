@@ -225,7 +225,7 @@ object MediaLoader {
         maxEdge: Int = 960,
         persistToDisk: Boolean = true,
         lowPriorityPrefetch: Boolean = false
-    ): Bitmap? = withContext(if (lowPriorityPrefetch) MediaWorkers.cacheDispatcher else MediaWorkers.cpuDispatcher) {
+    ): Bitmap? = withContext(if (lowPriorityPrefetch) MediaWorkers.cacheDispatcher else MediaWorkers.previewDispatcher) {
         val bucket = if (type == LayerType.VIDEO) (timeSec * sampleFps.toFloat()).toInt() else 0
         val sourceKey = mediaCacheIdentity(uri)
         val key = if (type == LayerType.IMAGE) "$sourceKey@image@$maxEdge" else "$sourceKey@$sampleFps@$maxEdge@$bucket"
