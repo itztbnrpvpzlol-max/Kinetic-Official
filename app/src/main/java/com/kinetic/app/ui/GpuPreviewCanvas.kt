@@ -21,6 +21,9 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -41,6 +44,7 @@ import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
+import com.kinetic.app.data.CompositionFrameCache
 import com.kinetic.app.data.MediaLoader
 import com.kinetic.app.model.COMP_H
 import com.kinetic.app.model.COMP_W
@@ -85,9 +89,50 @@ fun PreviewCanvas(
     qualityIndex: Int = 0,
     onVideoReady: (Boolean) -> Unit = {}
 ) {
-    // The import browser already uses Media3's hardware video decoder. Use the
-    // same playback path in the editor for a simple full-frame video composition,
-    // rather than decoding still frames with MediaMetadataRetriever at 12 fps.
+    val context = LocalContext.current
+    val visualLayers = editor.layers.filter {
+        it.visible && it.type != LayerType.AUDIO &&
+            it.type != LayerType.NULL && it.type != LayerType.ADJUSTMENT
+    }
+    val qualityScale = resolvePreviewScale(context, qualityIndex, visualLayers.size)
+    val outputWidth = (COMP_W * qualityScale).toInt().coerceAtLeast(240)
+    val outputHeight = (COMP_H * qualityScale).toInt().coerceAtLeast(135)
+    val frameIndex = (editor.time * editor.fps).toInt().coerceAtLeast(0)
+    val frameTime = frameIndex / editor.fps.toFloat()
+    val frameKey = remember(
+        editor.projectId, editor.layers, frameIndex, editor.fps, outputWidth, outputHeight
+    ) {
+        CompositionFrameCache.frameKey(
+            editor.projectId, editor.layers, frameTime, editor.fps, outputWidth, outputHeight
+        )
+    }
+    val readyKey = editor.cachedFrames[frameIndex]
+    val frameReady = editor.settings.autoPreviewCache && readyKey == frameKey
+    val cachedFrame by androidx.compose.runtime.produceState<Bitmap?>(
+        initialValue = null, frameKey, frameReady
+    ) {
+        value = if (frameReady) CompositionFrameCache.loadFrame(context, frameKey) else null
+    }
+
+    if (cachedFrame != null) {
+        LaunchedEffect(frameKey) { onVideoReady(true) }
+        Image(
+            bitmap = cachedFrame!!.asImageBitmap(),
+            contentDescription = "Cached composition frame",
+            modifier = modifier.background(androidx.compose.ui.graphics.Color.Black),
+            contentScale = ContentScale.Fit
+        )
+    } else {
+        LivePreviewCanvas(editor, modifier, qualityScale, onVideoReady)
+    }
+}
+
+private fun LivePreviewCanvas(
+    editor: EditorState,
+    modifier: Modifier,
+    qualityScale: Float,
+    onVideoReady: (Boolean) -> Unit
+) {
     val context = LocalContext.current
     val activeVisualLayers = editor.layers.filter { layer ->
         layer.visible && layer.activeAt(editor.time) &&
@@ -95,7 +140,6 @@ fun PreviewCanvas(
             layer.type != LayerType.NULL &&
             layer.type != LayerType.ADJUSTMENT
     }
-    val qualityScale = resolvePreviewScale(context, qualityIndex, activeVisualLayers.size)
     val multiVideo = activeVisualLayers.takeIf { layers ->
         layers.size > 1 && layers.all { it.type == LayerType.VIDEO &&
             !it.maskEnabled && it.effects.isEmpty() && it.blendMode == "Normal" }
@@ -126,7 +170,7 @@ fun PreviewCanvas(
     }
 }
 
-private fun resolvePreviewScale(context: Context, qualityIndex: Int, activeLayers: Int): Float {
+internal fun resolvePreviewScale(context: Context, qualityIndex: Int, activeLayers: Int): Float {
     if (qualityIndex == 1) return 1f
     if (qualityIndex == 2) return 0.5f
     if (qualityIndex == 3) return 0.25f
