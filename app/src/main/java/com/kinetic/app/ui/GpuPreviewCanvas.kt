@@ -226,29 +226,73 @@ private fun GpuCompositionPreviewCanvas(
 
     // Video layers use NDK MediaCodec Surface outputs and are composited
     // alongside stills, text and shapes in the same OpenGL draw order.
+    // Bitmap fallback layers use the composition cadence too, with one
+    // sequential decoder loop that skips obsolete frame requests.
+    val compositionFps = editor.fps.coerceIn(1, 60)
+    val latestTimelineTime = androidx.compose.runtime.rememberUpdatedState(editor.time)
+    val latestPlaying = androidx.compose.runtime.rememberUpdatedState(editor.playing)
     for (layer in editor.layers) {
         val uri = layer.uri
         val needsBitmap = layer.type == LayerType.IMAGE ||
             (layer.type == LayerType.VIDEO && layer.id !in textureVideoIds)
         if (uri != null && needsBitmap) {
-            val active = layer.activeAt(editor.time)
-            val sourceTime = ((editor.time - layer.start).coerceAtLeast(0f) *
-                layer.speed + layer.srcOffset).coerceAtLeast(0f)
-            val bucket = if (!active) -1 else if (layer.type == LayerType.VIDEO) {
-                (sourceTime * 12f).toInt()
-            } else 0
             key(layer.id) {
                 DisposableEffect(layer.id) {
                     onDispose { frames.remove(layer.id) }
                 }
-                LaunchedEffect(uri, bucket, qualityScale) {
-                    if (bucket >= 0) {
+                LaunchedEffect(
+                    uri, layer.type, layer.start, layer.duration,
+                    layer.srcOffset, layer.speed, qualityScale, compositionFps
+                ) {
+                    val source = Uri.parse(uri)
+                    if (layer.type == LayerType.IMAGE) {
                         MediaLoader.bitmapFor(
-                            context, Uri.parse(uri), layer.type, sourceTime,
-                            sampleFps = 12,
-                            maxEdge = 448
+                            context, source, LayerType.IMAGE, 0f,
+                            sampleFps = compositionFps, maxEdge = 448
                         )?.let { frames[layer.id] = it }
-                    } else frames.remove(layer.id)
+                    } else {
+                        var lastBucket = Int.MIN_VALUE
+                        var wasActive = false
+                        while (true) {
+                            val timelineTime = latestTimelineTime.value
+                            if (!layer.activeAt(timelineTime)) {
+                                if (wasActive) frames.remove(layer.id)
+                                wasActive = false
+                                lastBucket = Int.MIN_VALUE
+                                kotlinx.coroutines.delay(16L)
+                                continue
+                            }
+                            wasActive = true
+                            val sourceTime = (
+                                (timelineTime - layer.start).coerceAtLeast(0f) *
+                                    layer.speed + layer.srcOffset
+                            ).coerceAtLeast(0f)
+                            val requestedBucket = (sourceTime * compositionFps).toInt()
+                            if (requestedBucket != lastBucket) {
+                                val frame = MediaLoader.bitmapFor(
+                                    context, source, LayerType.VIDEO, sourceTime,
+                                    sampleFps = compositionFps,
+                                    maxEdge = if (latestPlaying.value) 320 else 448,
+                                    persistToDisk = !latestPlaying.value
+                                )
+                                val currentTime = latestTimelineTime.value
+                                val currentSourceTime = (
+                                    (currentTime - layer.start).coerceAtLeast(0f) *
+                                        layer.speed + layer.srcOffset
+                                ).coerceAtLeast(0f)
+                                val currentBucket = (currentSourceTime * compositionFps).toInt()
+                                val acceptableLag = maxOf(3, compositionFps / 4)
+                                if (frame != null &&
+                                    currentBucket >= requestedBucket &&
+                                    currentBucket - requestedBucket <= acceptableLag
+                                ) {
+                                    frames[layer.id] = frame
+                                }
+                                lastBucket = requestedBucket
+                            }
+                            kotlinx.coroutines.delay(maxOf(1L, 1000L / compositionFps))
+                        }
+                    }
                 }
             }
         }
