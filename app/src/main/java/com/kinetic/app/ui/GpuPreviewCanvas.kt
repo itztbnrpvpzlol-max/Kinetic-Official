@@ -487,6 +487,12 @@ private class CompositionGlRenderer(
     private val selectionScratch = FloatArray(8)
     private val activeTextureIds = HashSet<String>()
     private val fingerprintMatrixScratch = FloatArray(9)
+    private val compositeBlitVertices = floatArrayOf(
+        -1f, 1f, 0f, 0f,
+        -1f, -1f, 0f, 1f,
+        1f, 1f, 1f, 0f,
+        1f, -1f, 1f, 1f
+    )
     private var compositeFramebuffer = 0
     private var compositeTexture = 0
     private var compositeWidth = 0
@@ -592,6 +598,11 @@ private class CompositionGlRenderer(
 
     /** A single bounded GPU composition slot; resized or invalidated with the EGL surface. */
     private fun ensureCompositeTarget(width: Int, height: Int): Boolean {
+        // Bound the extra GPU allocation on 2 GB devices and unusual large surfaces.
+        if (width <= 0 || height <= 0 || width.toLong() * height.toLong() * 4L > 16L * 1024L * 1024L) {
+            releaseCompositeTarget()
+            return false
+        }
         if (compositeFramebuffer != 0 && compositeTexture != 0 &&
             compositeWidth == width && compositeHeight == height) return true
 
@@ -659,7 +670,15 @@ private class CompositionGlRenderer(
             0, 0, viewportWidth, viewportHeight,
             GLES30.GL_COLOR_BUFFER_BIT, GLES30.GL_NEAREST
         )
+        val blitError = GLES30.glGetError()
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+        if (blitError != GLES30.GL_NO_ERROR) {
+            // Some EGL default surfaces have a blit-incompatible format.
+            // Sample the cached texture through the renderer's GLES shader instead.
+            NativeRenderEngine.nativeGlDrawTexture(
+                compositeTexture, compositeBlitVertices, 1f, 0f, 0
+            )
+        }
     }
 
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
