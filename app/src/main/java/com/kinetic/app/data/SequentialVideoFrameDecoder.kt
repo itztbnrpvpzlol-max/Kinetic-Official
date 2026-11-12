@@ -72,7 +72,10 @@ internal class SequentialVideoFrameDecoder {
     }
 
     @Synchronized
-    fun release() = closeSession()
+    fun release() {
+        closeSession()
+        fallbackIdentity = null
+    }
 
     private fun openSession(context: Context, uri: Uri, identity: String, targetUs: Long): Session? {
         val extractor = MediaExtractor()

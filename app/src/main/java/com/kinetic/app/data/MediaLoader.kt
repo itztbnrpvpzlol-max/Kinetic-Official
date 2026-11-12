@@ -279,12 +279,16 @@ object MediaLoader {
                             else MediaMetadataRetriever.OPTION_CLOSEST
                         )
                     } else {
-                        sequentialVideoDecoder.decodeFrame(
+                        val sequentialFrame = sequentialVideoDecoder.decodeFrame(
                             ctx, uri, sourceKey, bucket.toLong() * 1_000_000L / sampleFps.coerceAtLeast(1), maxEdge
-                        ) ?: videoFrame(
-                            ctx, uri, bucket / sampleFps.toFloat(), maxEdge,
-                            MediaMetadataRetriever.OPTION_CLOSEST
                         )
+                        if (sequentialFrame != null) sequentialFrame
+                        else if (sequentialVideoDecoder.shouldUseRetrieverFallback(sourceKey)) {
+                            videoFrame(
+                                ctx, uri, bucket / sampleFps.toFloat(), maxEdge,
+                                MediaMetadataRetriever.OPTION_CLOSEST
+                            )
+                        } else null
                     }
                 } catch (e: Exception) {
                     null
