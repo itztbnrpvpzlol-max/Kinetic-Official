@@ -358,8 +358,9 @@ private fun GpuCompositionPreviewCanvas(
     val scene = GpuScene(renderLayers, selectedLayer, cacheAllowed = !editor.playing)
     val gpuFailed = remember { androidx.compose.runtime.mutableStateOf(false) }
 
-    // Low RAM is not a reason to disable the GPU. KRE uses a lower preview
-    // resolution and bounded decoder/cache budgets on constrained devices.
+    // Constrained devices use the CPU Canvas fallback because this class of
+    // Mali/entry-level driver has shown unreliable native composition behavior.
+    // KRE/GLES3 remains enabled for devices that pass the capability checks.
     if (gpuFailed.value || !supportsGles3(context) || shouldUseCpuPreview(context)) {
         CpuPreviewCanvas(editor, modifier)
     } else {
