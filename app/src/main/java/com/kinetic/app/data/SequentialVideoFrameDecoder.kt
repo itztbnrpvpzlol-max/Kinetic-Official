@@ -122,12 +122,21 @@ internal class SequentialVideoFrameDecoder {
             var candidate: MediaCodec? = null
             try {
                 candidate = MediaCodec.createByCodecName(hardware.name)
+                // Android 11+ exposes an optional decoder low-latency hint.
+                // Vendor codecs may ignore or reject it, so the normal path
+                // remains available immediately when configuration fails.
+                if (Build.VERSION.SDK_INT >= 30) {
+                    runCatching { format.setInteger("low-latency", 1) }
+                }
                 candidate.configure(format, null, null, 0)
                 candidate.start()
                 return candidate
             } catch (_: Throwable) {
                 runCatching { candidate?.stop() }
                 runCatching { candidate?.release() }
+                if (Build.VERSION.SDK_INT >= 30) {
+                    runCatching { format.setInteger("low-latency", 0) }
+                }
             }
         }
 

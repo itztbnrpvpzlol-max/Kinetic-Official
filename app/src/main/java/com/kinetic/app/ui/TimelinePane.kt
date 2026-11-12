@@ -458,7 +458,7 @@ private fun Clip(editor: EditorState, layer: Layer, pps: Float, selected: Boolea
                     }
             )
         }
-        if (cacheWindow != null && layer.speed > 0f) {
+        if (cacheWindow != null && layer.speed > 0f && !editor.playing) {
             Box(
                 Modifier.align(Alignment.TopEnd).padding(4.dp)
                     .clip(RoundedCornerShape(4.dp))
