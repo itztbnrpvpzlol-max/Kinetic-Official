@@ -261,7 +261,7 @@ class FfmpegVideoPlayer(
         if (nowNs - lastSyncNs >= 100_000_000L) {
             lastSyncNs = nowNs
             runCatching {
-                instance.setPropertyDouble("speed", (safeMasterSpeed * safeClipSpeed).coerceIn(0.1f, 4f).toDouble())
+                instance.setPropertyDouble("speed", targetSpeed)
                 instance.setPropertyBoolean("pause", !sync.playing)
             }
             val actualSeconds = instance.getPropertyDouble("time-pos")
@@ -270,6 +270,13 @@ class FfmpegVideoPlayer(
             val driftSeconds = actualSeconds?.let { it - expectedSeconds }
             val drifted = driftSeconds != null && abs(driftSeconds) > 0.18
             val correctionReady = nowNs - lastCorrectionNs >= 300_000_000L
+            // Slew playback speed for ordinary drift; repeated exact seeks make
+            // a slow decoder visibly jump backwards whenever latency grows.
+            val driftSpeedFactor = if (sync.playing && !generationChanged && driftSeconds != null) {
+                (1.0 - driftSeconds.coerceIn(-0.75, 0.75) * 0.04).coerceIn(0.97, 1.03)
+            } else 1.0
+            val targetSpeed = (safeMasterSpeed * safeClipSpeed * driftSpeedFactor)
+                .coerceIn(0.1, 4.0)
 
             if (nowNs - lastDiagnosticsNs >= 1_000_000_000L) {
                 lastDiagnosticsNs = nowNs
@@ -283,10 +290,15 @@ class FfmpegVideoPlayer(
                 Log.i(TAG, "decoder=$activeHwdec codec=$codecName fps=$decodedFps driftMs=$driftMs")
             }
 
-            if ((generationChanged || (sync.playing && drifted && correctionReady)) && loaded) {
-                Log.w(TAG, "Correcting preview clock drift: ${driftSeconds?.times(1_000.0)?.toLong() ?: 0L}ms")
+            if (generationChanged && loaded) {
+                // Explicit seeks, transport transitions and loop wraps are real
+                // discontinuities; ordinary playback drift is corrected by slew.
+                Log.i(TAG, "Aligning preview clock after transport generation change")
                 seekMpv((expectedSourceUs / 1_000L).coerceAtLeast(0L))
                 lastCorrectionNs = nowNs
+            } else if (sync.playing && drifted && correctionReady) {
+                lastCorrectionNs = nowNs
+                Log.d(TAG, "Preview clock slew driftMs=${driftSeconds?.times(1_000.0)?.toLong() ?: 0L} speed=$targetSpeed")
             }
             masterGeneration = sync.generation
         }

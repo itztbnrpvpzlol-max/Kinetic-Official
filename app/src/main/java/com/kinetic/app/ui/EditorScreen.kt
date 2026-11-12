@@ -196,22 +196,31 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
             // phones; video output is scheduled directly from the native clock.
             val uiFps = editor.fps.coerceIn(1, 30)
             var publishedFrame = (editor.time * uiFps).toInt()
+            var publishedGeneration = playback.clockSnapshot().generation
             var lastAudioSyncMs = 0L
             audio.sync(editor.layers, editor.time, true)
 
             while (editor.playing) {
                 delay(16L)
-                val transportTime = playback.positionSeconds()
+                // Sample frame position and transport time from one clock snapshot.
+                val clock = playback.clockSnapshot()
+                val elapsedSinceSnapshot = if (clock.playing) {
+                    ((SystemClock.elapsedRealtimeNanos() - clock.monotonicNs).coerceAtLeast(0L) /
+                        1_000_000_000.0 * clock.speed).toFloat()
+                } else 0f
+                val transportTime = ((clock.positionUs / 1_000_000.0).toFloat() + elapsedSinceSnapshot)
                     .coerceIn(0f, editor.duration.coerceAtLeast(0f))
+                val nextFrame = (transportTime * uiFps).toInt().coerceIn(0, Int.MAX_VALUE)
 
-                val nextFrame = playback.positionFrame(uiFps.toFloat())
-                    .coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
-                if (nextFrame != publishedFrame) {
-                    // UI animation is capped at 30 fps; the native master clock
-                    // remains unquantized for video scheduling and audio sync.
+                // Ignore small backwards samples inside one clock generation.
+                // A generation change represents an intentional seek or loop wrap.
+                if (nextFrame != publishedFrame &&
+                    (nextFrame > publishedFrame || clock.generation != publishedGeneration)
+                ) {
                     editor.time = (nextFrame / uiFps.toFloat()).coerceAtMost(editor.duration)
                     publishedFrame = nextFrame
                 }
+                publishedGeneration = clock.generation
 
                 val now = SystemClock.elapsedRealtime()
                 if (now - lastAudioSyncMs >= 33L) {

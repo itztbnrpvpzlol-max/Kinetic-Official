@@ -538,6 +538,17 @@ private class CompositionGlRenderer(
         Handler(Looper.getMainLooper()).post { onGpuFailure() }
     }
 
+    private fun checkGlErrors(stage: String) {
+        var error = GLES20.glGetError()
+        if (error == GLES20.GL_NO_ERROR) return
+        val errors = ArrayList<String>(2)
+        while (error != GLES20.GL_NO_ERROR && errors.size < 8) {
+            errors += "0x${error.toString(16)}"
+            error = GLES20.glGetError()
+        }
+        throw IllegalStateException("OpenGL error during $stage: ${errors.joinToString()}")
+    }
+
     private data class TextureEntry(val id: Int, val bitmap: Bitmap, val bytes: Long)
     private data class VideoOutput(
         val textureId: Int,
@@ -675,6 +686,7 @@ private class CompositionGlRenderer(
             check(NativeRenderEngine.available && NativeRenderEngine.nativeGlInit()) {
                 "Native OpenGL renderer initialization failed"
             }
+            checkGlErrors("renderer initialization")
             // Non-zero sentinels keep the existing lifecycle checks compact;
             // all shader programs and draw calls are owned by the C++ renderer.
             program = 1
@@ -711,6 +723,7 @@ private class CompositionGlRenderer(
             NativeRenderEngine.nativeGlBeginFrame(
                 current.background, viewportWidth, viewportHeight, false
             )
+            checkGlErrors("begin frame")
 
             activeTextureIds.clear()
             for (layer in current.layers) {
@@ -725,8 +738,10 @@ private class CompositionGlRenderer(
             val offsetY = (viewportHeight - COMP_H * scale) / 2f
 
             drawComposition(current.layers, scale, offsetX, offsetY)
+            checkGlErrors("composition draw")
             trimGpuTextureCache(activeTextureIds)
             current.selected?.let { drawSelection(it, scale, offsetX, offsetY) }
+            checkGlErrors("selection draw")
         } catch (error: Throwable) {
             reportGpuFailure(error)
         } finally {
