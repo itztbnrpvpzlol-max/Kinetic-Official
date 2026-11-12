@@ -41,7 +41,7 @@ fun HomeScreen(
 ) {
     Column(Modifier.fillMaxSize().background(KColors.Bg).statusBarsPadding().navigationBarsPadding()) {
         Header(onOpenSettings)
-        Column(Modifier.fillMaxSize().widthIn(max = 900.dp).align(Alignment.CenterHorizontally).padding(horizontal = 18.dp)) {
+        Column(Modifier.widthIn(max = 900.dp).fillMaxSize().align(Alignment.CenterHorizontally).padding(horizontal = 18.dp)) {
             Spacer(Modifier.height(16.dp))
             NewCompositionCard(onNewComposition)
             Spacer(Modifier.height(12.dp))

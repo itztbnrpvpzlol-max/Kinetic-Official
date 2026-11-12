@@ -267,7 +267,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
         val compactHeight = maxHeight < 520.dp
         val maxPreviewHeight = (maxHeight.value * 0.48f).coerceAtLeast(120f)
         val adaptivePreviewHeight = previewHeight.coerceIn(120f, maxPreviewHeight)
-        Column(Modifier.fillMaxSize().widthIn(max = 1440.dp).align(Alignment.Center)
+        Column(Modifier.widthIn(max = 1440.dp).fillMaxSize().align(Alignment.Center)
             .statusBarsPadding().navigationBarsPadding()) {
         TopBar(editor, onMenuHome = { leave() }, onOpenSettings = {
             editor.playing = false; onOpenSettings()

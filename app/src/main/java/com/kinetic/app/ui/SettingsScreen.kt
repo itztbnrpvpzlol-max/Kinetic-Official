@@ -53,7 +53,7 @@ fun SettingsScreen(settings: AppSettings, onBack: () -> Unit, onOpenMpvTest: () 
             Text("Preferences", color = KColors.Text, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
         }
         Box(Modifier.fillMaxWidth().height(1.dp).background(KColors.Line))
-        Column(Modifier.fillMaxSize().widthIn(max = 900.dp).align(Alignment.CenterHorizontally).verticalScroll(rememberScrollState()).padding(18.dp)) {
+        Column(Modifier.widthIn(max = 900.dp).fillMaxSize().align(Alignment.CenterHorizontally).verticalScroll(rememberScrollState()).padding(18.dp)) {
             Section("New compositions")
             ChoiceRow("Resolution", AppSettings.RESOLUTIONS, settings.resolution) { settings.updateResolution(it) }
             ChoiceRow("Frame rate", AppSettings.FPS.map { "$it fps" }, settings.frameRate) { settings.updateFrameRate(it) }

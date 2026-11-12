@@ -181,7 +181,7 @@ fun MediaImportSheet(
         val availableHeight = if (maxHeight.value.isFinite()) maxHeight.value else 640f
         val sheetHeight = (availableHeight * 0.9f).coerceIn(240f, 720f).dp
         val previewHeight = (sheetHeight.value * 0.28f).coerceIn(108f, 180f).dp
-        Column(Modifier.fillMaxWidth().widthIn(max = 900.dp).height(sheetHeight)
+        Column(Modifier.widthIn(max = 900.dp).fillMaxWidth().height(sheetHeight)
             .align(Alignment.Center).padding(horizontal = 16.dp).padding(bottom = 12.dp)) {
         Text("Import media", color = KColors.Text, fontSize = 19.sp)
         Spacer(Modifier.height(10.dp))
