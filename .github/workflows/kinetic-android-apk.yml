@@ -3,7 +3,6 @@ name: Kinetic Android APK
 on:
   push:
     branches:
-      - feature/native-render-audio-overhaul
       - migration/files-only
   workflow_dispatch:
 
@@ -56,8 +55,18 @@ jobs:
             sleep 10
           done
 
+      - name: Calculate unique APK version
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION_CODE=$((GITHUB_RUN_NUMBER * 100 + GITHUB_RUN_ATTEMPT))
+          VERSION_NAME="0.${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
+          echo "KINETIC_VERSION_CODE=${VERSION_CODE}" >> "${GITHUB_ENV}"
+          echo "KINETIC_VERSION_NAME=${VERSION_NAME}" >> "${GITHUB_ENV}"
+          echo "Building Kinetic ${VERSION_NAME} (versionCode ${VERSION_CODE})"
+
       - name: Build debug APK
-        run: gradle assembleDebug --no-daemon
+        run: gradle assembleDebug --no-daemon -PKINETIC_VERSION_CODE="${KINETIC_VERSION_CODE}" -PKINETIC_VERSION_NAME="${KINETIC_VERSION_NAME}"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
