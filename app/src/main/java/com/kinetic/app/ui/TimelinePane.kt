@@ -80,6 +80,7 @@ import com.kinetic.app.model.isDescendantOf
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.roundToInt
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.sample
 import kotlin.random.Random
 
@@ -106,6 +107,7 @@ fun typeIcon(t: LayerType): IconKind = when (t) {
     LayerType.NULL -> IconKind.NULL
 }
 
+@OptIn(kotlinx.coroutines.FlowPreview::class)
 @Composable
 fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
     val density = LocalDensity.current
