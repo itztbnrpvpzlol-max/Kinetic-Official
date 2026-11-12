@@ -72,6 +72,8 @@ import com.kinetic.app.data.AudioEngine
 import com.kinetic.app.data.CompositionFrameCache
 import com.kinetic.app.data.MediaLoader
 import com.kinetic.app.data.MediaWorkers
+import com.kinetic.app.data.PreviewDiagnostics
+import com.kinetic.app.data.PreviewProxyStore
 import com.kinetic.app.data.ProjectStore
 import com.kinetic.app.model.COMP_H
 import com.kinetic.app.model.COMP_W
@@ -124,6 +126,32 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
         CompositionFrameCache.configure(editor.settings.previewMemoryMb)
     }
     LaunchedEffect(editor.layers.map { it.id to it.uri }) { audio.prepare(editor.layers) }
+
+    // Build actual low-resolution video copies while the editor is idle. The
+    // original files remain untouched and are still used by audio/export paths.
+    LaunchedEffect(
+        editor.layers.map { it.id to it.uri },
+        editor.settings.previewQualityIndex,
+        editor.playing
+    ) {
+        if (editor.playing) return@LaunchedEffect
+        val scale = resolvePreviewScale(
+            ctx,
+            editor.settings.previewQualityIndex,
+            editor.layers.count { it.visible && it.type != LayerType.AUDIO &&
+                it.type != LayerType.NULL && it.type != LayerType.ADJUSTMENT }
+        )
+        if (scale >= 0.99f) return@LaunchedEffect
+        val targetHeight = when {
+            scale <= 0.40f -> 360
+            scale <= 0.60f -> 540
+            else -> 720
+        }
+        editor.layers.filter { it.visible && it.type == LayerType.VIDEO && it.uri != null }
+            .forEach { layer ->
+                PreviewProxyStore.getOrCreate(ctx, Uri.parse(layer.uri!!), targetHeight)
+            }
+    }
 
     val cachePriorityFrame = if (editor.playing) -1 else (editor.time * editor.fps).toInt()
     LaunchedEffect(
@@ -195,7 +223,8 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
             }
             // Yield briefly between idle-cache frames. The dedicated background
             // workers are priority-limited, so a long fixed sleep only delays cache fill.
-            delay(8)
+            val priorityWindow = (editor.fps * if (MediaWorkers.isConstrainedDevice) 3f else 6f).toInt()
+            delay(if (offset < priorityWindow) 4 else 28)
         }
     }
 
@@ -207,6 +236,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
     LaunchedEffect(editor.playing) {
         if (editor.playing) {
             if (editor.time >= editor.duration - 0.01f) editor.time = 0f
+            PreviewDiagnostics.resetSession()
             var last = withFrameNanos { it }
             // Advance the transport on composition frames instead of publishing a new
             // Compose state value on every display refresh (often 60/90/120 Hz).
@@ -220,7 +250,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
             audio.sync(editor.layers, transportTime, true)
             while (editor.playing) {
                 val now = withFrameNanos { it }
-                val dt = ((now - last) / 1_000_000_000f).coerceIn(0f, 0.1f)
+                val dt = ((now - last) / 1_000_000_000f).coerceIn(0f, 0.25f)
                 last = now
                 transportTime += dt
                 audioAccumulator += dt
@@ -274,11 +304,13 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
             Box(Modifier.weight(1f).fillMaxWidth()) {
             PreviewCanvas(editor, Modifier.fillMaxSize(), editor.settings.previewQualityIndex)
             PreviewQualityControl(editor, Modifier.align(Alignment.TopStart).padding(8.dp))
+                PreviewDiagnosticsBadge(editor.playing, Modifier.align(Alignment.BottomEnd).padding(8.dp))
             }
         } else {
             Box(Modifier.fillMaxWidth().height(previewHeight.dp)) {
                 PreviewCanvas(editor, Modifier.fillMaxSize(), editor.settings.previewQualityIndex)
                 PreviewQualityControl(editor, Modifier.align(Alignment.TopStart).padding(8.dp))
+                PreviewDiagnosticsBadge(editor.playing, Modifier.align(Alignment.BottomEnd).padding(8.dp))
                 }
             Box(Modifier.fillMaxWidth().height(10.dp).background(KColors.Bg).pointerInput(Unit) {
                 detectVerticalDragGestures { change, drag -> change.consume(); previewHeight = (previewHeight + drag / density).coerceIn(120f, 420f) }
@@ -668,6 +700,37 @@ private fun PreviewToolsBar(
             PreviewTool(IconKind.PLUS, onClick = onAddLayer)
             PreviewTool(if (isExpanded) IconKind.FIT else IconKind.FULLSCREEN, onClick = onTogglePreview)
         }
+    }
+}
+
+@Composable
+private fun PreviewDiagnosticsBadge(playing: Boolean, modifier: Modifier = Modifier) {
+    var snapshot by remember { mutableStateOf(PreviewDiagnostics.snapshot()) }
+    LaunchedEffect(playing) {
+        if (!playing) {
+            snapshot = PreviewDiagnostics.snapshot()
+            return@LaunchedEffect
+        }
+        while (true) {
+            snapshot = PreviewDiagnostics.snapshot()
+            delay(500)
+        }
+    }
+    if (playing) {
+        val glLabel = if (snapshot.glFps > 0f) {
+            "GL ${snapshot.glFps.toInt()} fps · ${"%.1f".format(snapshot.glSubmitMs)} ms"
+        } else {
+            "Video preview"
+        }
+        Text(
+            "$glLabel · dropped ${snapshot.droppedVideoFrames}",
+            modifier = modifier.clip(RoundedCornerShape(7.dp))
+                .background(KColors.Row.copy(alpha = 0.92f))
+                .padding(horizontal = 8.dp, vertical = 5.dp),
+            color = KColors.Muted,
+            fontSize = 9.sp,
+            maxLines = 1
+        )
     }
 }
 
