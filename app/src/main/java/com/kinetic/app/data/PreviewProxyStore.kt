@@ -6,13 +6,12 @@ import android.os.Handler
 import android.os.Looper
 import androidx.media3.common.MediaItem
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.common.util.MimeTypes
+import androidx.media3.common.MimeTypes
 import androidx.media3.transformer.EditedMediaItem
 import androidx.media3.transformer.Effects
 import androidx.media3.transformer.ExportException
 import androidx.media3.transformer.ExportResult
 import androidx.media3.transformer.Presentation
-import androidx.media3.transformer.TransformationRequest
 import androidx.media3.transformer.Transformer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
@@ -89,8 +88,14 @@ object PreviewProxyStore {
                 return@withLock null
             }
 
+            if (output.length() > MAX_CACHE_BYTES) {
+                output.delete()
+                failedKeys.add(key)
+                return@withLock null
+            }
             output.setLastModified(System.currentTimeMillis())
             trimCache(directory, output)
+            if (!output.isFile) return@withLock null
             Uri.fromFile(output)
         }
     }
@@ -102,7 +107,6 @@ object PreviewProxyStore {
         output: File
     ): Boolean = withContext(Dispatchers.Main.immediate) {
         suspendCancellableCoroutine { continuation ->
-            var transformer: Transformer? = null
             try {
                 val listener = object : Transformer.Listener {
                     override fun onCompleted(
@@ -121,7 +125,7 @@ object PreviewProxyStore {
                     }
                 }
 
-                transformer = Transformer.Builder(context)
+                val activeTransformer = Transformer.Builder(context)
                     .setVideoMimeType(MimeTypes.VIDEO_H264)
                     .addListener(listener)
                     .build()
@@ -136,7 +140,6 @@ object PreviewProxyStore {
                     )
                     .build()
 
-                val activeTransformer = transformer
                 continuation.invokeOnCancellation {
                     mainHandler.post { runCatching { activeTransformer.cancel() } }
                 }
