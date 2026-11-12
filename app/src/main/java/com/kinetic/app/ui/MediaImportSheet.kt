@@ -13,12 +13,15 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -174,7 +177,12 @@ fun MediaImportSheet(
         } else null
     }
 
-    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 24.dp)) {
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val availableHeight = if (maxHeight.value.isFinite()) maxHeight.value else 640f
+        val sheetHeight = (availableHeight * 0.9f).coerceIn(240f, 720f).dp
+        val previewHeight = (sheetHeight.value * 0.28f).coerceIn(108f, 180f).dp
+        Column(Modifier.fillMaxWidth().widthIn(max = 900.dp).height(sheetHeight)
+            .align(Alignment.Center).padding(horizontal = 16.dp).padding(bottom = 12.dp)) {
         Text("Import media", color = KColors.Text, fontSize = 19.sp)
         Spacer(Modifier.height(10.dp))
         Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(KColors.Surface2)) {
@@ -189,7 +197,7 @@ fun MediaImportSheet(
             Text("Allow media access to browse files on this device.", color = KColors.Muted, fontSize = 13.sp)
             Text("Grant access", color = KColors.Accent, modifier = Modifier.clickable { permissionLauncher.launch(permissions) }.padding(top = 10.dp))
         } else {
-            Row(Modifier.fillMaxWidth().height(180.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(Modifier.fillMaxWidth().height(previewHeight), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Box(Modifier.weight(1f).fillMaxSize().clip(RoundedCornerShape(10.dp)).background(KColors.Bg), contentAlignment = Alignment.Center) {
                     when (selected?.type) {
                         LayerType.IMAGE -> if (preview != null) Image(preview!!.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
@@ -216,7 +224,7 @@ fun MediaImportSheet(
                 }
             }
             Spacer(Modifier.height(8.dp))
-            LazyColumn(Modifier.fillMaxWidth().height(220.dp)) {
+            LazyColumn(Modifier.fillMaxWidth().weight(1f).heightIn(min = 96.dp)) {
                 items(entries, key = { it.uri.toString() }) { item ->
                     Row(Modifier.fillMaxWidth().clickable {
                         selected = item
@@ -259,6 +267,7 @@ fun MediaImportSheet(
                     }.padding(12.dp)
                 )
             }
+        }
         }
     }
 }

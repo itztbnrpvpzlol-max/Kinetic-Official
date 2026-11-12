@@ -41,7 +41,7 @@ fun HomeScreen(
 ) {
     Column(Modifier.fillMaxSize().background(KColors.Bg).statusBarsPadding().navigationBarsPadding()) {
         Header(onOpenSettings)
-        Column(Modifier.fillMaxSize().padding(horizontal = 18.dp)) {
+        Column(Modifier.fillMaxSize().widthIn(max = 900.dp).align(Alignment.CenterHorizontally).padding(horizontal = 18.dp)) {
             Spacer(Modifier.height(16.dp))
             NewCompositionCard(onNewComposition)
             Spacer(Modifier.height(12.dp))
@@ -90,7 +90,7 @@ private fun Header(onOpenSettings: () -> Unit) {
 @Composable
 private fun NewCompositionCard(onClick: () -> Unit) {
     val shape = RoundedCornerShape(22.dp)
-    Column(Modifier.fillMaxWidth().height(178.dp).clip(shape).background(KColors.Surface).border(1.dp, KColors.Line, shape).clickable(onClick = onClick).padding(22.dp), verticalArrangement = Arrangement.SpaceBetween) {
+    Column(Modifier.fillMaxWidth().heightIn(min = 178.dp).clip(shape).background(KColors.Surface).border(1.dp, KColors.Line, shape).clickable(onClick = onClick).padding(22.dp), verticalArrangement = Arrangement.SpaceBetween) {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             TrackBar(0.46f, 0f, KColors.Clip)
             TrackBar(0.78f, 0.12f, Color(0xFF26264A))

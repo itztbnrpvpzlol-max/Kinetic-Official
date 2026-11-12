@@ -263,7 +263,12 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
     val pickAudio = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { importUris(it, LayerType.AUDIO) }
 
 
-    Column(Modifier.fillMaxSize().background(KColors.Bg).statusBarsPadding().navigationBarsPadding()) {
+    BoxWithConstraints(Modifier.fillMaxSize().background(KColors.Bg)) {
+        val compactHeight = maxHeight < 520.dp
+        val maxPreviewHeight = (maxHeight.value * 0.48f).coerceAtLeast(120f)
+        val adaptivePreviewHeight = previewHeight.coerceIn(120f, maxPreviewHeight)
+        Column(Modifier.fillMaxSize().widthIn(max = 1440.dp).align(Alignment.Center)
+            .statusBarsPadding().navigationBarsPadding()) {
         TopBar(editor, onMenuHome = { leave() }, onOpenSettings = {
             editor.playing = false; onOpenSettings()
         }, onExport = { Toast.makeText(ctx, "Export isn't built yet", Toast.LENGTH_SHORT).show() })
@@ -275,13 +280,13 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                 PreviewDiagnosticsBadge(editor.playing, Modifier.align(Alignment.BottomEnd).padding(8.dp))
             }
         } else {
-            Box(Modifier.fillMaxWidth().height(previewHeight.dp)) {
+            Box(Modifier.fillMaxWidth().height(adaptivePreviewHeight.dp)) {
                 PreviewCanvas(editor, Modifier.fillMaxSize(), editor.settings.previewQualityIndex, playback = playback)
                 PreviewQualityControl(editor, Modifier.align(Alignment.TopStart).padding(8.dp))
                 PreviewDiagnosticsBadge(editor.playing, Modifier.align(Alignment.BottomEnd).padding(8.dp))
                 }
             Box(Modifier.fillMaxWidth().height(10.dp).background(KColors.Bg).pointerInput(Unit) {
-                detectVerticalDragGestures { change, drag -> change.consume(); previewHeight = (previewHeight + drag / density).coerceIn(120f, 420f) }
+                detectVerticalDragGestures { change, drag -> change.consume(); previewHeight = (previewHeight + drag / density).coerceIn(120f, maxPreviewHeight) }
             }, contentAlignment = Alignment.Center) {
                 Box(Modifier.width(44.dp).height(4.dp).clip(CircleShape).background(KColors.Muted))
             }
@@ -298,10 +303,13 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
             val activeLayer = editor.selected
             if (activeLayer != null) {
                 AlightCutBar(editor, activeLayer)
-                ResizeHandle(density) { panelHeight = it }
-                EditPanel(editor, activeLayer, panelTab, { panelTab = it }, { editor.select(null) },
-                    onRename = { renameTarget = activeLayer }, onParent = { parentPicker = true },
-                    modifier = Modifier.fillMaxWidth().height(panelHeight.dp))
+                if (!compactHeight) {
+                    ResizeHandle(density) { panelHeight = it }
+                    val adaptivePanelHeight = panelHeight.coerceAtMost((maxHeight.value * 0.38f).coerceAtLeast(130f))
+                    EditPanel(editor, activeLayer, panelTab, { panelTab = it }, { editor.select(null) },
+                        onRename = { renameTarget = activeLayer }, onParent = { parentPicker = true },
+                        modifier = Modifier.fillMaxWidth().height(adaptivePanelHeight.dp))
+                }
             }
             FloatingEditingDock(dockTool, activeLayer != null) { tool ->
                 dockTool = tool
@@ -320,6 +328,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                     "Import" -> showImport = true
                 }
             }
+        }
         }
     }
 
