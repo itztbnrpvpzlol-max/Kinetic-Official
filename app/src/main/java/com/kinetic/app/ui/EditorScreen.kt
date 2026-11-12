@@ -76,6 +76,7 @@ import com.kinetic.app.data.AudioEngine
 import com.kinetic.app.data.MediaLoader
 import com.kinetic.app.data.MediaWorkers
 import com.kinetic.app.data.PreviewDiagnostics
+import com.kinetic.app.data.TimelineRamCache
 import com.kinetic.app.data.ProjectStore
 import com.kinetic.app.model.COMP_H
 import com.kinetic.app.model.COMP_W
@@ -173,63 +174,78 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
     }
     LaunchedEffect(editor.layers.map { it.id to it.uri }) { audio.prepare(editor.layers) }
 
-    // Keep a very small RAM look-ahead window warm during playback. The
-    // cache worker runs at the lowest thread priority, so live frame decoding
-    // and audio remain ahead of prefetch work on constrained devices.
+    // RAM timeline preview: continuously warm a bounded window of decoded
+    // source frames around the playhead. The exact 12fps/320px keys are also
+    // requested by the constrained-device CPU preview, so playback can reuse
+    // these frames directly. Nothing is transcoded or written to disk.
     LaunchedEffect(
-        editor.playing,
-        editor.layers.map { listOf(it.id, it.uri, it.visible, it.type) }
+        editor.layers.map {
+            "${it.id}|${it.uri}|${it.start}|${it.duration}|${it.srcOffset}|${it.speed}|${it.visible}|${it.type}"
+        }
     ) {
-        if (!editor.playing) return@LaunchedEffect
-        while (editor.playing) {
+        val videoLayers = editor.layers.filter {
+            it.visible && it.type == LayerType.VIDEO && it.uri != null
+        }
+        if (videoLayers.isEmpty()) {
+            TimelineRamCache.clear()
+            return@LaunchedEffect
+        }
+        TimelineRamCache.retain(videoLayers.map { it.id }.toSet())
+
+        while (true) {
             val playhead = editor.time
-            val activeVideos = editor.layers.filter {
-                it.visible && it.type == LayerType.VIDEO && it.uri != null && it.activeAt(playhead)
+            val candidates = videoLayers.filter {
+                it.end > playhead && it.start <= playhead + 2.5f
+            }.take(3)
+            TimelineRamCache.retain(candidates.map { it.id }.toSet())
+
+            if (candidates.isEmpty()) {
+                delay(180L)
+                continue
             }
-            // The first N layers use direct MediaCodec Surface output. Only
-            // bitmap-fallback layers need the RAM source-frame look-ahead.
-            val cacheLayers = activeVideos
-                .drop(MediaWorkers.maxConcurrentVideoDecoders)
-                .take(2)
-            val frameEdge = 480
-            for (layer in cacheLayers) {
-                val sourceSpeed = layer.speed.coerceIn(0.1f, 4f)
-                val sourceTime = (
-                    (playhead - layer.start).coerceAtLeast(0f) * sourceSpeed + layer.srcOffset
-                ).coerceAtLeast(0f)
-                // Native KRE plans a bounded 15-timestamp look-ahead window.
-                // The RAM cache admits only a tiny slice at once on low-memory
-                // devices; the window advances continuously with the playhead.
-                val planned = KreEngine.planFrames(
-                    (sourceTime * 1_000_000f).toLong(),
-                    12.0,
-                    sourceSpeed.toDouble(),
-                    0L,
-                    16
+
+            val frameBudget = MediaLoader.recommendedTimelineCacheFrames(candidates.size, 320)
+            for (layer in candidates) {
+                val source = Uri.parse(layer.uri ?: continue)
+                val startTimeline = maxOf(
+                    layer.start,
+                    playhead - if (editor.playing) 0.25f else 0f
                 )
-                val firstUpcomingUs = planned.getOrNull(1) ?: continue
-                val nextUpcomingUs = planned.getOrNull(2)
-                val sourceStepSec = (
-                    ((nextUpcomingUs ?: (firstUpcomingUs + (1_000_000.0 / 12.0 * sourceSpeed).toLong()))
-                        - firstUpcomingUs).coerceAtLeast(1L)
-                    / 1_000_000f
-                )
-                MediaLoader.prefetchUpcomingVideoFrames(
-                    ctx,
-                    Uri.parse(layer.uri!!),
-                    firstUpcomingUs / 1_000_000f,
-                    frameCount = MediaLoader.recommendedPrefetchFrameCount(cacheLayers.size, frameEdge),
-                    sampleFps = 12,
-                    maxEdge = frameEdge,
-                    sourceStepSec = sourceStepSec
-                )
+                val timelineStep = 1f / 12f
+                val count = minOf(
+                    frameBudget,
+                    ((layer.end - startTimeline).coerceAtLeast(0f) * 12f).toInt() + 1
+                ).coerceAtLeast(1)
+                val targetEnd = minOf(layer.end, startTimeline + (count - 1) * timelineStep)
+                var cachedUntil = startTimeline
+                TimelineRamCache.publish(layer.id, startTimeline, cachedUntil, targetEnd)
+
+                for (index in 0 until count) {
+                    val timelineTime = minOf(startTimeline + index * timelineStep, targetEnd)
+                    val sourceTime = (
+                        (timelineTime - layer.start).coerceAtLeast(0f) *
+                            layer.speed.coerceIn(0.1f, 4f) + layer.srcOffset
+                    ).coerceAtLeast(0f)
+                    val alreadyCached = MediaLoader.hasCachedVideoFrame(
+                        source, sourceTime, sampleFps = 12, maxEdge = 320
+                    )
+                    val ready = alreadyCached || MediaLoader.bitmapFor(
+                        ctx, source, LayerType.VIDEO, sourceTime,
+                        sampleFps = 12, maxEdge = 320,
+                        persistToDisk = false, lowPriorityPrefetch = true
+                    ) != null
+                    if (!ready) break
+
+                    cachedUntil = timelineTime
+                    TimelineRamCache.publish(layer.id, startTimeline, cachedUntil, targetEnd)
+                    // Don't spend time filling a window that playback has
+                    // already passed; the next pass will follow the playhead.
+                    if (editor.playing && editor.time > timelineTime + 0.35f) break
+                }
             }
-            delay(180L)
+            delay(if (editor.playing) 80L else 250L)
         }
     }
-
-    // Timeline composition-frame caching is intentionally disabled. It was
-    // competing with preview decoding and making scrubbing/playback less responsive.
 
     LaunchedEffect(editor.layers, editor.duration, editor.resolution, editor.projectName) {
         delay(400)
