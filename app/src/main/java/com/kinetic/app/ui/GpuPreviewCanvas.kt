@@ -1,5 +1,6 @@
 package com.kinetic.app.ui
 
+import android.app.ActivityManager
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas as AndroidCanvas
