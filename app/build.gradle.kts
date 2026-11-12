@@ -58,4 +58,7 @@ dependencies {
     implementation("androidx.media3:media3-ui:1.5.1")
     implementation("androidx.media3:media3-transformer:1.5.1")
     implementation("androidx.media3:media3-effect:1.5.1")
+
+    // Isolated libmpv playback test backend (GPL-3.0-or-later native bundle).
+    implementation("dev.jdtech.mpv:libmpv:1.0.0")
 }
