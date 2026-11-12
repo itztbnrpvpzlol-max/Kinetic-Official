@@ -750,7 +750,14 @@ private class CompositionGlRenderer(
         ids.forEach(::ensureVideoOutput)
     }
     fun ensureVideoOutput(id: String) {
-        if (videoOutputs.containsKey(id) || program == 0) return
+        val existing = videoOutputs[id]
+        if (existing != null) {
+            // A player can attach after EGL created the output; hand the existing
+            // Surface to every newly attached player.
+            onVideoSurfaceAvailable(id, existing.surface)
+            return
+        }
+        if (program == 0) return
         val names = IntArray(1)
         GLES20.glGenTextures(1, names, 0)
         if (names[0] == 0) return
@@ -996,6 +1003,6 @@ private class CompositionGlRenderer(
         private const val VERTEX_SHADER = "attribute vec2 aPosition; attribute vec2 aTexCoord; varying vec2 vTexCoord; void main(){ gl_Position=vec4(aPosition,0.0,1.0); vTexCoord=aTexCoord; }"
         private const val TEXTURE_SHADER = "precision mediump float; uniform sampler2D uTexture; uniform float uAlpha; uniform float uGray; varying vec2 vTexCoord; void main(){ vec4 c=texture2D(uTexture,vTexCoord); if(uGray>0.5){ float y=dot(c.rgb,vec3(0.299,0.587,0.114)); c.rgb=vec3(y); } gl_FragColor=vec4(c.rgb*uAlpha,c.a*uAlpha); }"
         private const val SOLID_SHADER = "precision mediump float; uniform vec4 uColor; void main(){ gl_FragColor=uColor; }"
-        private const val EXTERNAL_TEXTURE_SHADER = "#extension GL_OES_EGL_image_external : require\\nprecision mediump float; uniform samplerExternalOES uTexture; uniform float uAlpha; uniform mat4 uTexMatrix; varying vec2 vTexCoord; void main(){ vec2 uv=(uTexMatrix*vec4(vTexCoord,0.0,1.0)).xy; vec4 c=texture2D(uTexture,uv); gl_FragColor=vec4(c.rgb*uAlpha,c.a*uAlpha); }"
+        private const val EXTERNAL_TEXTURE_SHADER = "#extension GL_OES_EGL_image_external : require\nprecision mediump float; uniform samplerExternalOES uTexture; uniform float uAlpha; uniform mat4 uTexMatrix; varying vec2 vTexCoord; void main(){ vec2 uv=(uTexMatrix*vec4(vTexCoord,0.0,1.0)).xy; vec4 c=texture2D(uTexture,uv); gl_FragColor=vec4(c.rgb*uAlpha,c.a*uAlpha); }"
     }
 }
