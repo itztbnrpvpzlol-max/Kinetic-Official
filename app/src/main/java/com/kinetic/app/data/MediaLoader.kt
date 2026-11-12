@@ -510,9 +510,10 @@ object MediaLoader {
             extractor.selectTrack(track)
             extractor.seekTo(startUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
 
-            decoder = MediaCodec.createDecoderByType(mime)
-            decoder.configure(format, null, null, 0)
-            decoder.start()
+            val codec = MediaCodec.createDecoderByType(mime)
+            decoder = codec
+            codec.configure(format, null, null, 0)
+            codec.start()
 
             val sampleCount = ceil(durationSec * fps).toInt().coerceIn(1, 1_000_000)
             var nextIndex = 0
@@ -525,11 +526,11 @@ object MediaLoader {
             while (!outputDone && SystemClock.elapsedRealtime() < deadline) {
                 currentCoroutineContext().ensureActive()
                 if (!inputDone) {
-                    val inputIndex = decoder.dequeueInputBuffer(10_000L)
+                    val inputIndex = codec.dequeueInputBuffer(10_000L)
                     if (inputIndex >= 0) {
-                        val input = decoder.getInputBuffer(inputIndex)
+                        val input = codec.getInputBuffer(inputIndex)
                         if (input == null) {
-                            decoder.queueInputBuffer(inputIndex, 0, 0, 0L, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                            codec.queueInputBuffer(inputIndex, 0, 0, 0L, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
                             inputDone = true
                         } else {
                             input.clear()
@@ -546,14 +547,14 @@ object MediaLoader {
                     }
                 }
 
-                when (val outputIndex = decoder.dequeueOutputBuffer(info, 10_000L)) {
+                when (val outputIndex = codec.dequeueOutputBuffer(info, 10_000L)) {
                     MediaCodec.INFO_OUTPUT_FORMAT_CHANGED,
                     MediaCodec.INFO_TRY_AGAIN_LATER,
                     MediaCodec.INFO_OUTPUT_BUFFERS_CHANGED -> Unit
                     else -> if (outputIndex >= 0) {
                         if (info.size > 0 && info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG == 0) {
                             val presentationSec = info.presentationTimeUs / 1_000_000f
-                            val image = runCatching { decoder.getOutputImage(outputIndex) }.getOrNull()
+                            val image = runCatching { codec.getOutputImage(outputIndex) }.getOrNull()
                             if (image != null) {
                                 try {
                                     while (nextIndex < sampleCount) {
@@ -575,7 +576,7 @@ object MediaLoader {
                             }
                         }
                         if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) outputDone = true
-                        decoder.releaseOutputBuffer(outputIndex, false)
+                        codec.releaseOutputBuffer(outputIndex, false)
                     }
                 }
                 if (nextIndex >= sampleCount) break
