@@ -229,6 +229,10 @@ private fun GraphCanvas(
                 if (idx >= 0) onSelectKey(idx)
             }
         }, onDragEnd = { dragHandle = 0 }, onDragCancel = { dragHandle = 0 }) { change, _ ->
+            val delta = change.position - change.previousPosition
+            val editingHandle = mode == GraphMode.EASE && dragHandle != 0
+            val scrubbing = mode != GraphMode.EASE && abs(delta.x) >= abs(delta.y)
+            if (!editingHandle && !scrubbing) return@detectDragGestures
             change.consume()
             if (mode == GraphMode.EASE && dragHandle != 0) {
                 val nx = ((change.position.x - left) / (right - left)).coerceIn(0f, 1f)
