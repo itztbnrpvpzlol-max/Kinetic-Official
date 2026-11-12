@@ -266,6 +266,12 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                 val info = withContext(MediaWorkers.cpuDispatcher) { MediaLoader.probe(ctx, cachedUri, type) }
                 val name = MediaLoader.displayName(ctx, u)
                 editor.addMedia(type, name, cachedUri.toString(), info.width, info.height, info.length)
+                // Warm a compact, low-resolution import cache off the playback path.
+                if (type == LayerType.VIDEO && info.length != null) {
+                    scope.launch {
+                        MediaLoader.cacheVideoPreviewFrames(ctx, cachedUri, info.length) { }
+                    }
+                }
             }
         }
     }
@@ -365,6 +371,11 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                             if (info.height > 0) info.height else item.height,
                             if (item.type == LayerType.IMAGE) null else item.duration,
                             trimIn, trimOut)
+                        if (item.type == LayerType.VIDEO) {
+                            scope.launch {
+                                MediaLoader.cacheVideoPreviewFrames(ctx, cachedUri, info.length ?: item.duration) { }
+                            }
+                        }
                     }
                 }
             )
