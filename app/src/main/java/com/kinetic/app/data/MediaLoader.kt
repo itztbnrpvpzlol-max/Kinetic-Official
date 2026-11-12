@@ -35,6 +35,7 @@ import kotlin.math.max
 
 object MediaLoader {
     class Info(val length: Float?, val width: Int, val height: Int)
+    private data class VideoFrameSpec(val targetWidth: Int, val targetHeight: Int)
 
     // A balanced temporal sampling rate for the constrained CPU Canvas preview.
     const val CPU_PREVIEW_SAMPLE_FPS = 20
@@ -48,6 +49,7 @@ object MediaLoader {
     }
     private val retrievers = ConcurrentHashMap<String, MediaMetadataRetriever>()
     private val retrieverLocks = ConcurrentHashMap<String, Any>()
+    private val videoFrameSpecs = ConcurrentHashMap<String, VideoFrameSpec>()
     private val retrieverRegistryLock = Any()
     private val retrieverLru = LinkedHashMap<String, Unit>(8, 0.75f, true)
     @Volatile private var maxCachedRetrievers = if (MediaWorkers.isConstrainedDevice) 2 else 4
@@ -142,6 +144,7 @@ object MediaLoader {
             }
         }
         retrieverLocks.clear()
+        videoFrameSpecs.clear()
         waveformCache.evictAll()
     }
 
@@ -156,6 +159,7 @@ object MediaLoader {
             removed
         }
         evicted.forEach { (key, retriever) ->
+            videoFrameSpecs.remove(key)
             val lock = retrieverLocks.getOrPut(key) { Any() }
             synchronized(lock) { runCatching { retriever.release() } }
         }
@@ -182,6 +186,7 @@ object MediaLoader {
             }
         }
         evicted.forEach { (oldKey, retriever) ->
+            videoFrameSpecs.remove(oldKey)
             val lock = retrieverLocks.getOrPut(oldKey) { Any() }
             synchronized(lock) { runCatching { retriever.release() } }
         }
@@ -262,7 +267,11 @@ object MediaLoader {
                 val decodeStartedNs = System.nanoTime()
                 val bmp = diskBitmap ?: try {
                     if (type == LayerType.IMAGE) decodeImage(ctx, uri, maxEdge)
-                    else videoFrame(ctx, uri, bucket / sampleFps.toFloat(), maxEdge)
+                    else videoFrame(
+                        ctx, uri, bucket / sampleFps.toFloat(), maxEdge,
+                        if (sampleFps <= 2) MediaMetadataRetriever.OPTION_CLOSEST_SYNC
+                        else MediaMetadataRetriever.OPTION_CLOSEST
+                    )
                 } catch (e: Exception) {
                     null
                 }
@@ -840,27 +849,38 @@ object MediaLoader {
         return ctx.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, options) }
     }
 
-    private fun videoFrame(ctx: Context, uri: Uri, sec: Float, maxEdge: Int): Bitmap? {
-        val sourceKey = uri.toString()
-        // Use a separate retriever per decoder thread. The live preview and its
-        // one-frame look-ahead can decode concurrently without sharing a native
-        // MediaMetadataRetriever instance across threads.
+    private fun videoFrame(
+        ctx: Context,
+        uri: Uri,
+        sec: Float,
+        maxEdge: Int,
+        option: Int
+    ): Bitmap? {
+        val sourceKey = mediaCacheIdentity(uri)
+        // Reuse dimensions for every sampled frame. Re-reading three metadata
+        // fields from the native retriever on each request adds avoidable work.
         val key = "$sourceKey#${Thread.currentThread().id}"
         val lock = retrieverLocks.computeIfAbsent(key) { Any() }
         return synchronized(lock) {
             val r = obtainRetriever(ctx, uri, key)
             val timeUs = (sec * 1_000_000f).toLong()
             if (Build.VERSION.SDK_INT >= 27) {
-                var sourceW = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: maxEdge
-                var sourceH = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: maxEdge
-                val rotation = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
-                if (rotation == 90 || rotation == 270) { val swap = sourceW; sourceW = sourceH; sourceH = swap }
-                val scale = minOf(1f, maxEdge.toFloat() / maxOf(sourceW, sourceH, 1))
-                val targetW = (sourceW * scale).toInt().coerceAtLeast(1)
-                val targetH = (sourceH * scale).toInt().coerceAtLeast(1)
-                r.getScaledFrameAtTime(timeUs, MediaMetadataRetriever.OPTION_CLOSEST, targetW, targetH)
+                val spec = videoFrameSpecs.getOrPut(key) {
+                    var sourceW = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: maxEdge
+                    var sourceH = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: maxEdge
+                    val rotation = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
+                    if (rotation == 90 || rotation == 270) {
+                        val swap = sourceW; sourceW = sourceH; sourceH = swap
+                    }
+                    val scale = minOf(1f, maxEdge.toFloat() / maxOf(sourceW, sourceH, 1))
+                    VideoFrameSpec(
+                        (sourceW * scale).toInt().coerceAtLeast(1),
+                        (sourceH * scale).toInt().coerceAtLeast(1)
+                    )
+                }
+                r.getScaledFrameAtTime(timeUs, option, spec.targetWidth, spec.targetHeight)
             } else {
-                val frame = r.getFrameAtTime(timeUs, MediaMetadataRetriever.OPTION_CLOSEST) ?: return@synchronized null
+                val frame = r.getFrameAtTime(timeUs, option) ?: return@synchronized null
                 val longest = maxOf(frame.width, frame.height)
                 if (longest <= maxEdge) frame else {
                     val scale = maxEdge.toFloat() / longest
