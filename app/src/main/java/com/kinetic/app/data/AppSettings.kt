@@ -43,6 +43,8 @@ class AppSettings(context: Context) {
         private set
     var previewQualityIndex by mutableIntStateOf(prefs.getInt("previewQualityIndex", 0).coerceIn(0, 3))
         private set
+    var autoPreviewCache by mutableStateOf(prefs.getBoolean("autoPreviewCache", true))
+        private set
 
     fun updateResolution(i: Int) { resolution = i; prefs.edit().putInt("resolution", i).apply() }
     fun updateFrameRate(i: Int) { frameRate = i; prefs.edit().putInt("frameRate", i).apply() }
@@ -54,6 +56,7 @@ class AppSettings(context: Context) {
     fun updateAfterEffectsScrubbing(v: Boolean) { afterEffectsScrubbing = v; prefs.edit().putBoolean("afterEffectsScrubbing", v).apply() }
     fun updatePreviewMemory(i: Int) { previewMemoryIndex = i.coerceIn(0, 3); prefs.edit().putInt("previewMemoryIndex", previewMemoryIndex).apply() }
     fun updatePreviewQuality(i: Int) { previewQualityIndex = i.coerceIn(0, 3); prefs.edit().putInt("previewQualityIndex", previewQualityIndex).apply() }
+    fun updateAutoPreviewCache(enabled: Boolean) { autoPreviewCache = enabled; prefs.edit().putBoolean("autoPreviewCache", enabled).apply() }
     val previewMemoryMb: Int get() = PREVIEW_MEMORY_MB[previewMemoryIndex]
 
     val fps: Int get() = FPS[frameRate]
