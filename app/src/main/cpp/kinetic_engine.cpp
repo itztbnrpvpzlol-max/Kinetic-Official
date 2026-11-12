@@ -313,6 +313,18 @@ void drawNativeTexture(GLuint program, GLint positionHandle, GLint uvHandle,
 }
 }
 
+extern "C" JNIEXPORT void JNICALL
+Java_com_kinetic_app_engine_NativeRenderEngine_nativeGlBeginFrame(
+        JNIEnv*, jobject, jint backgroundArgb, jint width, jint height) {
+    const float alpha = static_cast<float>((backgroundArgb >> 24) & 0xFF) / 255.0f;
+    const float red = static_cast<float>((backgroundArgb >> 16) & 0xFF) / 255.0f;
+    const float green = static_cast<float>((backgroundArgb >> 8) & 0xFF) / 255.0f;
+    const float blue = static_cast<float>(backgroundArgb & 0xFF) / 255.0f;
+    glViewport(0, 0, std::max(1, width), std::max(1, height));
+    glClearColor(red, green, blue, alpha);
+    glClear(GL_COLOR_BUFFER_BIT);
+}
+
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_kinetic_app_engine_NativeRenderEngine_nativeGlInit(JNIEnv*, jobject) {
     // KRE requires an actual ES 3.x context. Do not initialize against a
@@ -340,6 +352,8 @@ Java_com_kinetic_app_engine_NativeRenderEngine_nativeGlInit(JNIEnv*, jobject) {
     glBufferData(GL_ARRAY_BUFFER, 16 * sizeof(float), nullptr, GL_STREAM_DRAW);
     glBindBuffer(GL_ARRAY_BUFFER, 0);
     glBindVertexArray(0);
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_CULL_FACE);
 
     // KRE uses GLSL ES 3.00 exclusively; no ES 2 shader fallback is
     // silently accepted after requesting an ES 3.x context.
