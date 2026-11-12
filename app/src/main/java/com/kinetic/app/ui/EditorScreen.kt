@@ -81,10 +81,6 @@ import com.kinetic.app.model.LayerType
 import com.kinetic.app.model.PropId
 import com.kinetic.app.model.isDescendantOf
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -106,113 +102,16 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
     var previewHeight by remember { mutableFloatStateOf(210f) }
     var dockTool by remember { mutableStateOf("Select") }
     var showToolSheet by remember { mutableStateOf(false) }
-    var previewVideoReady by remember { mutableStateOf(true) }
-    var isPreparingCache by remember { mutableStateOf(false) }
-    var cachePrepareProgress by remember { mutableFloatStateOf(0f) }
-    var cachePrepareJob by remember { mutableStateOf<Job?>(null) }
-
     LaunchedEffect(editor.selectedId) {
         dockTool = if (editor.selectedId == null) "Select" else "Properties"
         showToolSheet = false
     }
 
     fun leave() { if (editor.layers.isEmpty()) onExit() else showLeave = true }
+    // Playback starts immediately. Expensive composition cache generation is
+    // reserved for idle time so it cannot compete with live video decoding.
     fun togglePlayback() {
-        if (editor.playing) {
-            editor.playing = false
-            return
-        }
-        if (isPreparingCache) {
-            cachePrepareJob?.cancel()
-            cachePrepareJob = null
-            isPreparingCache = false
-            return
-        }
-        if (!editor.settings.autoPreviewCache) {
-            previewVideoReady = false
-            editor.playing = true
-            return
-        }
-
-        cachePrepareJob = scope.launch {
-            isPreparingCache = true
-            cachePrepareProgress = 0f
-            try {
-                val snapshot = editor.layers.toList()
-                val visualCount = snapshot.count {
-                    it.visible && it.type != LayerType.AUDIO &&
-                        it.type != LayerType.NULL && it.type != LayerType.ADJUSTMENT
-                }
-                if (visualCount == 0) {
-                    previewVideoReady = false
-                    editor.playing = true
-                    return@launch
-                }
-
-                val requestedScale = resolvePreviewScale(
-                    ctx, editor.settings.previewQualityIndex, visualCount
-                )
-                // Warm the first seconds at a capped proxy resolution. The preview
-                // can display these frames immediately while full-quality frames
-                // are generated behind playback.
-                val warmScale = minOf(requestedScale, 0.5f)
-                val frameWidth = (COMP_W * warmScale).toInt().coerceAtLeast(240)
-                val frameHeight = (COMP_H * warmScale).toInt().coerceAtLeast(135)
-                val frameCount = kotlin.math.ceil(editor.duration * editor.fps)
-                    .toInt().coerceAtLeast(1)
-                val startFrame = (editor.time * editor.fps)
-                    .toInt().coerceIn(0, frameCount - 1)
-                val warmFrameCount = minOf(frameCount, (editor.fps * 3).coerceAtLeast(1))
-
-                // Only block for the first three seconds around the playhead.
-                // Two independent frames can be prepared concurrently; cache keys
-                // make already-rendered frames reusable without re-encoding them.
-                var completed = 0
-                var offset = 0
-                while (offset < warmFrameCount) {
-                    val batchOffsets = (offset until minOf(offset + 2, warmFrameCount)).toList()
-                    val results = coroutineScope {
-                        batchOffsets.map { batchOffset ->
-                            async {
-                                val frameIndex = (startFrame + batchOffset) % frameCount
-                                val frameTime = frameIndex / editor.fps.toFloat()
-                                val key = withContext(MediaWorkers.cpuDispatcher) {
-                                    CompositionFrameCache.frameKey(
-                                        editor.projectId, snapshot, frameTime, editor.fps,
-                                        frameWidth, frameHeight
-                                    )
-                                }
-                                val cached = withContext(Dispatchers.IO) {
-                                    CompositionFrameCache.isCached(ctx, key)
-                                }
-                                val readyKey = if (cached) key else if (
-                                    CompositionFrameCache.hasCapacity(
-                                        ctx, editor.settings.frameCacheDiskMb
-                                    )
-                                ) {
-                                    CompositionFrameCache.renderAndStore(
-                                        ctx, editor.projectId, snapshot, frameTime, editor.fps,
-                                        frameWidth, frameHeight, editor.settings.frameCacheDiskMb
-                                    )
-                                } else null
-                                frameIndex to readyKey
-                            }
-                        }.awaitAll()
-                    }
-                    results.forEach { (frameIndex, key) ->
-                        if (key != null) editor.markFrameCached(frameIndex, key)
-                    }
-                    completed += batchOffsets.size
-                    cachePrepareProgress = completed.toFloat() / warmFrameCount
-                    offset += batchOffsets.size
-                }
-                previewVideoReady = false
-                editor.playing = true
-            } finally {
-                isPreparingCache = false
-                cachePrepareJob = null
-            }
-        }
+        editor.playing = !editor.playing
     }
     BackHandler { leave() }
     BackHandler(enabled = previewExpanded) { previewExpanded = false }
@@ -300,61 +199,6 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
         }
     }
 
-    LaunchedEffect(
-        editor.playing,
-        editor.settings.autoPreviewCache,
-        editor.settings.frameCacheDiskMb,
-        editor.settings.previewQualityIndex,
-        editor.layers,
-        editor.duration,
-        editor.fps,
-        editor.projectId
-    ) {
-        if (!editor.playing || !editor.settings.autoPreviewCache) return@LaunchedEffect
-        val snapshot = editor.layers.toList()
-        val visualCount = snapshot.count {
-            it.visible && it.type != LayerType.AUDIO &&
-                it.type != LayerType.NULL && it.type != LayerType.ADJUSTMENT
-        }
-        if (visualCount == 0) return@LaunchedEffect
-
-        val qualityScale = resolvePreviewScale(
-            ctx, editor.settings.previewQualityIndex, visualCount
-        )
-        val frameWidth = (COMP_W * qualityScale).toInt().coerceAtLeast(240)
-        val frameHeight = (COMP_H * qualityScale).toInt().coerceAtLeast(135)
-        val frameCount = kotlin.math.ceil(editor.duration * editor.fps)
-            .toInt().coerceAtLeast(1)
-        val startFrame = (editor.time * editor.fps).toInt().coerceIn(0, frameCount - 1)
-
-        // Continue filling the full-quality cache while transport runs. The
-        // dedicated low-priority pool and small yield keep playback responsive.
-        for (offset in 0 until frameCount) {
-            if (!editor.playing) break
-            val frameIndex = (startFrame + offset) % frameCount
-            val frameTime = frameIndex / editor.fps.toFloat()
-            val key = withContext(MediaWorkers.cpuDispatcher) {
-                CompositionFrameCache.frameKey(
-                    editor.projectId, snapshot, frameTime, editor.fps,
-                    frameWidth, frameHeight
-                )
-            }
-            val cached = withContext(Dispatchers.IO) {
-                CompositionFrameCache.isCached(ctx, key)
-            }
-            val readyKey = if (cached) key else if (
-                CompositionFrameCache.hasCapacity(ctx, editor.settings.frameCacheDiskMb)
-            ) {
-                CompositionFrameCache.renderAndStore(
-                    ctx, editor.projectId, snapshot, frameTime, editor.fps,
-                    frameWidth, frameHeight, editor.settings.frameCacheDiskMb
-                )
-            } else null
-            if (readyKey != null) editor.markFrameCached(frameIndex, readyKey)
-            delay(16)
-        }
-    }
-
     LaunchedEffect(editor.layers, editor.duration, editor.resolution, editor.projectName) {
         delay(400)
         withContext(Dispatchers.IO) { runCatching { projectStore.save(editor) } }
@@ -428,20 +272,14 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
 
         if (previewExpanded) {
             Box(Modifier.weight(1f).fillMaxWidth()) {
-            PreviewCanvas(editor, Modifier.fillMaxSize(), editor.settings.previewQualityIndex) { previewVideoReady = it }
+            PreviewCanvas(editor, Modifier.fillMaxSize(), editor.settings.previewQualityIndex)
             PreviewQualityControl(editor, Modifier.align(Alignment.TopStart).padding(8.dp))
-            if (isPreparingCache) {
-                CompositionCacheOverlay(cachePrepareProgress, Modifier.align(Alignment.Center))
             }
-        }
         } else {
             Box(Modifier.fillMaxWidth().height(previewHeight.dp)) {
-                PreviewCanvas(editor, Modifier.fillMaxSize(), editor.settings.previewQualityIndex) { previewVideoReady = it }
+                PreviewCanvas(editor, Modifier.fillMaxSize(), editor.settings.previewQualityIndex)
                 PreviewQualityControl(editor, Modifier.align(Alignment.TopStart).padding(8.dp))
-                if (isPreparingCache) {
-                    CompositionCacheOverlay(cachePrepareProgress, Modifier.align(Alignment.Center))
                 }
-            }
             Box(Modifier.fillMaxWidth().height(10.dp).background(KColors.Bg).pointerInput(Unit) {
                 detectVerticalDragGestures { change, drag -> change.consume(); previewHeight = (previewHeight + drag / density).coerceIn(120f, 420f) }
             }, contentAlignment = Alignment.Center) {
