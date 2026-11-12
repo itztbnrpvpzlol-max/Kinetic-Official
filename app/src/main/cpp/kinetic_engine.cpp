@@ -15,20 +15,50 @@ inline float cubic(float t, float a, float b) {
     const float inv = 1.0f - t;
     return 3.0f * inv * inv * t * a + 3.0f * inv * t * t * b + t * t * t;
 }
+
+uint64_t curveFingerprint(float x1, float y1, float x2, float y2) {
+    uint64_t hash = 1469598103934665603ULL;
+    const float controls[4] = {x1, y1, x2, y2};
+    for (float value : controls) {
+        uint32_t bits = 0;
+        std::memcpy(&bits, &value, sizeof(bits));
+        hash = (hash ^ bits) * 1099511628211ULL;
+    }
+    return hash;
+}
+
+/** Reusable 257-point easing LUT: the cache key excludes progress by design. */
+float evaluateCurveCached(float progress, float x1, float y1, float x2, float y2) {
+    constexpr size_t LUT_SIZE = 257;
+    float table[LUT_SIZE];
+    const uint64_t fingerprint = curveFingerprint(x1, y1, x2, y2);
+    if (!kreGetCalculation(fingerprint, table, LUT_SIZE)) {
+        for (size_t sample = 0; sample < LUT_SIZE; ++sample) {
+            const float targetX = static_cast<float>(sample) / 256.0f;
+            float low = 0.0f;
+            float high = 1.0f;
+            for (int step = 0; step < 16; ++step) {
+                const float mid = (low + high) * 0.5f;
+                if (cubic(mid, x1, x2) < targetX) low = mid;
+                else high = mid;
+            }
+            table[sample] = cubic((low + high) * 0.5f, y1, y2);
+        }
+        krePutCalculation(fingerprint, table, LUT_SIZE);
+    }
+
+    const float u = std::clamp(progress, 0.0f, 1.0f) * 256.0f;
+    const size_t lower = static_cast<size_t>(u);
+    if (lower >= 256) return table[256];
+    const float fraction = u - static_cast<float>(lower);
+    return table[lower] + (table[lower + 1] - table[lower]) * fraction;
+}
 }
 
 extern "C" JNIEXPORT jfloat JNICALL
 Java_com_kinetic_app_engine_NativeRenderEngine_nativeCubicProgress(
         JNIEnv*, jobject, jfloat progress, jfloat x1, jfloat y1, jfloat x2, jfloat y2) {
-    const float u = std::clamp(progress, 0.0f, 1.0f);
-    float low = 0.0f;
-    float high = 1.0f;
-    for (int i = 0; i < 18; ++i) {
-        const float mid = (low + high) * 0.5f;
-        if (cubic(mid, x1, x2) < u) low = mid;
-        else high = mid;
-    }
-    return cubic((low + high) * 0.5f, y1, y2);
+    return evaluateCurveCached(progress, x1, y1, x2, y2);
 }
 
 extern "C" JNIEXPORT jfloatArray JNICALL
@@ -46,43 +76,15 @@ Java_com_kinetic_app_engine_NativeRenderEngine_nativeEvaluateCurves(
         env->ReleaseFloatArrayElements(input, values, JNI_ABORT);
         return nullptr;
     }
-    if (count == 0) {
-        env->ReleaseFloatArrayElements(input, values, JNI_ABORT);
-        return output;
-    }
-
-    // Exact input bits form the dependency fingerprint. Repeated curve batches
-    // can reuse their evaluated values without repeating the binary searches.
-    uint64_t fingerprint = 1469598103934665603ULL;
-    fingerprint = (fingerprint ^ static_cast<uint64_t>(length)) * 1099511628211ULL;
-    for (jsize i = 0; i < length; ++i) {
-        uint32_t bits = 0;
-        std::memcpy(&bits, &values[i], sizeof(bits));
-        fingerprint = (fingerprint ^ bits) * 1099511628211ULL;
-    }
-
     std::vector<jfloat> result(static_cast<size_t>(count));
-    if (kreGetCalculation(fingerprint, result.data(), result.size())) {
-        env->SetFloatArrayRegion(output, 0, count, result.data());
-        env->ReleaseFloatArrayElements(input, values, JNI_ABORT);
-        return output;
-    }
-
     for (jsize i = 0; i < count; ++i) {
         const jsize offset = i * 5;
-        const float u = std::clamp(values[offset], 0.0f, 1.0f);
-        float low = 0.0f;
-        float high = 1.0f;
-        for (int step = 0; step < 18; ++step) {
-            const float mid = (low + high) * 0.5f;
-            if (cubic(mid, values[offset + 1], values[offset + 3]) < u) low = mid;
-            else high = mid;
-        }
-        result[static_cast<size_t>(i)] =
-            cubic((low + high) * 0.5f, values[offset + 2], values[offset + 4]);
+        result[static_cast<size_t>(i)] = evaluateCurveCached(
+            values[offset], values[offset + 1], values[offset + 2],
+            values[offset + 3], values[offset + 4]
+        );
     }
-    krePutCalculation(fingerprint, result.data(), result.size());
-    env->SetFloatArrayRegion(output, 0, count, result.data());
+    if (count > 0) env->SetFloatArrayRegion(output, 0, count, result.data());
     env->ReleaseFloatArrayElements(input, values, JNI_ABORT);
     return output;
 }
