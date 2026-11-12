@@ -364,13 +364,13 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
 
         if (previewExpanded) {
             Box(Modifier.weight(1f).fillMaxWidth()) {
-            PreviewCanvas(editor, Modifier.fillMaxSize(), editor.settings.previewQualityIndex)
+            PreviewCanvas(editor, Modifier.fillMaxSize(), editor.settings.previewQualityIndex, playback = playback)
             PreviewQualityControl(editor, Modifier.align(Alignment.TopStart).padding(8.dp))
                 PreviewDiagnosticsBadge(editor.playing, Modifier.align(Alignment.BottomEnd).padding(8.dp))
             }
         } else {
             Box(Modifier.fillMaxWidth().height(previewHeight.dp)) {
-                PreviewCanvas(editor, Modifier.fillMaxSize(), editor.settings.previewQualityIndex)
+                PreviewCanvas(editor, Modifier.fillMaxSize(), editor.settings.previewQualityIndex, playback = playback)
                 PreviewQualityControl(editor, Modifier.align(Alignment.TopStart).padding(8.dp))
                 PreviewDiagnosticsBadge(editor.playing, Modifier.align(Alignment.BottomEnd).padding(8.dp))
                 }
