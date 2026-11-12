@@ -4,6 +4,7 @@ import android.graphics.Matrix
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.kinetic.app.data.AppSettings
@@ -21,6 +22,7 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
         private set
     var time by mutableFloatStateOf(0f)
     var playing by mutableStateOf(false)
+    val cacheProgress = mutableStateMapOf<String, Float>()
     var selectedId by mutableStateOf<String?>(null)
     var selectedProp by mutableStateOf<PropId?>(null)
     var selectedKey by mutableIntStateOf(-1)
@@ -153,7 +155,12 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
         if (source.type != LayerType.VIDEO || source.uri == null) return
         val audio = newLayer(LayerType.AUDIO, nextName("Extracted Audio"), source.start,
             source.duration, 0f, 0f, source.uri, source.srcLength).copy(srcOffset = source.srcOffset)
-        addLayer(audio)
+        commit { layers ->
+            listOf(audio) + layers.map { layer ->
+                if (layer.id == source.id) layer.copy(volume = 0f) else layer
+            }
+        }
+        select(audio.id)
     }
 
     fun addMediaTrimmed(type: LayerType, name: String, uri: String, w: Int, h: Int, sourceLength: Float?, trimStart: Float, trimEnd: Float) {
