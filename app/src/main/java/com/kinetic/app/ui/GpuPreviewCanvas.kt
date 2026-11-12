@@ -131,17 +131,23 @@ fun PreviewCanvas(
         }
     }
 
-    val cachedFrame by androidx.compose.runtime.produceState<Bitmap?>(
-        initialValue = null, frameKey, frameReady
-    ) {
+    // Do not reset the displayed bitmap to null on every playhead tick.
+    // The previous implementation briefly switched to the live decoder between
+    // cache-frame loads, producing visible flashes/flicker on cached sections.
+    var loadedCachedFrame by remember { mutableStateOf<Pair<String, Bitmap>?>(null) }
+    LaunchedEffect(frameKey, frameReady) {
         val key = frameKey
-        value = if (frameReady && key != null) CompositionFrameCache.loadFrame(context, key) else null
+        if (frameReady && key != null) {
+            val decoded = CompositionFrameCache.loadFrame(context, key)
+            if (decoded != null) loadedCachedFrame = key to decoded
+        }
     }
+    val cachedFrame = loadedCachedFrame?.takeIf { it.first == frameKey }?.second
 
     if (cachedFrame != null) {
         LaunchedEffect(frameKey) { onVideoReady(true) }
         Image(
-            bitmap = cachedFrame!!.asImageBitmap(),
+            bitmap = cachedFrame.asImageBitmap(),
             contentDescription = "Cached composition frame",
             modifier = modifier.background(androidx.compose.ui.graphics.Color.Black),
             contentScale = ContentScale.Fit
