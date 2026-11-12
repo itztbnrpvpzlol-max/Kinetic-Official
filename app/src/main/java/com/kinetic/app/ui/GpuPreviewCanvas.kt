@@ -645,22 +645,24 @@ private fun GpuCompositionPreviewCanvas(
                 // external GL textures and share the same ordered scene pass.
                 videoLayers.forEach { layer ->
                     key(layer.id) {
-                        val uri = layer.uri ?: return@key
-                        val maxW = (COMP_W * qualityScale).toInt().coerceAtLeast(240)
-                        val maxH = (COMP_H * qualityScale).toInt().coerceAtLeast(135)
-                        val player = remember(uri, qualityScale) {
-                            ExoPlayer.Builder(context).build().apply {
-                                trackSelectionParameters = TrackSelectionParameters.Builder(context)
-                                    .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, true)
-                                    .setMaxVideoSize(maxW, maxH)
-                                    .build()
-                                repeatMode = Player.REPEAT_MODE_OFF
+                        val uri = layer.uri
+                        if (uri != null) {
+                            val maxW = (COMP_W * qualityScale).toInt().coerceAtLeast(240)
+                            val maxH = (COMP_H * qualityScale).toInt().coerceAtLeast(135)
+                            val player = remember(uri, qualityScale) {
+                                ExoPlayer.Builder(context).build().apply {
+                                    trackSelectionParameters = TrackSelectionParameters.Builder(context)
+                                        .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, true)
+                                        .setMaxVideoSize(maxW, maxH)
+                                        .build()
+                                    repeatMode = Player.REPEAT_MODE_OFF
+                                }
                             }
+                            DisposableEffect(player) {
+                                onDispose { player.release() }
+                            }
+                            GpuVideoPlayerLayer(editor, layer, player, view)
                         }
-                        DisposableEffect(player) {
-                            onDispose { player.release() }
-                        }
-                        GpuVideoPlayerLayer(editor, layer, player, view)
                     }
                 }
             }
