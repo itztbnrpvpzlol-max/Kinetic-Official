@@ -86,7 +86,7 @@ struct NativeVideoDecoder {
         std::lock_guard<std::mutex> lock(mutex);
         if (playing != value) {
             playing = value;
-            if (value) {
+            if (value && anchorPtsUs >= 0) {
                 anchorPtsUs = lastPtsUs;
                 anchorNs = monotonicNs();
             }
@@ -97,8 +97,10 @@ struct NativeVideoDecoder {
     void setSpeed(double value) {
         std::lock_guard<std::mutex> lock(mutex);
         speed = std::clamp(value, 0.1, 4.0);
-        anchorPtsUs = lastPtsUs;
-        anchorNs = monotonicNs();
+        if (anchorPtsUs >= 0) {
+            anchorPtsUs = lastPtsUs;
+            anchorNs = monotonicNs();
+        }
     }
 
     static int64_t monotonicNs() {
