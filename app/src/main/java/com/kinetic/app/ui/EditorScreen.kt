@@ -92,6 +92,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 
@@ -119,13 +120,9 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
 
     fun leave() { if (editor.layers.isEmpty()) onExit() else showLeave = true }
 
-    // Fill the persistent, low-resolution timeline thumbnail cache after
-    // import. This runs in the low-priority cache worker and never blocks the UI.
-    suspend fun prepareVideoPreview(source: Uri, durationSec: Float) {
-        if (durationSec <= 0f) return
-        MediaLoader.cacheVideoPreviewFrames(ctx, source, durationSec) { }
-    }
-
+    // Full-clip disk prewarming is intentionally disabled. Timeline rows
+    // request only their visible representative thumbnails; scanning hundreds
+    // of frames after import can hold the same retriever lock as live preview.
     // Playback starts immediately from original media; thumbnail caching is
     // independent and does not block the transport.
     fun togglePlayback() {
@@ -346,11 +343,6 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                 val info = withContext(MediaWorkers.cpuDispatcher) { MediaLoader.probe(ctx, cachedUri, type) }
                 val name = MediaLoader.displayName(ctx, u)
                 editor.addMedia(type, name, cachedUri.toString(), info.width, info.height, info.length)
-                if (type == LayerType.VIDEO) {
-                    scope.launch {
-                        runCatching { prepareVideoPreview(cachedUri, info.length ?: 0f) }
-                    }
-                }
             }
         }
     }
@@ -445,7 +437,6 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                     scope.launch {
                         val cachedUri = MediaLoader.cacheMedia(ctx, item.uri)
                         val info = withContext(MediaWorkers.cpuDispatcher) { MediaLoader.probe(ctx, cachedUri, item.type) }
-                        if (item.type == LayerType.VIDEO) prepareVideoPreview(cachedUri, item.duration ?: 0f)
                         editor.addMediaTrimmed(item.type, item.name, cachedUri.toString(),
                             if (info.width > 0) info.width else item.width,
                             if (info.height > 0) info.height else item.height,
