@@ -158,7 +158,7 @@ private fun MultiVideoPreviewCanvas(
         }
     }
     val allReady = layers.isNotEmpty() && layers.all { readyById[it.id] == true }
-    LaunchedEffect(layers.map { it.id }, allReady) { onVideoReady(allReady) }
+    LaunchedEffect(layers.map { it.id }, allReady, editor.playing) { onVideoReady(allReady) }
     BoxWithConstraints(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         val fitScale = minOf(maxWidth.value / COMP_W, maxHeight.value / COMP_H)
         val compositionWidth = (COMP_W * fitScale).dp
@@ -311,6 +311,8 @@ private fun DirectVideoPreviewCanvas(
             player.release()
         }
     }
+
+    LaunchedEffect(editor.playing, videoReady) { onVideoReady(videoReady) }
 
     val sourceTime = ((editor.time - layer.start).coerceAtLeast(0f) * layer.speed + layer.srcOffset)
         .coerceAtLeast(0f)
