@@ -238,13 +238,22 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                     val centerSourceTime = (
                         (playhead - layer.start).coerceAtLeast(0f) * speed + layer.srcOffset
                     ).coerceAtLeast(0f)
-                    val beforeFrames = 2
-                    val afterFrames = (framesPerLayer - beforeFrames - 1).coerceAtLeast(1)
-                    val sourceStart = (centerSourceTime - beforeFrames / 12f)
-                        .coerceAtLeast(layer.srcOffset)
                     val sourceEndLimit = if (layer.srcLength.isFinite()) {
                         (layer.srcLength - 0.05f).coerceAtLeast(layer.srcOffset)
                     } else Float.POSITIVE_INFINITY
+                    val beforeAvailable = ((centerSourceTime - layer.srcOffset) * 12f)
+                        .toInt().coerceAtLeast(0)
+                    val afterAvailable = if (sourceEndLimit.isFinite()) {
+                        ((sourceEndLimit - centerSourceTime) * 12f).toInt().coerceAtLeast(0)
+                    } else 12
+                    val beforeFrames = minOf(2, beforeAvailable)
+                    val afterFrames = minOf(
+                        (framesPerLayer - beforeFrames - 1).coerceAtLeast(0),
+                        afterAvailable
+                    )
+                    val totalFrames = beforeFrames + afterFrames + 1
+                    val sourceStart = (centerSourceTime - beforeFrames / 12f)
+                        .coerceAtLeast(layer.srcOffset)
                     val sourceEnd = (centerSourceTime + afterFrames / 12f)
                         .coerceAtMost(sourceEndLimit)
                     val windowStart = (
@@ -259,7 +268,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                     ).joinToString("|")
 
                     TimelineRamCache.setWindow(
-                        layer.id, signature, windowStart, windowEnd, 0, framesPerLayer
+                        layer.id, signature, windowStart, windowEnd, 0, totalFrames
                     )
                     val readyFrames = MediaLoader.prefetchVideoFrameWindow(
                         ctx = ctx,
@@ -274,7 +283,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                     )
                     TimelineRamCache.setWindow(
                         layer.id, signature, windowStart, windowEnd,
-                        readyFrames, framesPerLayer
+                        readyFrames, totalFrames
                     )
                 }
             }
@@ -791,7 +800,7 @@ private fun PreviewDiagnosticsBadge(playing: Boolean, modifier: Modifier = Modif
     if (playing) {
         val previewLabel = when {
             snapshot.cpuDrawFps > 0f -> {
-                "CPU ${snapshot.cpuDrawFps.toInt()}fps · draw ${"%.1f".format(snapshot.cpuDrawMs)}ms · dec ${"%.1f".format(snapshot.cpuDecodeMs)}ms · RAM ${snapshot.cpuRamHitPercent}%"
+                "CPU ${snapshot.cpuDrawFps.toInt()}fps · draw ${"%.1f".format(snapshot.cpuDrawMs)}ms · dec ${"%.1f".format(snapshot.cpuDecodeMs)}ms · q ${"%.1f".format(snapshot.cpuQueueMs)}ms · RAM ${snapshot.cpuRamHitPercent}%"
             }
             snapshot.glFps > 0f -> {
                 "GL ${snapshot.glFps.toInt()}fps · submit ${"%.1f".format(snapshot.glSubmitMs)}ms"
