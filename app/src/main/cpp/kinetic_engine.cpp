@@ -356,7 +356,7 @@ Java_com_kinetic_app_engine_NativeRenderEngine_nativeGlInit(JNIEnv*, jobject) {
         "void main(){ vec2 uv=(uTexMatrix*vec4(vTexCoord,0.0,1.0)).xy;"
         "vec4 c=texture(uTexture,uv);"
         "if(uGray>0.5){ float y=dot(c.rgb,vec3(0.299,0.587,0.114)); c.rgb=vec3(y); }"
-        "fragColor=vec4(c.rgb*uAlpha,c.a*uAlpha); }";
+        "fragColor=vec4(c.rgb*c.a*uAlpha,c.a*uAlpha); }";
     static const char* solidVertex =
         "#version 300 es\n"
         "in vec2 aPosition; void main(){ gl_Position=vec4(aPosition,0.0,1.0); }";
