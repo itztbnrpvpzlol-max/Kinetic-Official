@@ -5,6 +5,7 @@
 #include <cstring>
 #include <vector>
 #include <cstddef>
+#include <android/log.h>
 
 extern "C" bool kreGetCalculation(uint64_t key, float* output, std::size_t count);
 extern "C" void krePutCalculation(uint64_t key, const float* values, std::size_t count);
@@ -222,6 +223,13 @@ GLuint compileGlShader(GLenum type, const char* source) {
     GLint status = GL_FALSE;
     glGetShaderiv(shader, GL_COMPILE_STATUS, &status);
     if (status != GL_TRUE) {
+        GLint logLength = 0;
+        glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &logLength);
+        if (logLength > 1) {
+            std::vector<char> log(static_cast<size_t>(logLength));
+            glGetShaderInfoLog(shader, logLength, nullptr, log.data());
+            __android_log_print(ANDROID_LOG_ERROR, "KRE", "Shader compile failed: %s", log.data());
+        }
         glDeleteShader(shader);
         return 0;
     }
@@ -250,6 +258,13 @@ GLuint linkGlProgram(const char* vertexSource, const char* fragmentSource) {
     glDeleteShader(vertex);
     glDeleteShader(fragment);
     if (status != GL_TRUE) {
+        GLint logLength = 0;
+        glGetProgramiv(program, GL_INFO_LOG_LENGTH, &logLength);
+        if (logLength > 1) {
+            std::vector<char> log(static_cast<size_t>(logLength));
+            glGetProgramInfoLog(program, logLength, nullptr, log.data());
+            __android_log_print(ANDROID_LOG_ERROR, "KRE", "Program link failed: %s", log.data());
+        }
         glDeleteProgram(program);
         return 0;
     }
@@ -330,7 +345,7 @@ Java_com_kinetic_app_engine_NativeRenderEngine_nativeGlInit(JNIEnv*, jobject) {
         "uniform float uGray; in vec2 vTexCoord; out vec4 fragColor;"
         "void main(){ vec4 c=texture(uTexture,vTexCoord);"
         "if(uGray>0.5){ float y=dot(c.rgb,vec3(0.299,0.587,0.114)); c.rgb=vec3(y); }"
-        "fragColor=vec4(c.rgb*uAlpha,c.a*uAlpha); }";
+        "fragColor=vec4(c.rgb*c.a*uAlpha,c.a*uAlpha); }";
     static const char* externalFragment =
         "#version 300 es\n"
         "#extension GL_OES_EGL_image_external_essl3 : require\n"
@@ -372,6 +387,25 @@ Java_com_kinetic_app_engine_NativeRenderEngine_nativeGlInit(JNIEnv*, jobject) {
     gExternalMatrix = glGetUniformLocation(gExternalProgram, "uTexMatrix");
     gSolidPosition = glGetAttribLocation(gSolidProgram, "aPosition");
     gSolidColor = glGetUniformLocation(gSolidProgram, "uColor");
+
+    const bool locationsValid =
+        gTexturePosition >= 0 && gTextureUv >= 0 && gTextureSampler >= 0 &&
+        gTextureAlpha >= 0 && gTextureGray >= 0 &&
+        gExternalPosition >= 0 && gExternalUv >= 0 && gExternalSampler >= 0 &&
+        gExternalAlpha >= 0 && gExternalGray >= 0 && gExternalMatrix >= 0 &&
+        gSolidPosition >= 0 && gSolidColor >= 0;
+    if (!locationsValid) {
+        __android_log_print(ANDROID_LOG_ERROR, "KRE", "Required GLES3 shader inputs were not linked");
+        if (gTextureProgram) glDeleteProgram(gTextureProgram);
+        if (gExternalProgram) glDeleteProgram(gExternalProgram);
+        if (gSolidProgram) glDeleteProgram(gSolidProgram);
+        if (gVertexBuffer) glDeleteBuffers(1, &gVertexBuffer);
+        if (gVertexArrayObject) glDeleteVertexArrays(1, &gVertexArrayObject);
+        gTextureProgram = gExternalProgram = gSolidProgram = 0;
+        gVertexBuffer = gVertexArrayObject = 0;
+        return JNI_FALSE;
+    }
+    __android_log_print(ANDROID_LOG_INFO, "KRE", "Native GLES3 renderer initialized");
     return JNI_TRUE;
 }
 
