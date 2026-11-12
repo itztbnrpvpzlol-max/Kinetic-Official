@@ -198,7 +198,7 @@ class AudioEngine(context: Context) {
 
                     val audioTrack = track
                     if (audioTrack != null && !outputEos) {
-                        if (abs(appliedSpeed - requestedSpeed) > 0.001f) {
+                        if (!appliedSpeed.isFinite() || abs(appliedSpeed - requestedSpeed) > 0.001f) {
                             runCatching {
                                 audioTrack.playbackParams = audioTrack.playbackParams.setSpeed(requestedSpeed)
                                 appliedSpeed = requestedSpeed

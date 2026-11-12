@@ -157,9 +157,12 @@ struct NativeVideoDecoder {
         AMediaCodec_flush(codec);
         inputEos = false;
         outputEos = false;
-        anchorPtsUs = -1;
-        lastPtsUs = targetUs;
-        anchorNs = monotonicNs();
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            anchorPtsUs = -1;
+            lastPtsUs = targetUs;
+            anchorNs = monotonicNs();
+        }
     }
 
     void run() {

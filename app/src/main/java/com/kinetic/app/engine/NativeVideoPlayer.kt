@@ -42,7 +42,10 @@ class NativeVideoPlayer(
     fun seekTo(targetMs: Long) = synchronized(lock) {
         if (released) return@synchronized
         positionMs = targetMs.coerceAtLeast(0L)
-        if (handle != 0L) nativeSeek(handle, positionMs)
+        if (handle != 0L) {
+            nativeSeek(handle, positionMs)
+            if (wantsPlayback) nativePlay(handle)
+        }
     }
 
     fun setSpeed(value: Float) = synchronized(lock) {
