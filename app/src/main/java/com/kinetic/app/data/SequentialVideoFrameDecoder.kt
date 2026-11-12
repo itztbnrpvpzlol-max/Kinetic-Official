@@ -8,7 +8,6 @@ import android.graphics.Rect
 import android.graphics.YuvImage
 import android.media.Image
 import android.media.MediaCodec
-import android.media.MediaCodecInfo
 import android.media.MediaCodecList
 import android.media.MediaExtractor
 import android.media.MediaFormat
@@ -41,10 +40,15 @@ internal class SequentialVideoFrameDecoder {
     )
 
     private var session: Session? = null
+    @Volatile private var fallbackIdentity: String? = null
+
+    fun shouldUseRetrieverFallback(identity: String): Boolean = fallbackIdentity == identity
 
     @Synchronized
     fun decodeFrame(context: Context, uri: Uri, identity: String, targetUs: Long, maxEdge: Int): Bitmap? {
         val target = targetUs.coerceAtLeast(0L)
+        if (fallbackIdentity == identity) return null
+        if (fallbackIdentity != null && fallbackIdentity != identity) fallbackIdentity = null
         try {
             var active = session
             val needsSeek = active == null ||
@@ -61,6 +65,7 @@ internal class SequentialVideoFrameDecoder {
             decoder.lastRequestedUs = target
             return decodeUntil(decoder, target, maxEdge)
         } catch (_: Throwable) {
+            fallbackIdentity = identity
             closeSession()
             return null
         }
@@ -76,9 +81,10 @@ internal class SequentialVideoFrameDecoder {
             extractor.setDataSource(context, uri, null)
             val trackIndex = (0 until extractor.trackCount).firstOrNull { index ->
                 extractor.getTrackFormat(index).getString(MediaFormat.KEY_MIME)?.startsWith("video/") == true
-            } ?: return null
+            } ?: throw IllegalArgumentException("No video track")
             val format = extractor.getTrackFormat(trackIndex)
-            val mime = format.getString(MediaFormat.KEY_MIME) ?: return null
+            val mime = format.getString(MediaFormat.KEY_MIME)
+                ?: throw IllegalArgumentException("Video track has no MIME type")
             val rotation = if (format.containsKey(MediaFormat.KEY_ROTATION)) {
                 format.getInteger(MediaFormat.KEY_ROTATION)
             } else 0
@@ -87,9 +93,7 @@ internal class SequentialVideoFrameDecoder {
             // dependent frames forward from that keyframe to reach targetUs.
             extractor.seekTo(targetUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
 
-            codec = createHardwarePreferredDecoder(mime)
-            codec.configure(format, null, null, 0)
-            codec.start()
+            codec = createConfiguredDecoder(mime, format)
             return Session(identity, extractor, codec, rotation)
         } catch (error: Throwable) {
             runCatching { codec?.stop() }
@@ -99,7 +103,7 @@ internal class SequentialVideoFrameDecoder {
         }
     }
 
-    private fun createHardwarePreferredDecoder(mime: String): MediaCodec {
+    private fun createConfiguredDecoder(mime: String, format: MediaFormat): MediaCodec {
         val candidates = runCatching {
             MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos
                 .filter { info ->
@@ -117,11 +121,23 @@ internal class SequentialVideoFrameDecoder {
         }
 
         if (hardware != null) {
-            runCatching { return MediaCodec.createByCodecName(hardware.name) }
+            var candidate: MediaCodec? = null
+            try {
+                candidate = MediaCodec.createByCodecName(hardware.name)
+                candidate.configure(format, null, null, 0)
+                candidate.start()
+                return candidate
+            } catch (_: Throwable) {
+                runCatching { candidate?.stop() }
+                runCatching { candidate?.release() }
+            }
         }
-        return MediaCodec.createDecoderByType(mime)
-    }
 
+        return MediaCodec.createDecoderByType(mime).also {
+            it.configure(format, null, null, 0)
+            it.start()
+        }
+    }
     private fun decodeUntil(session: Session, targetUs: Long, maxEdge: Int): Bitmap? {
         val codec = session.codec
         val extractor = session.extractor
@@ -178,6 +194,9 @@ internal class SequentialVideoFrameDecoder {
                             } finally {
                                 image.close()
                             }
+                            if (bitmap == null) fallbackIdentity = session.identity
+                        } else {
+                            fallbackIdentity = session.identity
                         }
                     }
                     if (hasFrame) session.lastOutputUs = presentationUs
