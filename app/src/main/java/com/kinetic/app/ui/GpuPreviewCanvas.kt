@@ -207,11 +207,13 @@ private fun GpuCompositionPreviewCanvas(
     val context = LocalContext.current
     val frames = remember { mutableStateMapOf<String, Bitmap>() }
     val textTextures = remember { mutableMapOf<String, Pair<Int, Bitmap>>() }
-    // All videos in a mixed composition use hardware decode and external OES.
-    // The GL pass applies the same supported mask, grayscale and blend features.
+    // Hardware decoder instances are scarce system resources, not a thread pool.
+    // Excess video layers use the existing bitmap preview path rather than
+    // exhausting MediaCodec resources.
+    val decoderLimit = com.kinetic.app.data.MediaWorkers.maxConcurrentVideoDecoders
     val videoLayers = editor.layers.filter {
         it.visible && it.activeAt(editor.time) && it.type == LayerType.VIDEO && it.uri != null
-    }
+    }.take(decoderLimit)
     val textureVideoIds = videoLayers.mapTo(HashSet<String>()) { it.id }
 
     LaunchedEffect(editor.layers.map { it.id }) {
