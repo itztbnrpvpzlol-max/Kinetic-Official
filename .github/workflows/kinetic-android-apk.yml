@@ -32,7 +32,7 @@ jobs:
       - name: Set up Gradle 8.7
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.7'
+          gradle-version: '8.11.1'
 
       - name: Install Android NDK and CMake
         shell: bash
@@ -44,8 +44,9 @@ jobs:
           # still propagating sdkmanager's actual exit status.
           for attempt in 1 2 3; do
             rm -rf "${ANDROID_HOME}/ndk/26.1.10909125"
-            if { yes || true; } | "${SDKMANAGER}" --install "ndk;26.1.10909125" "cmake;3.22.1"; then
+            if { yes || true; } | "${SDKMANAGER}" --install "platforms;android-36" "build-tools;36.0.0" "ndk;26.1.10909125" "cmake;3.22.1"; then
               test -x "${ANDROID_HOME}/ndk/26.1.10909125/ndk-build"
+              test -d "${ANDROID_HOME}/platforms/android-36"
               break
             fi
             if [ "${attempt}" -eq 3 ]; then

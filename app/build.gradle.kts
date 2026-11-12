@@ -1,11 +1,11 @@
 plugins {
-    id("com.android.application") version "8.6.1"
+    id("com.android.application") version "8.9.1"
     id("org.jetbrains.kotlin.android") version "1.9.24"
 }
 
 android {
     namespace = "com.kinetic.app"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.kinetic.app"
