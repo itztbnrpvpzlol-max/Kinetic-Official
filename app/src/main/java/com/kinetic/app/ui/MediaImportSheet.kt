@@ -166,7 +166,6 @@ fun MediaImportSheet(
                 sampleFps = 8,
                 maxEdge = 720,
                 persistToDisk = false,
-                retainInRam = false
             )
         } else null
     }
