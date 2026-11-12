@@ -46,6 +46,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import com.kinetic.app.data.MediaLoader
 import com.kinetic.app.engine.NativeRenderEngine
+import com.kinetic.app.engine.NativePlaybackEngine
 import com.kinetic.app.data.MediaWorkers
 import com.kinetic.app.data.PreviewDiagnostics
 import com.kinetic.app.data.PreviewProxyStore
@@ -89,7 +90,8 @@ fun PreviewCanvas(
     editor: EditorState,
     modifier: Modifier = Modifier,
     qualityIndex: Int = 0,
-    onVideoReady: (Boolean) -> Unit = {}
+    onVideoReady: (Boolean) -> Unit = {},
+    playback: NativePlaybackEngine? = null
 ) {
     val context = LocalContext.current
     val visualLayers = editor.layers.filter {
@@ -100,7 +102,7 @@ fun PreviewCanvas(
 
     // Always use the live preview renderer. No pre-rendered timeline frames,
     // disk frame scans, or cache bitmap swaps occur while scrubbing.
-    LivePreviewCanvas(editor, modifier, qualityScale, onVideoReady)
+    LivePreviewCanvas(editor, modifier, qualityScale, onVideoReady, playback)
 }
 
 @Composable
@@ -108,7 +110,8 @@ private fun LivePreviewCanvas(
     editor: EditorState,
     modifier: Modifier,
     qualityScale: Float,
-    onVideoReady: (Boolean) -> Unit
+    onVideoReady: (Boolean) -> Unit,
+    playback: NativePlaybackEngine?
 ) {
     val context = LocalContext.current
     val activeVisualLayers = editor.layers.filter { layer ->
@@ -138,7 +141,7 @@ private fun LivePreviewCanvas(
     }
 
     LaunchedEffect(editor.layers.map { it.id }, editor.playing) { onVideoReady(true) }
-    GpuCompositionPreviewCanvas(editor, modifier, qualityScale)
+    GpuCompositionPreviewCanvas(editor, modifier, qualityScale, playback)
 }
 
 @Composable
@@ -201,7 +204,8 @@ internal fun resolvePreviewScale(context: Context, qualityIndex: Int, activeLaye
 private fun GpuCompositionPreviewCanvas(
     editor: EditorState,
     modifier: Modifier = Modifier,
-    qualityScale: Float
+    qualityScale: Float,
+    playback: NativePlaybackEngine?
 ) {
     val context = LocalContext.current
     val frames = remember { mutableStateMapOf<String, Bitmap>() }
@@ -349,7 +353,7 @@ private fun GpuCompositionPreviewCanvas(
                                 )
                             }
                             GpuVideoPlayerLayer(
-                                editor, layer, player, view,
+                                editor, layer, player, view, playback,
                                 onDecoderFailed = { failedVideoSources[layer.id] = layer.uri.orEmpty() }
                             )
                         }
@@ -369,6 +373,7 @@ private fun GpuVideoPlayerLayer(
     layer: com.kinetic.app.model.Layer,
     player: com.kinetic.app.engine.NativeVideoPlayer,
     surfaceView: GpuPreviewSurfaceView,
+    playback: NativePlaybackEngine?,
     onDecoderFailed: (String) -> Unit
 ) {
     val sourceTime = ((editor.time - layer.start).coerceAtLeast(0f) * layer.speed + layer.srcOffset)
@@ -400,6 +405,20 @@ private fun GpuVideoPlayerLayer(
         if (waitedMs >= 10_000 && player.decoderState() == 0) {
             Log.w("KineticVideo", "Hardware decoder startup timed out for layer ${layer.id}; using bitmap fallback")
             onDecoderFailed(layer.id)
+        }
+    }
+
+    LaunchedEffect(player, layer.id, playback, layer.start, layer.srcOffset, layer.speed) {
+        if (playback != null) {
+            val clipStartUs = (layer.start * 1_000_000.0).toLong()
+            val sourceOffsetUs = (layer.srcOffset * 1_000_000.0).toLong()
+            val clipSpeed = layer.speed.coerceIn(0.1f, 4f)
+            while (true) {
+                val clock = playback.clockSnapshot()
+                player.syncMasterClock(clock.positionUs, clock.monotonicNs, clock.speed,
+                    clock.playing, clipStartUs, sourceOffsetUs, clipSpeed, clock.generation)
+                kotlinx.coroutines.delay(33L)
+            }
         }
     }
 
