@@ -47,10 +47,10 @@ object MediaWorkers {
         foregroundThreadFactory("KineticPreviewDecoder")
     ).asCoroutineDispatcher()
 
-    // Cache generation stays separately bounded and never takes all CPU cores.
+    // Non-urgent media requests stay separately bounded and never take all CPU cores.
     val cacheDispatcher = Executors.newFixedThreadPool(
         cacheWorkerCount,
-        cacheThreadFactory("KineticFrameCache")
+        cacheThreadFactory("KineticBackgroundMedia")
     ).asCoroutineDispatcher()
 
     private fun foregroundThreadFactory(name: String): ThreadFactory = ThreadFactory { runnable ->

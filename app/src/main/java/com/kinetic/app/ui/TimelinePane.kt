@@ -371,7 +371,7 @@ private fun Clip(editor: EditorState, layer: Layer, pps: Float, selected: Boolea
         thumbnails = if (u == null || (layer.type != LayerType.IMAGE && layer.type != LayerType.VIDEO)) {
             emptyList()
         } else if (layer.type == LayerType.IMAGE) {
-            listOfNotNull(MediaLoader.bitmapFor(ctx, Uri.parse(u), LayerType.IMAGE, 0f, 1, 320, lowPriorityPrefetch = true))
+            listOfNotNull(MediaLoader.bitmapFor(ctx, Uri.parse(u), LayerType.IMAGE, 0f, 1, 320, lowPriorityRequest = true, persistToDisk = false))
         } else {
             val fractions = floatArrayOf(0f, 0.25f, 0.5f, 0.75f)
             buildList {
@@ -380,7 +380,7 @@ private fun Clip(editor: EditorState, layer: Layer, pps: Float, selected: Boolea
                     if (layer.srcLength.isFinite()) {
                         sourceTime = sourceTime.coerceAtMost((layer.srcLength - 0.05f).coerceAtLeast(0f))
                     }
-                    MediaLoader.bitmapFor(ctx, Uri.parse(u), LayerType.VIDEO, sourceTime, 2, 240, lowPriorityPrefetch = true)?.let(::add)
+                    MediaLoader.bitmapFor(ctx, Uri.parse(u), LayerType.VIDEO, sourceTime, 2, 240, lowPriorityRequest = true, persistToDisk = false)?.let(::add)
                 }
             }
         }

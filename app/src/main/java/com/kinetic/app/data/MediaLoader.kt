@@ -2,7 +2,6 @@ package com.kinetic.app.data
 
 import android.content.Context
 import android.os.Build
-import android.app.ActivityManager
 import android.graphics.Bitmap
 import android.media.AudioFormat
 import android.media.MediaCodec
@@ -162,7 +161,7 @@ object MediaLoader {
         }
     }
 
-    /** Image bitmap, or a video frame at [timeSec] (cached frame sampling, cached). */
+    /** Decode an image or a requested video frame. Paused previews may use disk-backed samples. */
     suspend fun bitmapFor(
         ctx: Context,
         uri: Uri,
@@ -171,12 +170,12 @@ object MediaLoader {
         sampleFps: Int = 5,
         maxEdge: Int = 960,
         persistToDisk: Boolean = true,
-        lowPriorityPrefetch: Boolean = false,
+        lowPriorityRequest: Boolean = false,
     ): Bitmap? {
         val requestNs = System.nanoTime()
-        return withContext(if (lowPriorityPrefetch) MediaWorkers.cacheDispatcher else MediaWorkers.previewDispatcher) {
-            if (lowPriorityPrefetch && MediaWorkers.isPlaybackRequested) return@withContext null
-            if (!lowPriorityPrefetch) MediaWorkers.beginPlaybackRequest()
+        return withContext(if (lowPriorityRequest) MediaWorkers.cacheDispatcher else MediaWorkers.previewDispatcher) {
+            if (lowPriorityRequest && MediaWorkers.isPlaybackRequested) return@withContext null
+            if (!lowPriorityRequest) MediaWorkers.beginPlaybackRequest()
             try {
             val workerStartNs = System.nanoTime()
             val bucket = if (type == LayerType.VIDEO) (timeSec * sampleFps.toFloat()).toInt() else 0
@@ -189,11 +188,14 @@ object MediaLoader {
                 val bmp = diskBitmap ?: try {
                     if (type == LayerType.IMAGE) decodeImage(ctx, uri, maxEdge)
                     else {
-                        // Let cache warmup reuse the same persistent MediaCodec session
-                        // as preview. Reopening MediaMetadataRetriever for each look-ahead
-                        // sample made RAM prefetch dramatically slower.
-                        if (lowPriorityPrefetch && MediaWorkers.isPlaybackRequested) {
-                            null
+                        if (lowPriorityRequest) {
+                            // Timeline thumbnails must never hold the shared
+                            // sequential decoder lock. A retriever request may
+                            // finish in the background, but cannot stall preview.
+                            videoFrame(
+                                ctx, uri, bucket / sampleFps.toFloat(), maxEdge,
+                                MediaMetadataRetriever.OPTION_CLOSEST
+                            )
                         } else {
                             val sequentialFrame = sequentialVideoDecoder.decodeFrame(
                                 ctx, uri, sourceKey,
@@ -216,7 +218,7 @@ object MediaLoader {
                     System.nanoTime() - decodeStartedNs
                 } else 0L
 
-                if (!lowPriorityPrefetch) {
+                if (!lowPriorityRequest) {
                     PreviewDiagnostics.recordCpuFrameRequest(
                         ramHit = false,
                         diskHit = diskBitmap != null,
@@ -233,7 +235,7 @@ object MediaLoader {
                 bmp
             }
             } finally {
-                if (!lowPriorityPrefetch) MediaWorkers.endPlaybackRequest()
+                if (!lowPriorityRequest) MediaWorkers.endPlaybackRequest()
             }
         }
     }
