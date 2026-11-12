@@ -2,10 +2,6 @@ package com.kinetic.app.data
 
 import android.content.Context
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.graphics.ImageFormat
-import android.graphics.Rect
-import android.graphics.YuvImage
 import android.media.Image
 import android.media.MediaCodec
 import android.media.MediaCodecList
@@ -14,7 +10,6 @@ import android.media.MediaFormat
 import android.net.Uri
 import android.os.Build
 import android.os.SystemClock
-import java.io.ByteArrayOutputStream
 import kotlin.math.ceil
 import kotlin.math.max
 
@@ -136,9 +131,15 @@ internal class SequentialVideoFrameDecoder {
             }
         }
 
-        return MediaCodec.createDecoderByType(mime).also {
-            it.configure(format, null, null, 0)
-            it.start()
+        val fallback = MediaCodec.createDecoderByType(mime)
+        try {
+            fallback.configure(format, null, null, 0)
+            fallback.start()
+            return fallback
+        } catch (error: Throwable) {
+            runCatching { fallback.stop() }
+            runCatching { fallback.release() }
+            throw error
         }
     }
     private fun decodeUntil(session: Session, targetUs: Long, maxEdge: Int): Bitmap? {
@@ -221,49 +222,64 @@ internal class SequentialVideoFrameDecoder {
         return null
     }
 
+    /**
+     * Convert the decoder's YUV image directly into a downscaled ARGB bitmap.
+     * Avoids the old YUV -> NV21 -> JPEG -> Bitmap roundtrip, which allocated
+     * multiple full-frame buffers and spent CPU time compressing a preview.
+     */
     private fun imageToBitmap(image: Image, rotation: Int, maxEdge: Int): Bitmap? {
         val crop = image.cropRect
         val sourceWidth = crop.width()
         val sourceHeight = crop.height()
         if (sourceWidth < 2 || sourceHeight < 2) return null
-        val scale = ceil(max(sourceWidth, sourceHeight).toFloat() /
-            maxEdge.coerceAtLeast(160).toFloat()).toInt().coerceAtLeast(1)
-        val width = (sourceWidth / scale).coerceAtLeast(2).let { if (it % 2 == 0) it else it - 1 }
-        val height = (sourceHeight / scale).coerceAtLeast(2).let { if (it % 2 == 0) it else it - 1 }
+
+        val scale = ceil(
+            max(sourceWidth, sourceHeight).toFloat() /
+                maxEdge.coerceAtLeast(160).toFloat()
+        ).toInt().coerceAtLeast(1)
+        val width = (sourceWidth / scale).coerceAtLeast(1)
+        val height = (sourceHeight / scale).coerceAtLeast(1)
         val planes = image.planes
         if (planes.size < 3) return null
+
         val yPlane = planes[0]
         val uPlane = planes[1]
         val vPlane = planes[2]
-        val yBuffer = yPlane.buffer
-        val uBuffer = uPlane.buffer
-        val vBuffer = vPlane.buffer
-        val nv21 = ByteArray(width * height * 3 / 2)
-        var offset = 0
+        val yBuffer = yPlane.buffer.duplicate()
+        val uBuffer = uPlane.buffer.duplicate()
+        val vBuffer = vPlane.buffer.duplicate()
+        val yBase = yBuffer.position()
+        val uBase = uBuffer.position()
+        val vBase = vBuffer.position()
+        val pixels = IntArray(width * height)
 
         for (row in 0 until height) {
-            val sourceY = crop.top + minOf(row * scale, sourceHeight - 1)
-            val rowStart = sourceY * yPlane.rowStride + crop.left * yPlane.pixelStride
+            val sourceY = (crop.top + row * scale).coerceAtMost(crop.bottom - 1)
+            val yRow = yBase + sourceY * yPlane.rowStride
+            val chromaY = sourceY / 2
+            val uRow = uBase + chromaY * uPlane.rowStride
+            val vRow = vBase + chromaY * vPlane.rowStride
             for (column in 0 until width) {
-                val sourceX = crop.left + minOf(column * scale, sourceWidth - 1)
-                nv21[offset++] = yBuffer.get(rowStart + (sourceX - crop.left) * yPlane.pixelStride)
-            }
-        }
-        for (row in 0 until height / 2) {
-            val sourceY = crop.top / 2 + minOf(row * scale, sourceHeight / 2 - 1)
-            val uRow = sourceY * uPlane.rowStride + (crop.left / 2) * uPlane.pixelStride
-            val vRow = sourceY * vPlane.rowStride + (crop.left / 2) * vPlane.pixelStride
-            for (column in 0 until width / 2) {
-                val sourceX = minOf(column * scale, sourceWidth / 2 - 1)
-                nv21[offset++] = vBuffer.get(vRow + sourceX * vPlane.pixelStride)
-                nv21[offset++] = uBuffer.get(uRow + sourceX * uPlane.pixelStride)
+                val sourceX = (crop.left + column * scale).coerceAtMost(crop.right - 1)
+                val yIndex = yRow + sourceX * yPlane.pixelStride
+                val chromaX = sourceX / 2
+                val uIndex = uRow + chromaX * uPlane.pixelStride
+                val vIndex = vRow + chromaX * vPlane.pixelStride
+
+                val luminance = (yBuffer.get(yIndex).toInt() and 0xff) - 16
+                val u = (uBuffer.get(uIndex).toInt() and 0xff) - 128
+                val v = (vBuffer.get(vIndex).toInt() and 0xff) - 128
+                val y = luminance.coerceAtLeast(0)
+                val red = ((298 * y + 409 * v + 128) shr 8).coerceIn(0, 255)
+                val green = ((298 * y - 100 * u - 208 * v + 128) shr 8).coerceIn(0, 255)
+                val blue = ((298 * y + 516 * u + 128) shr 8).coerceIn(0, 255)
+                pixels[row * width + column] =
+                    (0xff shl 24) or (red shl 16) or (green shl 8) or blue
             }
         }
 
-        val bytes = ByteArrayOutputStream()
-        if (!YuvImage(nv21, ImageFormat.NV21, width, height, null)
-                .compressToJpeg(Rect(0, 0, width, height), 82, bytes)) return null
-        var bitmap = BitmapFactory.decodeByteArray(bytes.toByteArray(), 0, bytes.size()) ?: return null
+        var bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        bitmap.setPixels(pixels, 0, width, 0, 0, width, height)
         if (rotation % 360 != 0) {
             val matrix = android.graphics.Matrix().apply { postRotate(rotation.toFloat()) }
             val rotated = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)

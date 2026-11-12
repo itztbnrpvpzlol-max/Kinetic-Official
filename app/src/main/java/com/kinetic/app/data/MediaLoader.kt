@@ -335,13 +335,20 @@ object MediaLoader {
         maxEdge: Int = 320,
         minimumTimeSec: Float = 0f,
         maximumTimeSec: Float = Float.POSITIVE_INFINITY
-    ): Int = withContext(MediaWorkers.cacheDispatcher) {
+    ): List<Float> = withContext(MediaWorkers.cacheDispatcher) {
         val fps = sampleFps.coerceAtLeast(1)
         val before = beforeFrames.coerceIn(0, 8)
         val after = afterFrames.coerceIn(0, 12)
         val step = 1f / fps.toFloat()
-        val times = (0..(before + after)).map { index ->
-            (centerTimeSec + (index - before) * step)
+        val offsets = buildList {
+            add(0)
+            for (distance in 1..maxOf(before, after)) {
+                if (distance <= after) add(distance)
+                if (distance <= before) add(-distance)
+            }
+        }
+        val times = offsets.map { offset ->
+            (centerTimeSec + offset * step)
                 .coerceIn(minimumTimeSec.coerceAtLeast(0f), maximumTimeSec)
         }.distinctBy { (it * fps).toInt() }
 
@@ -356,12 +363,9 @@ object MediaLoader {
             )
         }
 
-        var residentPrefix = 0
-        for (time in times) {
-            if (!hasCachedVideoFrame(uri, time, fps, maxEdge)) break
-            residentPrefix++
-        }
-        residentPrefix
+        // Return the exact resident samples so the timeline can draw accurate
+        // cache ticks even when the playhead sample is ready before its neighbors.
+        times.filter { hasCachedVideoFrame(uri, it, fps, maxEdge) }
     }
 
     /**

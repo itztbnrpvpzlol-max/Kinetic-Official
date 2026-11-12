@@ -102,7 +102,7 @@ fun CpuPreviewCanvas(editor: EditorState, modifier: Modifier = Modifier) {
                 .coerceAtMost(maximumTime)
             val signature = rawUri + "|" + layer.srcOffset + "|" + layer.srcLength + "|" + fps + "|" + edge
 
-            val readyFrames = MediaLoader.prefetchVideoFrameWindow(
+            val readyTimes = MediaLoader.prefetchVideoFrameWindow(
                 ctx = ctx,
                 uri = uri,
                 centerTimeSec = sourceTime,
@@ -118,7 +118,7 @@ fun CpuPreviewCanvas(editor: EditorState, modifier: Modifier = Modifier) {
                 signature = signature,
                 startSec = windowStart,
                 targetEndSec = windowEnd,
-                readyFrames = readyFrames,
+                readyTimesSec = readyTimes,
                 totalFrames = beforeFrames + afterFrames + 1
             )
         }

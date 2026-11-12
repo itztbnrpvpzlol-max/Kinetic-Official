@@ -15,7 +15,8 @@ object TimelineRamCache {
         val preparedUntilSec: Float,
         val targetEndSec: Float,
         val readyFrames: Int,
-        val totalFrames: Int
+        val totalFrames: Int,
+        val readyTimesSec: List<Float>
     )
 
     val windows = mutableStateMapOf<String, Window>()
@@ -28,7 +29,7 @@ object TimelineRamCache {
         signature: String,
         startSec: Float,
         targetEndSec: Float,
-        readyFrames: Int,
+        readyTimesSec: List<Float>,
         totalFrames: Int
     ) {
         if (signatures[layerId] != signature) {
@@ -38,11 +39,12 @@ object TimelineRamCache {
         val start = startSec.coerceAtLeast(0f)
         val end = targetEndSec.coerceAtLeast(start)
         val total = totalFrames.coerceAtLeast(0)
-        val ready = readyFrames.coerceIn(0, total)
-        val preparedUntil = if (total == 0) start else {
-            start + (end - start) * (ready.toFloat() / total.toFloat())
-        }
-        windows[layerId] = Window(start, preparedUntil, end, ready, total)
+        val readyTimes = readyTimesSec.distinct().filter { it >= start && it <= end }.sorted()
+        val ready = readyTimes.size.coerceIn(0, total)
+        // Kept for compatibility with older UI consumers; exact readiness is
+        // represented by readyTimesSec because centered prefetch is not a prefix.
+        val preparedUntil = readyTimes.lastOrNull() ?: start
+        windows[layerId] = Window(start, preparedUntil, end, ready, total, readyTimes)
     }
 
     fun invalidate() {
