@@ -333,12 +333,25 @@ Java_com_kinetic_app_engine_NativeRenderEngine_nativeGlDrawExternalTexture(
         if (matrix) env->ReleaseFloatArrayElements(textureMatrix, matrix, JNI_ABORT);
         return;
     }
-    drawNativeTexture(gExternalProgram, gExternalPosition, gExternalUv,
-        gExternalSampler, gExternalAlpha, gExternalGray, GL_TEXTURE_EXTERNAL_OES,
-        textureId, data, alpha, gray, blendMode);
+    glUseProgram(gExternalProgram);
+    glEnableVertexAttribArray(static_cast<GLuint>(gExternalPosition));
+    glVertexAttribPointer(static_cast<GLuint>(gExternalPosition), 2, GL_FLOAT, GL_FALSE,
+                          4 * sizeof(jfloat), data);
+    glEnableVertexAttribArray(static_cast<GLuint>(gExternalUv));
+    glVertexAttribPointer(static_cast<GLuint>(gExternalUv), 2, GL_FLOAT, GL_FALSE,
+                          4 * sizeof(jfloat), data + 2);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_EXTERNAL_OES, static_cast<GLuint>(textureId));
+    glUniform1i(gExternalSampler, 0);
+    glUniform1f(gExternalAlpha, alpha);
+    glUniform1f(gExternalGray, gray);
     glUniformMatrix4fv(gExternalMatrix, 1, GL_FALSE, matrix);
-    // Re-submit the external pass with its transform uniform active.
-    // The first draw above is intentionally suppressed by resetting the program below.
+    applyNativeBlend(blendMode);
+    glEnable(GL_BLEND);
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    glDisable(GL_BLEND);
+    glDisableVertexAttribArray(static_cast<GLuint>(gExternalPosition));
+    glDisableVertexAttribArray(static_cast<GLuint>(gExternalUv));
     env->ReleaseFloatArrayElements(vertices, data, JNI_ABORT);
     env->ReleaseFloatArrayElements(textureMatrix, matrix, JNI_ABORT);
 }
