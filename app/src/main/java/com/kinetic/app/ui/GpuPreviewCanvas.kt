@@ -350,7 +350,7 @@ private fun HardwareVideoLayer(
                 rotationZ = rotation
                 alpha = opacity
             },
-        update = { player.setVideoTextureView(it) }
+        update = { }
     )
 }
 
@@ -446,7 +446,7 @@ private fun DirectVideoPreviewCanvas(
             modifier = Modifier
                 .fillMaxWidth((layer.width / COMP_W).coerceIn(0.01f, 1f))
                 .fillMaxHeight((layer.height / COMP_H).coerceIn(0.01f, 1f)),
-            update = { view -> player.setVideoTextureView(view) }
+            update = { }
         )
     }
 }
@@ -536,7 +536,7 @@ private fun TextureVideoLayer(
                 rotationZ = rotation
                 alpha = opacity
             },
-        update = { player.setVideoTextureView(it) }
+        update = { }
     )
 }
 
