@@ -186,9 +186,10 @@ object MediaLoader {
                 durationUs.toDouble() * sampleRate * channels / 1_000_000.0 / bins else 0.0
 
             extractor.selectTrack(track)
-            decoder = MediaCodec.createDecoderByType(mime)
-            decoder.configure(inputFormat, null, null, 0)
-            decoder.start()
+            val codec = MediaCodec.createDecoderByType(mime)
+            decoder = codec
+            codec.configure(inputFormat, null, null, 0)
+            codec.start()
             val info = MediaCodec.BufferInfo()
             var inputDone = false
             var outputDone = false
@@ -196,29 +197,29 @@ object MediaLoader {
 
             while (!outputDone && SystemClock.elapsedRealtime() < deadline) {
                 if (!inputDone) {
-                    val inputIndex = decoder.dequeueInputBuffer(10_000L)
+                    val inputIndex = codec.dequeueInputBuffer(10_000L)
                     if (inputIndex >= 0) {
-                        val inputBuffer = decoder.getInputBuffer(inputIndex)
+                        val inputBuffer = codec.getInputBuffer(inputIndex)
                         if (inputBuffer == null) {
-                            decoder.queueInputBuffer(inputIndex, 0, 0, 0L, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                            codec.queueInputBuffer(inputIndex, 0, 0, 0L, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
                             inputDone = true
                         } else {
                             inputBuffer.clear()
                             val size = extractor.readSampleData(inputBuffer, 0)
                             if (size < 0) {
-                                decoder.queueInputBuffer(inputIndex, 0, 0, 0L, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                                codec.queueInputBuffer(inputIndex, 0, 0, 0L, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
                                 inputDone = true
                             } else {
-                                decoder.queueInputBuffer(inputIndex, 0, size, extractor.sampleTime, 0)
+                                codec.queueInputBuffer(inputIndex, 0, size, extractor.sampleTime, 0)
                                 extractor.advance()
                             }
                         }
                     }
                 }
 
-                when (val outputIndex = decoder.dequeueOutputBuffer(info, 10_000L)) {
+                when (val outputIndex = codec.dequeueOutputBuffer(info, 10_000L)) {
                     MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
-                        val outputFormat = decoder.outputFormat
+                        val outputFormat = codec.outputFormat
                         if (outputFormat.containsKey(MediaFormat.KEY_SAMPLE_RATE))
                             sampleRate = outputFormat.getInteger(MediaFormat.KEY_SAMPLE_RATE).coerceAtLeast(1)
                         if (outputFormat.containsKey(MediaFormat.KEY_CHANNEL_COUNT))
@@ -229,7 +230,7 @@ object MediaLoader {
                     MediaCodec.INFO_TRY_AGAIN_LATER, MediaCodec.INFO_OUTPUT_BUFFERS_CHANGED -> Unit
                     else -> if (outputIndex >= 0) {
                         if (info.size > 0 && info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG == 0) {
-                            decoder.getOutputBuffer(outputIndex)?.let { raw ->
+                            codec.getOutputBuffer(outputIndex)?.let { raw ->
                                 raw.position(info.offset)
                                 raw.limit(info.offset + info.size)
                                 val pcm = raw.slice().order(java.nio.ByteOrder.LITTLE_ENDIAN)
@@ -255,7 +256,7 @@ object MediaLoader {
                             }
                         }
                         if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) outputDone = true
-                        decoder.releaseOutputBuffer(outputIndex, false)
+                        codec.releaseOutputBuffer(outputIndex, false)
                     }
                 }
             }

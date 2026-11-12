@@ -13,7 +13,6 @@ import android.opengl.GLSurfaceView
 import android.opengl.GLUtils
 import android.os.Handler
 import android.os.Looper
-import android.os.HandlerThread
 import android.os.SystemClock
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -143,10 +142,6 @@ private fun MultiVideoPreviewCanvas(
     qualityScale: Float
 ) {
     val context = LocalContext.current
-    val playbackThread = remember(context) { HandlerThread("KineticMultiVideoPreview").apply { start() } }
-    DisposableEffect(playbackThread) {
-        onDispose { playbackThread.quitSafely() }
-    }
     BoxWithConstraints(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         val fitScale = minOf(maxWidth.value / COMP_W, maxHeight.value / COMP_H)
         val compositionWidth = (COMP_W * fitScale).dp
@@ -159,8 +154,8 @@ private fun MultiVideoPreviewCanvas(
                     if (uri != null) {
                         val maxW = (COMP_W * qualityScale).toInt().coerceAtLeast(240)
                         val maxH = (COMP_H * qualityScale).toInt().coerceAtLeast(135)
-                        val player = remember(uri, playbackThread) {
-                            ExoPlayer.Builder(context).setLooper(playbackThread.looper).build().apply {
+                        val player = remember(uri) {
+                            ExoPlayer.Builder(context).build().apply {
                                 trackSelectionParameters = TrackSelectionParameters.Builder(context)
                                     .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, true)
                                     .setMaxVideoSize(maxW, maxH)
@@ -224,7 +219,6 @@ private fun HardwareVideoLayer(
     AndroidView(
         factory = { viewContext ->
             PlayerView(viewContext).apply {
-                setUseTextureView(true)
                 this.player = player
                 useController = false
                 resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
