@@ -54,8 +54,6 @@ import com.kinetic.app.model.EditorState
 import com.kinetic.app.model.LayerType
 import com.kinetic.app.model.PropId
 import com.kinetic.app.model.layerMatrix
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
 import java.nio.FloatBuffer
 import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
@@ -480,7 +478,6 @@ private class CompositionGlRenderer(
     // Reuse frame geometry arrays on the GL thread to avoid per-frame heap
     // churn and garbage-collection pauses during composition playback.
     private val pointScratch = FloatArray(8)
-    private val quadScratch = FloatArray(16)
     private val selectionScratch = FloatArray(8)
     private val activeTextureIds = HashSet<String>()
     private val fingerprintMatrixScratch = FloatArray(9)
@@ -507,8 +504,6 @@ private class CompositionGlRenderer(
     private var cachedCompositionFingerprint = Long.MIN_VALUE
     private var viewportWidth = 1
     private var viewportHeight = 1
-    private val vertices = ByteBuffer.allocateDirect(16 * 4).order(ByteOrder.nativeOrder()).asFloatBuffer()
-    private val solidVertices = ByteBuffer.allocateDirect(8 * 4).order(ByteOrder.nativeOrder()).asFloatBuffer()
 
     private data class TextureEntry(val id: Int, val bitmap: Bitmap)
     private data class VideoOutput(
@@ -784,10 +779,6 @@ private class CompositionGlRenderer(
         }
     }
 
-    /**
-     * Packs the ordered scene once and lets the native KRE renderer issue all
-     * GLES3 draw calls. Kotlin retains Android Bitmap/Surface lifecycle only.
-     */
     /**
      * Packs layer state once. KRE evaluates transforms, viewport geometry,
      * texture sampling and the ordered GLES3 draw pass natively.
