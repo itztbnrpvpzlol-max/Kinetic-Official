@@ -10,6 +10,7 @@ import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.Typeface
 import android.net.Uri
+import kotlinx.coroutines.delay
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.runtime.Composable
@@ -37,39 +38,79 @@ import android.graphics.Path as AndroidPath
 fun CpuPreviewCanvas(editor: EditorState, modifier: Modifier = Modifier) {
     val ctx = LocalContext.current
     val bitmaps = remember { mutableStateMapOf<String, Bitmap>() }
+    val latestTimelineTime = rememberUpdatedState(editor.time)
+    val latestPlaying = rememberUpdatedState(editor.playing)
 
-    // load image / video frames for layers that are visible at the playhead
-    val t = editor.time
-    for (l in editor.layers) {
-        val uri = l.uri
-        if (uri != null && (l.type == LayerType.IMAGE || l.type == LayerType.VIDEO)) {
-            val active = l.activeAt(t)
-            val src = ((t - l.start).coerceAtLeast(0f) * l.speed + l.srcOffset).coerceAtLeast(0f)
-            // Decode video preview frames at a bounded rate. Scrubbing and playback
-            // share the same bucket size so toggling transport doesn't invalidate cache.
-            val bucket = if (!active) -1 else if (l.type == LayerType.VIDEO) (src * 12f).toInt() else 0
-            key(l.id) {
-                DisposableEffect(l.id) {
-                    onDispose { bitmaps.remove(l.id) }
+    // Keep one request loop alive per layer. MediaMetadataRetriever performs
+    // blocking native work that cannot be cancelled reliably; restarting a
+    // LaunchedEffect for every frame bucket can leave obsolete decodes queued.
+    for (layer in editor.layers) {
+        val uri = layer.uri
+        if (uri != null && (layer.type == LayerType.IMAGE || layer.type == LayerType.VIDEO)) {
+            key(layer.id) {
+                DisposableEffect(layer.id) {
+                    onDispose { bitmaps.remove(layer.id) }
                 }
-                // Track the newest requested bucket independently of this
-                // coroutine. MediaMetadataRetriever calls can block while a
-                // previous decode finishes; never publish that stale result
-                // after the playhead has already advanced.
-                val latestBucket = rememberUpdatedState(bucket)
-                val playbackSource = Uri.parse(uri)
-                val frameEdge = if (editor.playing && l.type == LayerType.VIDEO) 320 else 640
-                LaunchedEffect(uri, bucket, editor.playing) {
-                    if (bucket >= 0) {
-                        val frame = MediaLoader.bitmapFor(
-                            ctx, playbackSource, l.type, src, 12, frameEdge,
-                            persistToDisk = !editor.playing
-                        )
-                        if (latestBucket.value == bucket && frame != null) {
-                            bitmaps[l.id] = frame
+                LaunchedEffect(
+                    uri, layer.type, layer.start, layer.duration,
+                    layer.srcOffset, layer.speed
+                ) {
+                    val source = Uri.parse(uri)
+                    var lastBucket = Int.MIN_VALUE
+                    var lastFrameEdge = 0
+
+                    while (true) {
+                        val timelineTime = latestTimelineTime.value
+                        val playing = latestPlaying.value
+                        if (!layer.activeAt(timelineTime)) {
+                            if (lastBucket != -1) bitmaps.remove(layer.id)
+                            lastBucket = -1
+                            lastFrameEdge = 0
+                            delay(16L)
+                            continue
                         }
-                    } else {
-                        bitmaps.remove(l.id)
+
+                        val sourceTime = if (layer.type == LayerType.VIDEO) {
+                            ((timelineTime - layer.start).coerceAtLeast(0f) *
+                                layer.speed + layer.srcOffset).coerceAtLeast(0f)
+                        } else 0f
+                        val bucket = if (layer.type == LayerType.VIDEO) {
+                            (sourceTime * 12f).toInt()
+                        } else 0
+                        val frameEdge = if (playing && layer.type == LayerType.VIDEO) 320 else 640
+
+                        if (bucket != lastBucket || frameEdge != lastFrameEdge) {
+                            lastBucket = bucket
+                            lastFrameEdge = frameEdge
+                            val frame = MediaLoader.bitmapFor(
+                                ctx, source, layer.type, sourceTime,
+                                sampleFps = 12,
+                                maxEdge = frameEdge,
+                                persistToDisk = !playing
+                            )
+
+                            // Keep the last good frame visible if this decode
+                            // completed after the playhead moved on. A single
+                            // bucket of lag is acceptable during playback.
+                            val currentTime = latestTimelineTime.value
+                            val currentSourceTime = if (layer.type == LayerType.VIDEO) {
+                                ((currentTime - layer.start).coerceAtLeast(0f) *
+                                    layer.speed + layer.srcOffset).coerceAtLeast(0f)
+                            } else 0f
+                            val currentBucket = if (layer.type == LayerType.VIDEO) {
+                                (currentSourceTime * 12f).toInt()
+                            } else 0
+                            val currentEdge = if (
+                                latestPlaying.value && layer.type == LayerType.VIDEO
+                            ) 320 else 640
+                            val maxLag = if (latestPlaying.value) 1 else 0
+                            if (frame != null && currentEdge == frameEdge &&
+                                currentBucket >= bucket && currentBucket - bucket <= maxLag
+                            ) {
+                                bitmaps[layer.id] = frame
+                            }
+                        }
+                        kotlinx.coroutines.delay(16L)
                     }
                 }
             }
