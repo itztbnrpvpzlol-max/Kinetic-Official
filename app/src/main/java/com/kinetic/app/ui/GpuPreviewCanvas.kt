@@ -80,9 +80,9 @@ private data class GpuScene(
     val background: Int = 0xFF000000.toInt()
 )
 
-private fun supportsGles2(context: Context): Boolean = runCatching {
+private fun supportsGles3(context: Context): Boolean = runCatching {
     val manager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
-    manager.deviceConfigurationInfo.reqGlEsVersion >= 0x20000
+    manager.deviceConfigurationInfo.reqGlEsVersion >= 0x30000
 }.getOrDefault(false)
 
 @Composable
@@ -315,14 +315,9 @@ private fun GpuCompositionPreviewCanvas(
     val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
     val memoryInfo = ActivityManager.MemoryInfo()
     activityManager?.getMemoryInfo(memoryInfo)
-    // The Mali-T820 / 2 GB class of devices can expose GLES2 but still fail to
-    // present the SurfaceView reliably under memory pressure. Use the Canvas
-    // compatibility renderer there so shapes, text and decoded media remain
-    // visible; keep the native GLES composition path for stronger devices.
-    val constrainedDevice = activityManager?.isLowRamDevice == true ||
-        memoryInfo.totalMem < 3L * 1024L * 1024L * 1024L
-
-    if (gpuFailed.value || !supportsGles2(context) || constrainedDevice) {
+    // Low RAM is not a reason to disable the GPU. KRE uses a lower preview
+    // resolution and bounded decoder/cache budgets on constrained devices.
+    if (gpuFailed.value || !supportsGles3(context)) {
         CpuPreviewCanvas(editor, modifier)
     } else {
         val view = remember(context) { GpuPreviewSurfaceView(context) { gpuFailed.value = true } }
@@ -429,7 +424,7 @@ private class GpuPreviewSurfaceView(context: Context, onGpuFailure: () -> Unit) 
         }
     )
     init {
-        setEGLContextClientVersion(2)
+        setEGLContextClientVersion(3)
         setPreserveEGLContextOnPause(true)
         setRenderer(gpuRenderer)
         renderMode = RENDERMODE_WHEN_DIRTY
