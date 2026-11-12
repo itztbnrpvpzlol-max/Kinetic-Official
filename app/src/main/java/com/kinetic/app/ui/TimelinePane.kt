@@ -71,6 +71,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kinetic.app.data.MediaLoader
+import com.kinetic.app.data.MediaWorkers
 import com.kinetic.app.data.TimelineRamCache
 import com.kinetic.app.model.EditorState
 import com.kinetic.app.model.fmt
@@ -130,9 +131,10 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
     // Center the playhead under the preview transport's play control.
     // During playback, sample auto-scroll at the composition frame cadence.
     // The native clock remains authoritative; the scroll is only a visual follow.
+    val autoScrollIntervalMs = if (MediaWorkers.isConstrainedDevice) 100L else 50L
     LaunchedEffect(editor.playing, pps, paneW) {
         snapshotFlow { editor.time }
-            .let { times -> if (editor.playing) times.sample(50L) else times }
+            .let { times -> if (editor.playing) times.sample(autoScrollIntervalMs) else times }
             .collect { time ->
                 if (paneW > leftPx) {
                     val target = (time * pps * dens).coerceAtLeast(0f)
@@ -451,7 +453,7 @@ private fun Clip(editor: EditorState, layer: Layer, pps: Float, selected: Boolea
                 }
             }
         }
-        if (layer.type == LayerType.AUDIO) Waveform(layer.id, layer.uri)
+        if (layer.type == LayerType.AUDIO) Waveform(layer.id, layer.uri, editor.playing)
         Row(
             Modifier.align(Alignment.CenterStart).padding(start = 12.dp, end = 8.dp),
             verticalAlignment = Alignment.CenterVertically
@@ -486,10 +488,13 @@ private fun Clip(editor: EditorState, layer: Layer, pps: Float, selected: Boolea
 }
 
 @Composable
-private fun Waveform(seed: String, uri: String?) {
+private fun Waveform(seed: String, uri: String?, playing: Boolean) {
     val context = LocalContext.current
     var decodedPeaks by remember(seed, uri) { mutableStateOf<FloatArray?>(null) }
-    LaunchedEffect(uri) {
+    LaunchedEffect(uri, playing) {
+        // Audio waveform extraction is non-urgent and CPU intensive on long
+        // tracks; defer first-time extraction until transport is paused.
+        if (playing) return@LaunchedEffect
         decodedPeaks = if (uri == null) null else MediaLoader.waveform(context, Uri.parse(uri), 240)
     }
     // Keep drawing bounded while showing actual decoded PCM peaks when available.
