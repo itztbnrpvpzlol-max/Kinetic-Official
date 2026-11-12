@@ -319,7 +319,6 @@ private fun DirectVideoPreviewCanvas(
         onVideoReady(videoReady)
         onDispose {
             player.removeListener(listener)
-            onVideoReady(false)
             player.release()
         }
     }
