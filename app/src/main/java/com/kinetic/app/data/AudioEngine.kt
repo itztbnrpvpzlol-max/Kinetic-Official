@@ -294,7 +294,9 @@ class AudioEngine(context: Context) {
             val minBuffer = AudioTrack.getMinBufferSize(rate, channelMask, encoding)
                 .takeIf { it > 0 } ?: (rate / 5 * channelCount * 2)
             val bytesPerSample = if (encoding == AudioFormat.ENCODING_PCM_FLOAT) 4 else 2
-            val bufferBytes = max(minBuffer, rate / 5 * channelCount * bytesPerSample)
+            // Respect the platform minimum without forcing a 200 ms queue.
+            val targetBytes = rate / 10 * channelCount * bytesPerSample
+            val bufferBytes = max(minBuffer, targetBytes)
             val format = AudioFormat.Builder()
                 .setSampleRate(rate)
                 .setChannelMask(channelMask)
@@ -340,8 +342,8 @@ class AudioEngine(context: Context) {
     }
 
     companion object {
-        private const val DRIFT_CORRECTION_MS = 250L
-        private const val CORRECTION_COOLDOWN_MS = 700L
+        private const val DRIFT_CORRECTION_MS = 90L
+        private const val CORRECTION_COOLDOWN_MS = 250L
         private const val IDLE_PLAYER_RELEASE_MS = 2_500L
     }
 }
