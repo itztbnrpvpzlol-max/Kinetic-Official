@@ -191,6 +191,17 @@ class AudioEngine(context: Context) {
                 player.playWhenReady = false
                 inactiveSinceMs.putIfAbsent(id, now)
             }
+            // Release paused decoders after a short grace period. If playback
+            // resumes first, applySync clears the inactive timestamp and keeps
+            // the player warm.
+            handler.postDelayed({
+                if (!released) {
+                    val expired = inactiveSinceMs.filterValues {
+                        SystemClock.elapsedRealtime() - it >= IDLE_PLAYER_RELEASE_MS
+                    }.keys.toList()
+                    expired.forEach(::releasePlayer)
+                }
+            }, IDLE_PLAYER_RELEASE_MS)
         }
     }
 
