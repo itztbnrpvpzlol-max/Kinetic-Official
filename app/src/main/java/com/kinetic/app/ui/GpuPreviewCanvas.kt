@@ -244,8 +244,8 @@ private fun GpuCompositionPreviewCanvas(
                     if (bucket >= 0) {
                         MediaLoader.bitmapFor(
                             context, Uri.parse(uri), layer.type, sourceTime,
-                            if (qualityScale >= 0.75f) 12 else if (qualityScale >= 0.45f) 8 else 5,
-                            (1920f * qualityScale).toInt().coerceIn(240, 1920)
+                            sampleFps = 12,
+                            maxEdge = 480
                         )?.let { frames[layer.id] = it }
                     } else frames.remove(layer.id)
                 }
