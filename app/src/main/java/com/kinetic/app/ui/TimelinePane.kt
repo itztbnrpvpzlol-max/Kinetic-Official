@@ -71,6 +71,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kinetic.app.data.MediaLoader
+import com.kinetic.app.data.TimelineRamCache
 import com.kinetic.app.model.EditorState
 import com.kinetic.app.model.fmt
 import com.kinetic.app.model.Layer
@@ -415,6 +416,33 @@ private fun Clip(editor: EditorState, layer: Layer, pps: Float, selected: Boolea
                         contentScale = ContentScale.Crop,
                         alpha = 0.45f,
                         modifier = Modifier.weight(1f).fillMaxHeight()
+                    )
+                }
+            }
+        }
+        // The cyan strip is the contiguous decoded-frame window resident
+        // in RAM right now. It moves with the playhead as the LRU window rolls.
+        if (layer.type == LayerType.VIDEO) {
+            val ramWindow = TimelineRamCache.windows[layer.id]
+            Box(
+                Modifier.align(Alignment.BottomStart).fillMaxWidth()
+                    .height(2.dp).background(Color.White.copy(alpha = 0.12f))
+            )
+            if (ramWindow != null && ramWindow.cachedUntilSec > ramWindow.startSec) {
+                val clipDuration = layer.duration.coerceAtLeast(0.01f)
+                val startFraction = (
+                    (ramWindow.startSec - layer.start) / clipDuration
+                ).coerceIn(0f, 1f)
+                val cachedFraction = (
+                    (ramWindow.cachedUntilSec - ramWindow.startSec) / clipDuration
+                ).coerceIn(0f, 1f - startFraction)
+                if (cachedFraction > 0f) {
+                    Box(
+                        Modifier.align(Alignment.BottomStart)
+                            .offset(x = (startFraction * layer.duration * pps).dp)
+                            .width((cachedFraction * layer.duration * pps).coerceAtLeast(1f).dp)
+                            .height(2.dp)
+                            .background(Color(0xFF55D8FF))
                     )
                 }
             }
