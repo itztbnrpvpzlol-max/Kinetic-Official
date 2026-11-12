@@ -3,7 +3,6 @@ package com.kinetic.app.engine
 import android.content.Context
 import android.net.Uri
 import android.os.ParcelFileDescriptor
-import android.os.SystemClock
 import android.util.Log
 import android.view.Surface
 import java.util.concurrent.Executors
@@ -249,7 +248,7 @@ class FfmpegVideoPlayer(
             return
         }
         val instance = mpv ?: return
-        val nowNs = SystemClock.elapsedRealtimeNanos()
+        val nowNs = System.nanoTime()
         val safeMasterSpeed = sync.masterSpeed.coerceIn(0.1f, 4f)
         val safeClipSpeed = sync.clipSpeed.coerceIn(0.1f, 4f)
         val timelineNowUs = sync.positionUs.coerceAtLeast(0L) +

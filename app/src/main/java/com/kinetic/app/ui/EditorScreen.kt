@@ -205,7 +205,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                 // Sample frame position and transport time from one clock snapshot.
                 val clock = playback.clockSnapshot()
                 val elapsedSinceSnapshot = if (clock.playing) {
-                    ((SystemClock.elapsedRealtimeNanos() - clock.monotonicNs).coerceAtLeast(0L) /
+                    ((System.nanoTime() - clock.monotonicNs).coerceAtLeast(0L) /
                         1_000_000_000.0 * clock.speed).toFloat()
                 } else 0f
                 val transportTime = ((clock.positionUs / 1_000_000.0).toFloat() + elapsedSinceSnapshot)

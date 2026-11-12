@@ -1,6 +1,5 @@
 package com.kinetic.app.engine
 
-import android.os.SystemClock
 import kotlin.math.min
 
 /**
@@ -23,7 +22,7 @@ class NativePlaybackEngine {
     private var fallbackSpeed = 1f
     private var fallbackLooping = false
     private var fallbackPlaying = false
-    private var fallbackAnchorNs = SystemClock.elapsedRealtimeNanos()
+    private var fallbackAnchorNs = System.nanoTime()
     private var released = false
     private var fallbackGeneration = 1L
 
@@ -43,7 +42,7 @@ class NativePlaybackEngine {
         } else if (fallbackDuration > 0f) {
             fallbackPosition = min(fallbackPosition, fallbackDuration)
         }
-        fallbackAnchorNs = SystemClock.elapsedRealtimeNanos()
+        fallbackAnchorNs = System.nanoTime()
         fallbackGeneration++
     }
 
@@ -51,7 +50,7 @@ class NativePlaybackEngine {
         if (released) return
         val upper = if (fallbackDuration > 0f) fallbackDuration else Float.MAX_VALUE
         fallbackPosition = positionSeconds.coerceIn(0f, upper)
-        fallbackAnchorNs = SystemClock.elapsedRealtimeNanos()
+        fallbackAnchorNs = System.nanoTime()
         if (handle != 0L) nativeSeek(handle, fallbackPosition.toDouble())
         fallbackGeneration++
     }
@@ -64,7 +63,7 @@ class NativePlaybackEngine {
             if (fallbackDuration > 0f && fallbackPosition >= fallbackDuration) {
                 if (fallbackLooping) fallbackPosition = 0f else return
             }
-            fallbackAnchorNs = SystemClock.elapsedRealtimeNanos()
+            fallbackAnchorNs = System.nanoTime()
             fallbackPlaying = true
         }
         fallbackGeneration++
@@ -77,7 +76,7 @@ class NativePlaybackEngine {
         } else {
             fallbackPosition = fallbackPositionNow()
             fallbackPlaying = false
-            fallbackAnchorNs = SystemClock.elapsedRealtimeNanos()
+            fallbackAnchorNs = System.nanoTime()
         }
         fallbackGeneration++
     }
@@ -90,7 +89,7 @@ class NativePlaybackEngine {
 
     fun clockSnapshot(): ClockSnapshot {
         if (released) return ClockSnapshot((fallbackPosition.coerceAtLeast(0f) * 1_000_000f).toLong(),
-            SystemClock.elapsedRealtimeNanos(), fallbackSpeed, false, fallbackGeneration)
+            System.nanoTime(), fallbackSpeed, false, fallbackGeneration)
         if (handle != 0L) {
             val values = runCatching { nativeClockSnapshot(handle) }.getOrNull()
             if (values != null && values.size >= 5) return ClockSnapshot(
@@ -98,7 +97,7 @@ class NativePlaybackEngine {
                 (values[2] / 1_000_000f).coerceIn(0.1f, 4f), values[3] != 0L, values[4])
         }
         return ClockSnapshot((positionSeconds().coerceAtLeast(0f) * 1_000_000f).toLong(),
-            SystemClock.elapsedRealtimeNanos(), fallbackSpeed, fallbackPlaying, fallbackGeneration)
+            System.nanoTime(), fallbackSpeed, fallbackPlaying, fallbackGeneration)
     }
 
     /** Frame index sampled directly from the authoritative native monotonic clock. */
@@ -127,7 +126,7 @@ class NativePlaybackEngine {
 
     private fun fallbackPositionNow(): Float {
         if (!fallbackPlaying) return fallbackPosition
-        val now = SystemClock.elapsedRealtimeNanos()
+        val now = System.nanoTime()
         val elapsed = ((now - fallbackAnchorNs).coerceAtLeast(0L) / 1_000_000_000.0).toFloat()
         var next = fallbackPosition + elapsed * fallbackSpeed
         if (fallbackDuration > 0f && next >= fallbackDuration) {

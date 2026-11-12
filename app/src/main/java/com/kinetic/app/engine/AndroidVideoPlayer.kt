@@ -6,7 +6,6 @@ import android.media.MediaCodecList
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.net.Uri
-import android.os.SystemClock
 import android.os.Build
 import android.util.Log
 import android.view.Surface
@@ -132,7 +131,7 @@ class AndroidVideoPlayer(
         speed = value.coerceIn(0.1f, 4f)
         if (!hasMasterClock) {
             localAnchorPtsUs = lastOutputPtsUs
-            localAnchorNs = SystemClock.elapsedRealtimeNanos()
+            localAnchorNs = System.nanoTime()
         }
     }
 
@@ -141,7 +140,7 @@ class AndroidVideoPlayer(
         playing = true
         if (!hasMasterClock) {
             localAnchorPtsUs = lastOutputPtsUs
-            localAnchorNs = SystemClock.elapsedRealtimeNanos()
+            localAnchorNs = System.nanoTime()
         }
         lock.notifyAll()
     }
@@ -304,7 +303,7 @@ class AndroidVideoPlayer(
                             }
                         }
 
-                        val nowNs = SystemClock.elapsedRealtimeNanos()
+                        val nowNs = System.nanoTime()
                         val targetNs = if (render) targetPresentationNs(info.presentationTimeUs, nowNs) else nowNs
 
                         // Keep the Surface queue shallow. Queueing a long run of
@@ -312,7 +311,7 @@ class AndroidVideoPlayer(
                         if (render && isPlayingNow() && targetNs > nowNs + 80_000_000L) {
                             render = waitForPresentationWindow(targetNs, outputSurface)
                         }
-                        val presentNowNs = SystemClock.elapsedRealtimeNanos()
+                        val presentNowNs = System.nanoTime()
                         if (render && isPlayingNow() && targetNs < presentNowNs - frameDurationNs) {
                             render = false
                         }
@@ -417,7 +416,7 @@ class AndroidVideoPlayer(
      * than filling SurfaceTexture's BufferQueue and producing bursty playback.
      */
     private fun waitForPresentationWindow(targetNs: Long, outputSurface: Surface): Boolean {
-        while (targetNs - SystemClock.elapsedRealtimeNanos() > 80_000_000L) {
+        while (targetNs - System.nanoTime() > 80_000_000L) {
             synchronized(lock) {
                 if (stopping || released || surface !== outputSurface ||
                     pendingSeekUs != null || !playing
