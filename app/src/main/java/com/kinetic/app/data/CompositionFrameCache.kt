@@ -41,6 +41,7 @@ object CompositionFrameCache {
         override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount
     }
     @Volatile private var knownDiskBytes = -1L
+    private val diskWriteLock = Any()
 
     @Synchronized
     fun configure(memoryMb: Int) {
@@ -134,38 +135,40 @@ object CompositionFrameCache {
             renderCompositionFrame(context, layers, time, fps, width, height)
         } ?: return null
         val saved = withContext(Dispatchers.IO) {
-            val directory = frameDirectory(context).apply { mkdirs() }
-            val target = frameFile(context, key)
-            if (target.isFile) return@withContext true
-            val temporary = File(directory, "$key.part")
-            val encoded = runCatching {
-                FileOutputStream(temporary).use { output ->
-                    rendered.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, output)
+            synchronized(diskWriteLock) {
+                val directory = frameDirectory(context).apply { mkdirs() }
+                val target = frameFile(context, key)
+                if (target.isFile) return@synchronized true
+                val temporary = File(directory, "$key.part")
+                val encoded = runCatching {
+                    FileOutputStream(temporary).use { output ->
+                        rendered.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, output)
+                    }
+                }.getOrDefault(false)
+                if (!encoded) {
+                    temporary.delete()
+                    return@synchronized false
                 }
-            }.getOrDefault(false)
-            if (!encoded) {
-                temporary.delete()
-                return@withContext false
+                val maxBytes = diskLimitMb.coerceIn(128, 4096) * 1024L * 1024L
+                val currentBytes = if (knownDiskBytes < 0L) {
+                    directory.listFiles()?.filter { it.isFile && it.extension == "jpg" }
+                        ?.sumOf { it.length() } ?: 0L
+                } else knownDiskBytes
+                if (currentBytes + temporary.length() > maxBytes) {
+                    temporary.delete()
+                    knownDiskBytes = currentBytes
+                    return@synchronized false
+                }
+                val length = temporary.length()
+                val moved = temporary.renameTo(target)
+                if (!moved) {
+                    runCatching { temporary.copyTo(target, overwrite = true); temporary.delete() }
+                }
+                if (target.isFile) {
+                    knownDiskBytes = currentBytes + length
+                    true
+                } else false
             }
-            val maxBytes = diskLimitMb.coerceIn(128, 4096) * 1024L * 1024L
-            val currentBytes = if (knownDiskBytes < 0L) {
-                directory.listFiles()?.filter { it.isFile && it.extension == "jpg" }
-                    ?.sumOf { it.length() } ?: 0L
-            } else knownDiskBytes
-            if (currentBytes + temporary.length() > maxBytes) {
-                temporary.delete()
-                knownDiskBytes = currentBytes
-                return@withContext false
-            }
-            val length = temporary.length()
-            val moved = temporary.renameTo(target)
-            if (!moved) {
-                runCatching { temporary.copyTo(target, overwrite = true); temporary.delete() }
-            }
-            if (target.isFile) {
-                knownDiskBytes = currentBytes + length
-                true
-            } else false
         }
         if (!saved) {
             rendered.recycle()
@@ -209,13 +212,15 @@ object CompositionFrameCache {
             if (opacity <= 0f) continue
             val bitmap = when (layer.type) {
                 LayerType.IMAGE -> layer.uri?.let {
-                    MediaLoader.bitmapFor(context, Uri.parse(it), LayerType.IMAGE, 0f, 1, max(width, height), persistToDisk = false)
+                    // Persist downscaled source frames as reusable proxy frames so
+                    // subsequent composition renders do not decode the original again.
+                    MediaLoader.bitmapFor(context, Uri.parse(it), LayerType.IMAGE, 0f, 1, max(width, height), persistToDisk = true)
                 }
                 LayerType.VIDEO -> {
                     val uri = layer.uri ?: continue
                     val sourceTime = ((time - layer.start).coerceAtLeast(0f) * layer.speed + layer.srcOffset)
                         .coerceAtLeast(0f)
-                    MediaLoader.bitmapFor(context, Uri.parse(uri), LayerType.VIDEO, sourceTime, fps, max(width, height), persistToDisk = false)
+                    MediaLoader.bitmapFor(context, Uri.parse(uri), LayerType.VIDEO, sourceTime, fps, max(width, height), persistToDisk = true)
                 }
                 LayerType.TEXT, LayerType.SHAPE -> makeTextOrShapeBitmap(layer)
                 else -> null
