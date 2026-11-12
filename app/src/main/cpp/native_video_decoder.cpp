@@ -212,9 +212,6 @@ struct NativeVideoDecoder {
                         inputEos = true;
                     } else {
                         const int64_t pts = AMediaExtractor_getSampleTime(extractor);
-                        const uint32_t flags = AMediaExtractor_getSampleFlags(extractor) == AMEDIAEXTRACTOR_SAMPLE_FLAG_SYNC
-                            ? 0u : 0u;
-                        (void)flags;
                         AMediaCodec_queueInputBuffer(codec, static_cast<size_t>(inputIndex),
                             0, static_cast<size_t>(sampleSize), pts, 0);
                         AMediaExtractor_advance(extractor);

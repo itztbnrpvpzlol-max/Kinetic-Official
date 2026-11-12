@@ -3,8 +3,6 @@ package com.kinetic.app.engine
 import android.content.Context
 import android.net.Uri
 import android.view.Surface
-import android.os.ParcelFileDescriptor
-import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Hardware video decoder backed by NDK MediaExtractor/MediaCodec.
@@ -35,6 +33,10 @@ class NativeVideoPlayer(
         if (released) return@synchronized
         destroyDecoder()
         surface = null
+    }
+
+    fun updatePositionHint(targetMs: Long) = synchronized(lock) {
+        if (!released) positionMs = targetMs.coerceAtLeast(0L)
     }
 
     fun seekTo(targetMs: Long) = synchronized(lock) {

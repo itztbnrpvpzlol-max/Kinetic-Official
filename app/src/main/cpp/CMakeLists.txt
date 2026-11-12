@@ -3,6 +3,7 @@ project(kinetic_engine LANGUAGES CXX)
 
 add_library(kinetic_engine SHARED
     kinetic_engine.cpp
+    native_video_decoder.cpp
 )
 
 find_library(log-lib log)
@@ -12,4 +13,5 @@ target_compile_options(kinetic_engine PRIVATE -O3 -fno-exceptions -fno-rtti)
 target_link_libraries(kinetic_engine ${log-lib})
 
 find_library(android-lib android)
-target_link_libraries(kinetic_engine ${android-lib})
+find_library(mediandk-lib mediandk)
+target_link_libraries(kinetic_engine ${android-lib} ${mediandk-lib})
