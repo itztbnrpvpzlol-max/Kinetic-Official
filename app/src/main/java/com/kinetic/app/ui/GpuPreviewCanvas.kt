@@ -79,7 +79,12 @@ private fun supportsGles2(context: Context): Boolean = runCatching {
 }.getOrDefault(false)
 
 @Composable
-fun PreviewCanvas(editor: EditorState, modifier: Modifier = Modifier, qualityIndex: Int = 0) {
+fun PreviewCanvas(
+    editor: EditorState,
+    modifier: Modifier = Modifier,
+    qualityIndex: Int = 0,
+    onVideoReady: (Boolean) -> Unit = {}
+) {
     // The import browser already uses Media3's hardware video decoder. Use the
     // same playback path in the editor for a simple full-frame video composition,
     // rather than decoding still frames with MediaMetadataRetriever at 12 fps.
@@ -112,9 +117,12 @@ fun PreviewCanvas(editor: EditorState, modifier: Modifier = Modifier, qualityInd
     }
 
     when {
-        multiVideo != null -> MultiVideoPreviewCanvas(editor, multiVideo, modifier, qualityScale)
-        directVideo != null -> DirectVideoPreviewCanvas(editor, directVideo, modifier, qualityScale)
-        else -> GpuCompositionPreviewCanvas(editor, modifier, qualityScale)
+        multiVideo != null -> MultiVideoPreviewCanvas(editor, multiVideo, modifier, qualityScale, onVideoReady)
+        directVideo != null -> DirectVideoPreviewCanvas(editor, directVideo, modifier, qualityScale, onVideoReady)
+        else -> {
+            LaunchedEffect(editor.layers.map { it.id }, editor.playing) { onVideoReady(true) }
+            GpuCompositionPreviewCanvas(editor, modifier, qualityScale)
+        }
     }
 }
 
@@ -140,9 +148,17 @@ private fun MultiVideoPreviewCanvas(
     editor: EditorState,
     layers: List<com.kinetic.app.model.Layer>,
     modifier: Modifier,
-    qualityScale: Float
+    qualityScale: Float,
+    onVideoReady: (Boolean) -> Unit
 ) {
     val context = LocalContext.current
+    val readyById = remember(layers.map { it.id }) {
+        androidx.compose.runtime.mutableStateMapOf<String, Boolean>().apply {
+            layers.forEach { put(it.id, false) }
+        }
+    }
+    val allReady = layers.isNotEmpty() && layers.all { readyById[it.id] == true }
+    LaunchedEffect(layers.map { it.id }, allReady) { onVideoReady(allReady) }
     BoxWithConstraints(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         val fitScale = minOf(maxWidth.value / COMP_W, maxHeight.value / COMP_H)
         val compositionWidth = (COMP_W * fitScale).dp
@@ -169,7 +185,9 @@ private fun MultiVideoPreviewCanvas(
                         DisposableEffect(player) {
                             onDispose { player.release() }
                         }
-                        HardwareVideoLayer(editor, layer, player, fitScale)
+                        HardwareVideoLayer(
+                            editor, layer, player, fitScale, allReady
+                        ) { id, ready -> readyById[id] = ready }
                     }
                 }
             }
@@ -182,13 +200,30 @@ private fun HardwareVideoLayer(
     editor: EditorState,
     layer: com.kinetic.app.model.Layer,
     player: ExoPlayer,
-    fitScale: Float
+    fitScale: Float,
+    canStartPlayback: Boolean,
+    onReadyChanged: (String, Boolean) -> Unit
 ) {
+    var videoReady by remember(player) { androidx.compose.runtime.mutableStateOf(player.playbackState == Player.STATE_READY) }
+    DisposableEffect(player, layer.id) {
+        val listener = object : Player.Listener {
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                videoReady = playbackState == Player.STATE_READY
+                onReadyChanged(layer.id, videoReady)
+            }
+        }
+        player.addListener(listener)
+        onReadyChanged(layer.id, videoReady)
+        onDispose {
+            player.removeListener(listener)
+            onReadyChanged(layer.id, false)
+        }
+    }
     val sourceTime = ((editor.time - layer.start).coerceAtLeast(0f) * layer.speed + layer.srcOffset)
         .coerceAtLeast(0f)
     val sourcePositionMs = (sourceTime * 1000f).toLong()
-    LaunchedEffect(editor.playing, layer.id, layer.speed, player) {
-        if (editor.playing) {
+    LaunchedEffect(editor.playing, canStartPlayback, videoReady, layer.id, layer.speed, player) {
+        if (editor.playing && canStartPlayback && videoReady) {
             player.seekTo(sourcePositionMs)
             player.play()
         } else {
@@ -244,7 +279,8 @@ private fun DirectVideoPreviewCanvas(
     editor: EditorState,
     layer: com.kinetic.app.model.Layer,
     modifier: Modifier,
-    qualityScale: Float
+    qualityScale: Float,
+    onVideoReady: (Boolean) -> Unit
 ) {
     val context = LocalContext.current
     val uri = layer.uri ?: return
@@ -259,8 +295,21 @@ private fun DirectVideoPreviewCanvas(
             repeatMode = Player.REPEAT_MODE_OFF
         }
     }
+    var videoReady by remember(player) { androidx.compose.runtime.mutableStateOf(player.playbackState == Player.STATE_READY) }
     DisposableEffect(player) {
-        onDispose { player.release() }
+        val listener = object : Player.Listener {
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                videoReady = playbackState == Player.STATE_READY
+                onVideoReady(videoReady)
+            }
+        }
+        player.addListener(listener)
+        onVideoReady(videoReady)
+        onDispose {
+            player.removeListener(listener)
+            onVideoReady(false)
+            player.release()
+        }
     }
 
     val sourceTime = ((editor.time - layer.start).coerceAtLeast(0f) * layer.speed + layer.srcOffset)
@@ -273,11 +322,10 @@ private fun DirectVideoPreviewCanvas(
         player.setPlaybackSpeed(layer.speed.coerceIn(0.1f, 4f))
         player.seekTo(sourcePositionMs)
         player.prepare()
-        if (editor.playing) player.play()
     }
 
-    LaunchedEffect(editor.playing, layer.id, layer.speed) {
-        if (editor.playing) {
+    LaunchedEffect(editor.playing, videoReady, layer.id, layer.speed) {
+        if (editor.playing && videoReady) {
             player.seekTo(sourcePositionMs)
             player.play()
         } else {
