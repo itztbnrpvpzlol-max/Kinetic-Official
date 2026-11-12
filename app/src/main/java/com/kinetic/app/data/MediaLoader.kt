@@ -99,14 +99,14 @@ object MediaLoader {
         persistToDisk: Boolean = true
     ): Bitmap? = withContext(MediaWorkers.cpuDispatcher) {
         val bucket = if (type == LayerType.VIDEO) (timeSec * sampleFps.toFloat()).toInt() else 0
-        val key = if (type == LayerType.IMAGE) "$uri@image" else "$uri@$sampleFps@$maxEdge@$bucket"
+        val key = if (type == LayerType.IMAGE) "$uri@image@$maxEdge" else "$uri@$sampleFps@$maxEdge@$bucket"
         synchronized(key.intern()) {
             val hit = cache.get(key)
             if (hit != null) return@synchronized hit
             val diskFile = if (persistToDisk) previewFrameFile(ctx, key, type) else null
             val diskBitmap = diskFile?.takeIf { it.isFile }?.let { BitmapFactory.decodeFile(it.absolutePath) }
             val bmp = diskBitmap ?: try {
-                if (type == LayerType.IMAGE) decodeImage(ctx, uri) else videoFrame(ctx, uri, bucket / sampleFps.toFloat(), maxEdge)
+                if (type == LayerType.IMAGE) decodeImage(ctx, uri, maxEdge) else videoFrame(ctx, uri, bucket / sampleFps.toFloat(), maxEdge)
             } catch (e: Exception) {
                 null
             }
@@ -335,13 +335,13 @@ object MediaLoader {
         }
     }
 
-    private fun decodeImage(ctx: Context, uri: Uri): Bitmap? {
-        val b = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        ctx.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, b) }
+    private fun decodeImage(ctx: Context, uri: Uri, maxEdge: Int): Bitmap? {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        ctx.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
         var sample = 1
-        while (maxOf(b.outWidth, b.outHeight) / sample > 1600) sample *= 2
-        val o = BitmapFactory.Options().apply { inSampleSize = sample }
-        return ctx.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, o) }
+        while (maxOf(bounds.outWidth, bounds.outHeight) / sample > maxEdge.coerceAtLeast(240)) sample *= 2
+        val options = BitmapFactory.Options().apply { inSampleSize = sample }
+        return ctx.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, options) }
     }
 
     private fun videoFrame(ctx: Context, uri: Uri, sec: Float, maxEdge: Int): Bitmap? {
