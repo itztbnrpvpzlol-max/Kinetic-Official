@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import android.view.Surface
 import android.opengl.GLES11Ext
 import java.util.concurrent.ConcurrentHashMap
+import java.util.LinkedHashMap
 import java.util.concurrent.atomic.AtomicInteger
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
@@ -490,7 +491,16 @@ private class CompositionGlRenderer(
     private var solidProgram = 0
     private var externalProgram = 0
     private val videoOutputs = HashMap<String, VideoOutput>()
-    private val textures = HashMap<String, TextureEntry>()
+    // GPU source-frame texture cache: access-ordered and byte-budgeted. Inactive
+    // textures remain warm for quick timeline revisits, but active scene textures
+    // are protected from eviction while a frame is being composed.
+    private val textures = LinkedHashMap<String, TextureEntry>(16, 0.75f, true)
+    private var gpuTextureCacheBytes = 0L
+    private val gpuTextureCacheBudgetBytes = if (MediaWorkers.isConstrainedDevice) {
+        6L * 1024L * 1024L
+    } else {
+        24L * 1024L * 1024L
+    }
     // Reuse frame geometry arrays on the GL thread to avoid per-frame heap
     // churn and garbage-collection pauses during composition playback.
     private val pointScratch = FloatArray(8)
@@ -512,7 +522,7 @@ private class CompositionGlRenderer(
     private var viewportWidth = 1
     private var viewportHeight = 1
 
-    private data class TextureEntry(val id: Int, val bitmap: Bitmap)
+    private data class TextureEntry(val id: Int, val bitmap: Bitmap, val bytes: Long)
     private data class VideoOutput(
         val textureId: Int,
         val texture: SurfaceTexture,
@@ -635,6 +645,7 @@ private class CompositionGlRenderer(
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
         // A recreated EGL context invalidates every texture/program from the old context.
         textures.clear()
+        gpuTextureCacheBytes = 0L
         // The previous EGL context is gone; its GL names must not be deleted in
         // the new context, only forgotten.
         compositionCacheAllocated = false
@@ -689,14 +700,9 @@ private class CompositionGlRenderer(
             )
             activeTextureIds.clear()
             for (layer in current.layers) if (!layer.isVideo) activeTextureIds.add(layer.id)
-            val textureIterator = textures.entries.iterator()
-            while (textureIterator.hasNext()) {
-                val entry = textureIterator.next()
-                if (entry.key !in activeTextureIds) {
-                    GLES20.glDeleteTextures(1, intArrayOf(entry.value.id), 0)
-                    textureIterator.remove()
-                }
-            }
+            // Keep recently used source textures warm across playhead movement.
+            // Only inactive LRU entries are eligible for eviction.
+
             val scale = minOf(
                 viewportWidth.toFloat() / COMP_W.toFloat(),
                 viewportHeight.toFloat() / COMP_H.toFloat()
@@ -704,6 +710,7 @@ private class CompositionGlRenderer(
             val offsetX = (viewportWidth - COMP_W * scale) / 2f
             val offsetY = (viewportHeight - COMP_H * scale) / 2f
             drawComposition(current.layers)
+            trimGpuTextureCache(activeTextureIds)
             current.selected?.let { drawSelection(it, scale, offsetX, offsetY) }
             if (cacheReady) {
                 cachedCompositionFingerprint = fingerprint
@@ -802,7 +809,11 @@ private class CompositionGlRenderer(
     private fun textureFor(layerId: String, bitmap: Bitmap): Int? {
         val old = textures[layerId]
         if (old != null && old.bitmap === bitmap && old.id != 0) return old.id
-        if (old != null) GLES20.glDeleteTextures(1, intArrayOf(old.id), 0)
+        if (old != null) {
+            GLES20.glDeleteTextures(1, intArrayOf(old.id), 0)
+            gpuTextureCacheBytes = (gpuTextureCacheBytes - old.bytes).coerceAtLeast(0L)
+            textures.remove(layerId)
+        }
         val ids = IntArray(1)
         GLES20.glGenTextures(1, ids, 0)
         if (ids[0] == 0) return null
@@ -812,8 +823,22 @@ private class CompositionGlRenderer(
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
         GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, bitmap, 0)
-        textures[layerId] = TextureEntry(ids[0], bitmap)
+        val bytes = bitmap.byteCount.toLong().coerceAtLeast(0L)
+        textures[layerId] = TextureEntry(ids[0], bitmap, bytes)
+        gpuTextureCacheBytes += bytes
         return ids[0]
+    }
+
+    private fun trimGpuTextureCache(protectedIds: Set<String>) {
+        if (gpuTextureCacheBytes <= gpuTextureCacheBudgetBytes) return
+        val iterator = textures.entries.iterator()
+        while (iterator.hasNext() && gpuTextureCacheBytes > gpuTextureCacheBudgetBytes) {
+            val entry = iterator.next()
+            if (entry.key in protectedIds) continue
+            GLES20.glDeleteTextures(1, intArrayOf(entry.value.id), 0)
+            gpuTextureCacheBytes = (gpuTextureCacheBytes - entry.value.bytes).coerceAtLeast(0L)
+            iterator.remove()
+        }
     }
 
     private fun drawSelection(layer: GpuLayer, scale: Float, ox: Float, oy: Float) {
@@ -847,6 +872,7 @@ private class CompositionGlRenderer(
         if (textures.isNotEmpty()) {
             GLES20.glDeleteTextures(textures.size, textures.values.map { it.id }.toIntArray(), 0)
             textures.clear()
+            gpuTextureCacheBytes = 0L
         }
         NativeRenderEngine.nativeGlRelease()
         program = 0; solidProgram = 0; externalProgram = 0
