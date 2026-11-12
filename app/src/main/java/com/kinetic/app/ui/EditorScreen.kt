@@ -1,6 +1,8 @@
 package com.kinetic.app.ui
 
 import android.net.Uri
+import android.content.ComponentCallbacks2
+import android.content.res.Configuration
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -126,9 +128,24 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
             MediaLoader.releaseAll()
         }
     }
+    DisposableEffect(ctx) {
+        val callbacks = object : ComponentCallbacks2 {
+            override fun onTrimMemory(level: Int) {
+                MediaLoader.trimMemory(level)
+            }
+
+            override fun onLowMemory() {
+                MediaLoader.trimMemory(ComponentCallbacks2.TRIM_MEMORY_COMPLETE)
+            }
+
+            override fun onConfigurationChanged(newConfig: Configuration) = Unit
+        }
+        ctx.applicationContext.registerComponentCallbacks(callbacks)
+        onDispose { ctx.applicationContext.unregisterComponentCallbacks(callbacks) }
+    }
     val projectStore = remember { ProjectStore(ctx) }
     LaunchedEffect(editor.settings.previewMemoryMb) {
-        MediaLoader.configureCache(editor.settings.previewMemoryMb)
+        MediaLoader.configureCache(ctx, editor.settings.previewMemoryMb)
     }
     LaunchedEffect(editor.layers.map { it.id to it.uri }) { audio.prepare(editor.layers) }
 
@@ -156,6 +173,38 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
             .forEach { layer ->
                 PreviewProxyStore.getOrCreate(ctx, Uri.parse(layer.uri!!), targetHeight)
             }
+    }
+
+    // Keep a very small RAM look-ahead window warm during playback. The
+    // cache worker runs at the lowest thread priority, so live frame decoding
+    // and audio remain ahead of prefetch work on constrained devices.
+    LaunchedEffect(
+        editor.playing,
+        editor.layers.map { listOf(it.id, it.uri, it.visible, it.type) }
+    ) {
+        if (!editor.playing) return@LaunchedEffect
+        while (editor.playing) {
+            val playhead = editor.time
+            val maxLayers = if (MediaWorkers.isConstrainedDevice) 1 else 2
+            val activeVideos = editor.layers.filter {
+                it.visible && it.type == LayerType.VIDEO && it.uri != null && it.activeAt(playhead)
+            }.take(maxLayers)
+            for (layer in activeVideos) {
+                val sourceSpeed = layer.speed.coerceIn(0.1f, 4f)
+                val sourceTime = (
+                    (playhead - layer.start).coerceAtLeast(0f) * sourceSpeed + layer.srcOffset
+                ).coerceAtLeast(0f)
+                val sourceStep = sourceSpeed / 12f
+                MediaLoader.prefetchUpcomingVideoFrames(
+                    ctx,
+                    Uri.parse(layer.uri!!),
+                    sourceTime + sourceStep,
+                    frameCount = if (MediaWorkers.isConstrainedDevice) 1 else 2,
+                    sourceStepSec = sourceStep
+                )
+            }
+            delay(180L)
+        }
     }
 
     // Timeline composition-frame caching is intentionally disabled. It was
