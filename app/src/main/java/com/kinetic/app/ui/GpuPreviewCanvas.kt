@@ -172,7 +172,7 @@ private fun GpuCompositionPreviewCanvas(
     val frames = remember { mutableStateMapOf<String, Bitmap>() }
     val textTextures = remember { mutableMapOf<String, Pair<Int, Bitmap>>() }
     val failedVideoSources = remember { mutableStateMapOf<String, String>() }
-    // Hardware decoder instances are scarce system resources, not a thread pool.
+    // Native decoder instances are scarce system resources, not a thread pool.
     // Excess video layers use the existing bitmap preview path rather than
     // exhausting MediaCodec resources.
     val decoderLimit = com.kinetic.app.data.MediaWorkers.maxConcurrentVideoDecoders
@@ -192,7 +192,7 @@ private fun GpuCompositionPreviewCanvas(
             .forEach { failedVideoSources.remove(it) }
     }
 
-    // Video layers use Android MediaCodec Surface outputs and are composited
+    // Video layers use FFmpeg/libavcodec Surface outputs and are composited
     // alongside stills, text and shapes in the same OpenGL draw order.
     // Bitmap fallback layers use the composition cadence too, with one
     // sequential decoder loop that skips obsolete frame requests.
@@ -346,7 +346,7 @@ private fun GpuCompositionPreviewCanvas(
                         if (uri != null) {
                             val playbackUri = rememberPlaybackUri(uri, editor.playing)
                             val player = remember(playbackUri, qualityScale) {
-                                com.kinetic.app.engine.AndroidVideoPlayer(
+                                com.kinetic.app.engine.FfmpegVideoPlayer(
                                     context, playbackUri ?: Uri.parse(uri)
                                 )
                             }
@@ -368,7 +368,7 @@ private fun GpuCompositionPreviewCanvas(
 private fun GpuVideoPlayerLayer(
     editor: EditorState,
     layer: com.kinetic.app.model.Layer,
-    player: com.kinetic.app.engine.AndroidVideoPlayer,
+    player: com.kinetic.app.engine.FfmpegVideoPlayer,
     surfaceView: GpuPreviewSurfaceView,
     playback: NativePlaybackEngine?,
     onDecoderFailed: (String) -> Unit
@@ -448,7 +448,7 @@ private fun GpuVideoPlayerLayer(
 
 private class GpuPreviewSurfaceView(context: Context, onGpuFailure: () -> Unit) : GLSurfaceView(context) {
     private val mainHandler = Handler(Looper.getMainLooper())
-    private val attachedPlayers = ConcurrentHashMap<String, com.kinetic.app.engine.AndroidVideoPlayer>()
+    private val attachedPlayers = ConcurrentHashMap<String, com.kinetic.app.engine.FfmpegVideoPlayer>()
     private val frameNotifications = AtomicInteger(0)
     @Volatile private var videoLayerIds: Set<String> = emptySet()
     private val gpuRenderer = CompositionGlRenderer(
@@ -481,11 +481,11 @@ private class GpuPreviewSurfaceView(context: Context, onGpuFailure: () -> Unit) 
         }
         requestRender()
     }
-    fun attachVideo(id: String, player: com.kinetic.app.engine.AndroidVideoPlayer) {
+    fun attachVideo(id: String, player: com.kinetic.app.engine.FfmpegVideoPlayer) {
         attachedPlayers[id] = player
         queueEvent { gpuRenderer.ensureVideoOutput(id) }
     }
-    fun detachVideo(id: String, player: com.kinetic.app.engine.AndroidVideoPlayer) {
+    fun detachVideo(id: String, player: com.kinetic.app.engine.FfmpegVideoPlayer) {
         attachedPlayers.remove(id, player)
         mainHandler.post { player.detachSurface() }
         queueEvent { gpuRenderer.releaseVideoOutput(id) }
