@@ -95,6 +95,17 @@ object CompositionFrameCache {
         return frameFile(context, key).isFile
     }
 
+    suspend fun hasCapacity(context: Context, diskLimitMb: Int): Boolean = withContext(Dispatchers.IO) {
+        val directory = frameDirectory(context)
+        if (!directory.exists()) return@withContext true
+        val used = if (knownDiskBytes >= 0L) knownDiskBytes else {
+            directory.listFiles()?.filter { it.isFile && it.extension == "jpg" }
+                ?.sumOf { it.length() } ?: 0L
+        }
+        knownDiskBytes = used
+        used < diskLimitMb.coerceIn(128, 4096) * 1024L * 1024L
+    }
+
     suspend fun loadFrame(context: Context, key: String): Bitmap? {
         memory.get(key)?.let { return it }
         val file = frameFile(context, key)
