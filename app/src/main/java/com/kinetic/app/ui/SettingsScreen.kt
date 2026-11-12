@@ -16,9 +16,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.Icon
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Switch
@@ -49,7 +46,7 @@ fun SettingsScreen(settings: AppSettings, onBack: () -> Unit, onOpenMpvTest: () 
     var cacheCleared by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxSize().background(KColors.Bg).statusBarsPadding().navigationBarsPadding()) {
         Row(Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = KColors.Text) }
+            IconButton(onClick = onBack) { KIcon(IconKind.BACK, KColors.Text) }
             Text("Preferences", color = KColors.Text, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
         }
         Box(Modifier.fillMaxWidth().height(1.dp).background(KColors.Line))

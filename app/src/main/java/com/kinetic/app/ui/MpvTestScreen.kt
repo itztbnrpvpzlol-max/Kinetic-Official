@@ -21,10 +21,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
-import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -148,7 +145,7 @@ fun MpvTestScreen(onBack: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = KColors.Text)
+                KIcon(IconKind.BACK, KColors.Text)
             }
             Column(Modifier.weight(1f)) {
                 Text("MPV decoder test", color = KColors.Text, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
