@@ -94,10 +94,11 @@ fun CpuPreviewCanvas(editor: EditorState, modifier: Modifier = Modifier) {
         if (!editor.playing) return@LaunchedEffect
         while (editor.playing) {
             val playhead = editor.time
-            val activeVideos = editor.layers.filter {
-                it.visible && it.type == LayerType.VIDEO && it.uri != null && it.activeAt(playhead)
+            val upcomingVideos = editor.layers.filter {
+                it.visible && it.type == LayerType.VIDEO && it.uri != null &&
+                    it.end > playhead && it.start <= playhead + 0.5f
             }
-            for (layer in activeVideos) {
+            for (layer in upcomingVideos) {
                 val original = Uri.parse(layer.uri!!)
                 val source = PreviewProxyStore.findExisting(
                     ctx,
@@ -106,8 +107,11 @@ fun CpuPreviewCanvas(editor: EditorState, modifier: Modifier = Modifier) {
                     PreviewProxyStore.PLAYBACK_PROXY_BITRATE
                 ) ?: original
                 val speed = layer.speed.coerceIn(0.1f, 4f)
+                // Warm clips just before their in-point too, so a layer
+                // transition cannot stall waiting for its very first frame.
+                val sampleTimelineTime = maxOf(playhead, layer.start)
                 val sourceTime = (
-                    (playhead - layer.start).coerceAtLeast(0f) * speed + layer.srcOffset
+                    (sampleTimelineTime - layer.start).coerceAtLeast(0f) * speed + layer.srcOffset
                 ).coerceAtLeast(0f)
                 MediaLoader.prefetchUpcomingVideoFrames(
                     ctx,
