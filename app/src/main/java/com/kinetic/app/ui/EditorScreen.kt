@@ -147,8 +147,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
         if (editor.playing) return@LaunchedEffect
         // Debounce rapid scrubbing so the worker starts from the final playhead
         // position instead of repeatedly restarting during a drag.
-        delay(80)
-        editor.clearCachedFrameMarks()
+        delay(500)
 
         val snapshot = editor.layers.toList()
         val visualCount = snapshot.count {
@@ -201,7 +200,10 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                 ) ?: continue
                 editor.markFrameCached(frameIndex, renderedKey)
             }
-            if (offset % 2 == 0) delay(1)
+            // Keep background rendering deliberately slow and low-priority.
+            // The cache should fill over time without stealing decode time from
+            // the live preview or making audio playback compete for CPU.
+            delay(32)
         }
     }
 
@@ -210,7 +212,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
         withContext(Dispatchers.IO) { runCatching { projectStore.save(editor) } }
     }
 
-    LaunchedEffect(editor.playing, previewVideoReady) {
+    LaunchedEffect(editor.playing) {
         if (editor.playing) {
             if (editor.time >= editor.duration - 0.01f) editor.time = 0f
             var last = withFrameNanos { it }
@@ -223,7 +225,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
             var audioAccumulator = 0f
             // Start the audio transport immediately; subsequent clock updates are
             // coalesced and applied on AudioEngine's dedicated playback thread.
-            audio.sync(editor.layers, transportTime, previewVideoReady)
+            audio.sync(editor.layers, transportTime, true)
             while (editor.playing) {
                 val now = withFrameNanos { it }
                 val dt = ((now - last) / 1_000_000_000f).coerceIn(0f, 0.1f)
@@ -247,7 +249,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                 }
                 // Audio transport work is deliberately decoupled from the visual frame clock.
                 if (audioAccumulator >= 0.08f || !editor.playing) {
-                    audio.sync(editor.layers, transportTime, editor.playing && previewVideoReady)
+                    audio.sync(editor.layers, transportTime, editor.playing)
                     audioAccumulator = 0f
                 }
             }
@@ -292,8 +294,13 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                 Box(Modifier.width(44.dp).height(4.dp).clip(CircleShape).background(KColors.Muted))
             }
         }
-        PreviewToolsBar(editor, onAddLayer = { showLayers = true }, onTogglePreview = { previewExpanded = !previewExpanded },
-            onPlay = { togglePlayback() })
+        PreviewToolsBar(
+            editor,
+            isExpanded = previewExpanded,
+            onAddLayer = { showLayers = true },
+            onTogglePreview = { previewExpanded = !previewExpanded },
+            onPlay = { togglePlayback() }
+        )
         if (!previewExpanded) {
             TimelinePane(editor, Modifier.weight(1f))
             val activeLayer = editor.selected
@@ -634,16 +641,35 @@ private fun AlightDock(active: String, onSelect: (String) -> Unit) {
 }
 
 @Composable
-private fun PreviewToolsBar(editor: EditorState, onAddLayer: () -> Unit, onTogglePreview: () -> Unit,
-    onPlay: () -> Unit) {
-    Row(Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 4.dp).horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-        PreviewTool(IconKind.UNDO, editor.canUndo) { editor.undo() }
-        PreviewTool(IconKind.REDO, editor.canRedo) { editor.redo() }
-        PreviewTool(IconKind.BACK) { editor.playing = false; editor.seek(0f) }
-        PreviewTool(if (editor.playing) IconKind.PAUSE else IconKind.PLAY, onClick = onPlay)
-        PreviewTool(IconKind.NEXT) { editor.playing = false; editor.seek(editor.duration) }
-        PreviewTool(IconKind.PLUS, onClick = onAddLayer)
-        PreviewTool(if (editor.playing) IconKind.FIT else IconKind.FULLSCREEN, onClick = onTogglePreview)
+private fun PreviewToolsBar(
+    editor: EditorState,
+    isExpanded: Boolean,
+    onAddLayer: () -> Unit,
+    onTogglePreview: () -> Unit,
+    onPlay: () -> Unit
+) {
+    // The side actions are anchored to the left; transport controls are centered
+    // against the full preview width and cannot drift when the side group changes.
+    Box(Modifier.fillMaxWidth().height(48.dp)) {
+        Row(
+            Modifier.align(Alignment.CenterStart).padding(start = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            PreviewTool(IconKind.UNDO, editor.canUndo) { editor.undo() }
+            PreviewTool(IconKind.REDO, editor.canRedo) { editor.redo() }
+            PreviewTool(IconKind.PLUS, onClick = onAddLayer)
+            PreviewTool(if (isExpanded) IconKind.FIT else IconKind.FULLSCREEN, onClick = onTogglePreview)
+        }
+        Row(
+            Modifier.align(Alignment.Center),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            PreviewTool(IconKind.BACK) { editor.playing = false; editor.seek(0f) }
+            PreviewTool(if (editor.playing) IconKind.PAUSE else IconKind.PLAY, onClick = onPlay)
+            PreviewTool(IconKind.NEXT) { editor.playing = false; editor.seek(editor.duration) }
+        }
     }
 }
 
