@@ -82,6 +82,9 @@ import com.kinetic.app.model.PropId
 import com.kinetic.app.model.isDescendantOf
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -146,45 +149,62 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                     return@launch
                 }
 
-                val qualityScale = resolvePreviewScale(
+                val requestedScale = resolvePreviewScale(
                     ctx, editor.settings.previewQualityIndex, visualCount
                 )
-                val frameWidth = (COMP_W * qualityScale).toInt().coerceAtLeast(240)
-                val frameHeight = (COMP_H * qualityScale).toInt().coerceAtLeast(135)
+                // Warm the first seconds at a capped proxy resolution. The preview
+                // can display these frames immediately while full-quality frames
+                // are generated behind playback.
+                val warmScale = minOf(requestedScale, 0.5f)
+                val frameWidth = (COMP_W * warmScale).toInt().coerceAtLeast(240)
+                val frameHeight = (COMP_H * warmScale).toInt().coerceAtLeast(135)
                 val frameCount = kotlin.math.ceil(editor.duration * editor.fps)
                     .toInt().coerceAtLeast(1)
                 val startFrame = (editor.time * editor.fps)
                     .toInt().coerceIn(0, frameCount - 1)
+                val warmFrameCount = minOf(frameCount, (editor.fps * 3).coerceAtLeast(1))
 
-                // Prepare the entire composition before starting transport. Frames
-                // are rendered from the playhead forward so the first moments are
-                // ready as early as possible, while progress reflects the full pass.
-                for (offset in 0 until frameCount) {
-                    val frameIndex = (startFrame + offset) % frameCount
-                    val frameTime = frameIndex / editor.fps.toFloat()
-                    val key = withContext(MediaWorkers.cpuDispatcher) {
-                        CompositionFrameCache.frameKey(
-                            editor.projectId, snapshot, frameTime, editor.fps,
-                            frameWidth, frameHeight
-                        )
+                // Only block for the first three seconds around the playhead.
+                // Two independent frames can be prepared concurrently; cache keys
+                // make already-rendered frames reusable without re-encoding them.
+                var completed = 0
+                var offset = 0
+                while (offset < warmFrameCount) {
+                    val batchOffsets = (offset until minOf(offset + 2, warmFrameCount)).toList()
+                    val results = coroutineScope {
+                        batchOffsets.map { batchOffset ->
+                            async {
+                                val frameIndex = (startFrame + batchOffset) % frameCount
+                                val frameTime = frameIndex / editor.fps.toFloat()
+                                val key = withContext(MediaWorkers.cpuDispatcher) {
+                                    CompositionFrameCache.frameKey(
+                                        editor.projectId, snapshot, frameTime, editor.fps,
+                                        frameWidth, frameHeight
+                                    )
+                                }
+                                val cached = withContext(Dispatchers.IO) {
+                                    CompositionFrameCache.isCached(ctx, key)
+                                }
+                                val readyKey = if (cached) key else if (
+                                    CompositionFrameCache.hasCapacity(
+                                        ctx, editor.settings.frameCacheDiskMb
+                                    )
+                                ) {
+                                    CompositionFrameCache.renderAndStore(
+                                        ctx, editor.projectId, snapshot, frameTime, editor.fps,
+                                        frameWidth, frameHeight, editor.settings.frameCacheDiskMb
+                                    )
+                                } else null
+                                frameIndex to readyKey
+                            }
+                        }.awaitAll()
                     }
-                    val cached = withContext(Dispatchers.IO) {
-                        CompositionFrameCache.isCached(ctx, key)
+                    results.forEach { (frameIndex, key) ->
+                        if (key != null) editor.markFrameCached(frameIndex, key)
                     }
-                    if (cached) {
-                        editor.markFrameCached(frameIndex, key)
-                    } else if (CompositionFrameCache.hasCapacity(
-                            ctx, editor.settings.frameCacheDiskMb
-                        )) {
-                        val renderedKey = CompositionFrameCache.renderAndStore(
-                            ctx, editor.projectId, snapshot, frameTime, editor.fps,
-                            frameWidth, frameHeight, editor.settings.frameCacheDiskMb
-                        )
-                        if (renderedKey != null) {
-                            editor.markFrameCached(frameIndex, renderedKey)
-                        }
-                    }
-                    cachePrepareProgress = (offset + 1).toFloat() / frameCount
+                    completed += batchOffsets.size
+                    cachePrepareProgress = completed.toFloat() / warmFrameCount
+                    offset += batchOffsets.size
                 }
                 previewVideoReady = false
                 editor.playing = true
@@ -278,6 +298,61 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
             // The cache should fill over time without stealing decode time from
             // the live preview or making audio playback compete for CPU.
             delay(32)
+        }
+    }
+
+    LaunchedEffect(
+        editor.playing,
+        editor.settings.autoPreviewCache,
+        editor.settings.frameCacheDiskMb,
+        editor.settings.previewQualityIndex,
+        editor.layers,
+        editor.duration,
+        editor.fps,
+        editor.projectId
+    ) {
+        if (!editor.playing || !editor.settings.autoPreviewCache) return@LaunchedEffect
+        val snapshot = editor.layers.toList()
+        val visualCount = snapshot.count {
+            it.visible && it.type != LayerType.AUDIO &&
+                it.type != LayerType.NULL && it.type != LayerType.ADJUSTMENT
+        }
+        if (visualCount == 0) return@LaunchedEffect
+
+        val qualityScale = resolvePreviewScale(
+            ctx, editor.settings.previewQualityIndex, visualCount
+        )
+        val frameWidth = (COMP_W * qualityScale).toInt().coerceAtLeast(240)
+        val frameHeight = (COMP_H * qualityScale).toInt().coerceAtLeast(135)
+        val frameCount = kotlin.math.ceil(editor.duration * editor.fps)
+            .toInt().coerceAtLeast(1)
+        val startFrame = (editor.time * editor.fps).toInt().coerceIn(0, frameCount - 1)
+
+        // Continue filling the full-quality cache while transport runs. The
+        // dedicated low-priority pool and small yield keep playback responsive.
+        for (offset in 0 until frameCount) {
+            if (!editor.playing) break
+            val frameIndex = (startFrame + offset) % frameCount
+            val frameTime = frameIndex / editor.fps.toFloat()
+            val key = withContext(MediaWorkers.cpuDispatcher) {
+                CompositionFrameCache.frameKey(
+                    editor.projectId, snapshot, frameTime, editor.fps,
+                    frameWidth, frameHeight
+                )
+            }
+            val cached = withContext(Dispatchers.IO) {
+                CompositionFrameCache.isCached(ctx, key)
+            }
+            val readyKey = if (cached) key else if (
+                CompositionFrameCache.hasCapacity(ctx, editor.settings.frameCacheDiskMb)
+            ) {
+                CompositionFrameCache.renderAndStore(
+                    ctx, editor.projectId, snapshot, frameTime, editor.fps,
+                    frameWidth, frameHeight, editor.settings.frameCacheDiskMb
+                )
+            } else null
+            if (readyKey != null) editor.markFrameCached(frameIndex, readyKey)
+            delay(16)
         }
     }
 
