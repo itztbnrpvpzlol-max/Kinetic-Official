@@ -81,6 +81,7 @@ import com.kinetic.app.model.LayerType
 import com.kinetic.app.model.PropId
 import com.kinetic.app.model.isDescendantOf
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -103,6 +104,9 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
     var dockTool by remember { mutableStateOf("Select") }
     var showToolSheet by remember { mutableStateOf(false) }
     var previewVideoReady by remember { mutableStateOf(true) }
+    var isPreparingCache by remember { mutableStateOf(false) }
+    var cachePrepareProgress by remember { mutableFloatStateOf(0f) }
+    var cachePrepareJob by remember { mutableStateOf<Job?>(null) }
 
     LaunchedEffect(editor.selectedId) {
         dockTool = if (editor.selectedId == null) "Select" else "Properties"
@@ -113,11 +117,81 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
     fun togglePlayback() {
         if (editor.playing) {
             editor.playing = false
-        } else {
-            // Preview decoders report readiness. Audio waits for that signal so
-            // it cannot run ahead while the first video frame is still starting.
+            return
+        }
+        if (isPreparingCache) {
+            cachePrepareJob?.cancel()
+            cachePrepareJob = null
+            isPreparingCache = false
+            return
+        }
+        if (!editor.settings.autoPreviewCache) {
             previewVideoReady = false
             editor.playing = true
+            return
+        }
+
+        cachePrepareJob = scope.launch {
+            isPreparingCache = true
+            cachePrepareProgress = 0f
+            try {
+                val snapshot = editor.layers.toList()
+                val visualCount = snapshot.count {
+                    it.visible && it.type != LayerType.AUDIO &&
+                        it.type != LayerType.NULL && it.type != LayerType.ADJUSTMENT
+                }
+                if (visualCount == 0) {
+                    previewVideoReady = false
+                    editor.playing = true
+                    return@launch
+                }
+
+                val qualityScale = resolvePreviewScale(
+                    ctx, editor.settings.previewQualityIndex, visualCount
+                )
+                val frameWidth = (COMP_W * qualityScale).toInt().coerceAtLeast(240)
+                val frameHeight = (COMP_H * qualityScale).toInt().coerceAtLeast(135)
+                val frameCount = kotlin.math.ceil(editor.duration * editor.fps)
+                    .toInt().coerceAtLeast(1)
+                val startFrame = (editor.time * editor.fps)
+                    .toInt().coerceIn(0, frameCount - 1)
+
+                // Prepare the entire composition before starting transport. Frames
+                // are rendered from the playhead forward so the first moments are
+                // ready as early as possible, while progress reflects the full pass.
+                for (offset in 0 until frameCount) {
+                    val frameIndex = (startFrame + offset) % frameCount
+                    val frameTime = frameIndex / editor.fps.toFloat()
+                    val key = withContext(MediaWorkers.cpuDispatcher) {
+                        CompositionFrameCache.frameKey(
+                            editor.projectId, snapshot, frameTime, editor.fps,
+                            frameWidth, frameHeight
+                        )
+                    }
+                    val cached = withContext(Dispatchers.IO) {
+                        CompositionFrameCache.isCached(ctx, key)
+                    }
+                    if (cached) {
+                        editor.markFrameCached(frameIndex, key)
+                    } else if (CompositionFrameCache.hasCapacity(
+                            ctx, editor.settings.frameCacheDiskMb
+                        )) {
+                        val renderedKey = CompositionFrameCache.renderAndStore(
+                            ctx, editor.projectId, snapshot, frameTime, editor.fps,
+                            frameWidth, frameHeight, editor.settings.frameCacheDiskMb
+                        )
+                        if (renderedKey != null) {
+                            editor.markFrameCached(frameIndex, renderedKey)
+                        }
+                    }
+                    cachePrepareProgress = (offset + 1).toFloat() / frameCount
+                }
+                previewVideoReady = false
+                editor.playing = true
+            } finally {
+                isPreparingCache = false
+                cachePrepareJob = null
+            }
         }
     }
     BackHandler { leave() }
@@ -282,11 +356,17 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
             Box(Modifier.weight(1f).fillMaxWidth()) {
             PreviewCanvas(editor, Modifier.fillMaxSize(), editor.settings.previewQualityIndex) { previewVideoReady = it }
             PreviewQualityControl(editor, Modifier.align(Alignment.TopStart).padding(8.dp))
+            if (isPreparingCache) {
+                CompositionCacheOverlay(cachePrepareProgress, Modifier.align(Alignment.Center))
+            }
         }
         } else {
             Box(Modifier.fillMaxWidth().height(previewHeight.dp)) {
                 PreviewCanvas(editor, Modifier.fillMaxSize(), editor.settings.previewQualityIndex) { previewVideoReady = it }
                 PreviewQualityControl(editor, Modifier.align(Alignment.TopStart).padding(8.dp))
+                if (isPreparingCache) {
+                    CompositionCacheOverlay(cachePrepareProgress, Modifier.align(Alignment.Center))
+                }
             }
             Box(Modifier.fillMaxWidth().height(10.dp).background(KColors.Bg).pointerInput(Unit) {
                 detectVerticalDragGestures { change, drag -> change.consume(); previewHeight = (previewHeight + drag / density).coerceIn(120f, 420f) }
@@ -669,6 +749,41 @@ private fun PreviewToolsBar(
             PreviewTool(IconKind.BACK) { editor.playing = false; editor.seek(0f) }
             PreviewTool(if (editor.playing) IconKind.PAUSE else IconKind.PLAY, onClick = onPlay)
             PreviewTool(IconKind.NEXT) { editor.playing = false; editor.seek(editor.duration) }
+        }
+    }
+}
+
+@Composable
+private fun CompositionCacheOverlay(progress: Float, modifier: Modifier = Modifier) {
+    Box(
+        modifier.fillMaxSize().background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.62f)),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                "Preparing composition cache",
+                color = KColors.Text,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+            Spacer(Modifier.height(10.dp))
+            Box(
+                Modifier.width(190.dp).height(4.dp).clip(CircleShape)
+                    .background(KColors.Line)
+            ) {
+                Box(
+                    Modifier.fillMaxWidth(progress.coerceIn(0f, 1f))
+                        .fillMaxHeight().background(KColors.Accent)
+                )
+            }
+            Spacer(Modifier.height(7.dp))
+            Text(
+                "${(progress.coerceIn(0f, 1f) * 100).toInt()}%",
+                color = KColors.Muted,
+                fontSize = 11.sp
+            )
+            Spacer(Modifier.height(8.dp))
+            Text("Tap Play to cancel", color = KColors.Muted, fontSize = 10.sp)
         }
     }
 }
