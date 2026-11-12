@@ -26,7 +26,6 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
 import java.security.MessageDigest
-import kotlin.math.abs
 import kotlin.math.max
 
 /**
@@ -38,7 +37,6 @@ object CompositionFrameCache {
     private const val DIRECTORY = "kinetic-rendered-frames"
     private const val JPEG_QUALITY = 90
     private var memoryLimitBytes = 64 * 1024 * 1024
-    private var diskLimitBytes = 512L * 1024L * 1024L
     private val memory = object : LruCache<String, Bitmap>(memoryLimitBytes) {
         override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount
     }
@@ -47,8 +45,8 @@ object CompositionFrameCache {
     @Synchronized
     fun configure(memoryMb: Int, diskMb: Int) {
         memoryLimitBytes = memoryMb.coerceIn(16, 256) * 1024 * 1024
-        diskLimitBytes = diskMb.coerceIn(128, 4096) * 1024L * 1024L
         memory.resize(memoryLimitBytes)
+        knownDiskBytes = -1L
     }
 
     fun frameKey(
@@ -203,6 +201,8 @@ object CompositionFrameCache {
                 layer.type == LayerType.AUDIO || layer.type == LayerType.NULL ||
                 layer.type == LayerType.ADJUSTMENT) continue
 
+            val opacity = (layer.p(PropId.OPACITY).valueAt(time) / 100f).coerceIn(0f, 1f)
+            if (opacity <= 0f) continue
             val bitmap = when (layer.type) {
                 LayerType.IMAGE -> layer.uri?.let {
                     MediaLoader.bitmapFor(context, Uri.parse(it), LayerType.IMAGE, 0f, 1, max(width, height))
@@ -224,8 +224,6 @@ object CompositionFrameCache {
                 continue
             }
 
-            val opacity = (layer.p(PropId.OPACITY).valueAt(time) / 100f).coerceIn(0f, 1f)
-            if (opacity <= 0f) continue
             val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply {
                 alpha = (opacity * 255f).toInt()
                 if ("Grayscale" in layer.effects) {
