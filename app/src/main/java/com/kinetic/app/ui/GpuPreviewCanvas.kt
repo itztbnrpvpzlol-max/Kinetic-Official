@@ -1,6 +1,5 @@
 package com.kinetic.app.ui
 
-import android.app.ActivityManager
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas as AndroidCanvas
@@ -313,9 +312,6 @@ private fun GpuCompositionPreviewCanvas(
     val scene = GpuScene(renderLayers, selectedLayer)
     val gpuFailed = remember { androidx.compose.runtime.mutableStateOf(false) }
 
-    val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
-    val memoryInfo = ActivityManager.MemoryInfo()
-    activityManager?.getMemoryInfo(memoryInfo)
     // Low RAM is not a reason to disable the GPU. KRE uses a lower preview
     // resolution and bounded decoder/cache budgets on constrained devices.
     if (gpuFailed.value || !supportsGles3(context)) {
