@@ -128,6 +128,10 @@ fun PreviewCanvas(
     }
 }
 
+@Composable
+private fun rememberPlaybackUri(uri: String?, playing: Boolean): Uri? =
+    uri?.let(Uri::parse)
+
 internal fun resolvePreviewScale(context: Context, qualityIndex: Int, activeLayers: Int): Float {
     // Explicit quality choices remain user-controlled.
     if (qualityIndex == 1) return 1f
