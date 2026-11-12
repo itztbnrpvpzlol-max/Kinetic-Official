@@ -34,14 +34,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Menu
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -438,7 +433,7 @@ private fun TopBar(editor: EditorState, onMenuHome: () -> Unit, onOpenSettings: 
     var resMenu by remember { mutableStateOf(false) }
     Row(Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
         Box {
-            IconButton(onClick = { menu = true }) { Icon(Icons.Default.Menu, "Menu", tint = KColors.Text) }
+            IconButton(onClick = { menu = true }) { KIcon(IconKind.MENU, KColors.Text) }
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, containerColor = KColors.Surface2) {
                 DropdownMenuItem(text = { Text("Home", color = KColors.Text) }, onClick = { menu = false; onMenuHome() })
                 DropdownMenuItem(text = { Text("Preferences", color = KColors.Text) }, onClick = { menu = false; onOpenSettings() })
@@ -465,7 +460,7 @@ private fun TopBar(editor: EditorState, onMenuHome: () -> Unit, onOpenSettings: 
             }
         }
         IconButton(onClick = onExport) { KIcon(IconKind.PLAY, KColors.Text, Modifier.size(24.dp)) }
-        IconButton(onClick = onOpenSettings) { Icon(Icons.Default.Settings, "Preferences", tint = KColors.Text) }
+        IconButton(onClick = onOpenSettings) { KIcon(IconKind.SETTINGS, KColors.Text) }
     }
 }
 
@@ -809,7 +804,7 @@ private fun EditPanel(
             TabLabel("Properties", tab == 0) { onTab(0) }
             TabLabel("Graph", tab == 1) { onTab(1) }
             Box {
-                IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, "Layer actions", tint = KColors.Muted) }
+                IconButton(onClick = { menu = true }) { KIcon(IconKind.MORE, KColors.Muted) }
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, containerColor = KColors.Surface2) {
                     DropdownMenuItem(text = { Text(if (layer.type == LayerType.TEXT) "Edit text" else "Rename", color = KColors.Text) }, onClick = { menu = false; onRename() })
                     DropdownMenuItem(text = { Text("Duplicate", color = KColors.Text) }, onClick = { menu = false; editor.duplicate(layer.id) })

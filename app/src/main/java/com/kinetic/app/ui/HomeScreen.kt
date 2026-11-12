@@ -8,9 +8,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -81,7 +78,7 @@ private fun Header(onOpenSettings: () -> Unit) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Image(painterResource(R.drawable.kinetic_icon), "Kinetic", Modifier.size(36.dp).clip(RoundedCornerShape(10.dp)))
             Text("Kinetic", color = KColors.Text, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-            IconButton(onClick = onOpenSettings) { Icon(Icons.Default.Settings, "Preferences", tint = KColors.Muted) }
+            IconButton(onClick = onOpenSettings) { KIcon(IconKind.SETTINGS, KColors.Muted) }
         }
         Box(Modifier.fillMaxWidth().height(1.dp).background(KColors.Line))
     }
@@ -118,7 +115,7 @@ private fun ProjectCard(project: ProjectStore.ProjectInfo, onClick: () -> Unit, 
             Spacer(Modifier.height(3.dp))
             Text("${project.layerCount} layers  ·  ${DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(project.updatedAt))}", color = KColors.Muted, fontSize = 11.sp, maxLines = 1)
         }
-        IconButton(onClick = onDelete) { Icon(Icons.Default.Delete, "Delete project", tint = KColors.Muted) }
+        IconButton(onClick = onDelete) { KIcon(IconKind.DELETE, KColors.Muted) }
     }
 }
 

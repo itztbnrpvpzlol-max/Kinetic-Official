@@ -24,7 +24,7 @@ import kotlin.math.sin
  */
 enum class IconKind {
     EYE, EYE_OFF, HANDLE, PLAY, PAUSE, UNDO, REDO, DIAMOND, DIAMOND_FILLED, STOPWATCH,
-    SELECT, SHAPES, STAR, LAYERS, SLIDERS, PREV, NEXT, CHEVRON_DOWN, CHEVRON_UP, PLUS,
+    SELECT, SHAPES, STAR, LAYERS, SLIDERS, PREV, NEXT, CHEVRON_DOWN, CHEVRON_UP, MENU, PLUS,
     IMAGE, MUSIC, VIDEO, NULL, ADJ, TEXT, PARENT,
     LOCK, UNLOCK, SETTINGS, EXPORT, IMPORT, DELETE, CUT, SPLIT, CROP, ROTATE, FLIP,
     COPY, MORE, ZOOM_IN, ZOOM_OUT, EFFECTS, FILTER, MASK, BLEND, WAVEFORM, SEARCH,
@@ -92,6 +92,7 @@ fun KIcon(kind: IconKind, tint: Color, modifier: Modifier = Modifier.size(22.dp)
             IconKind.NEXT -> { line(pt(.66f,.18f),pt(.66f,.82f)); drawPath(poly(false,pt(.32f,.2f),pt(.68f,.5f),pt(.32f,.8f)),tint,style=st) }
             IconKind.CHEVRON_DOWN -> drawPath(poly(false,pt(.25f,.38f),pt(.5f,.64f),pt(.75f,.38f)),tint,style=st)
             IconKind.CHEVRON_UP -> drawPath(poly(false,pt(.25f,.62f),pt(.5f,.36f),pt(.75f,.62f)),tint,style=st)
+            IconKind.MENU -> { line(pt(.18f,.28f),pt(.82f,.28f)); line(pt(.18f,.5f),pt(.82f,.5f)); line(pt(.18f,.72f),pt(.82f,.72f)) }
             IconKind.PLUS, IconKind.ZOOM_IN -> { line(pt(.5f,.2f),pt(.5f,.8f)); line(pt(.2f,.5f),pt(.8f,.5f)); if(kind==IconKind.ZOOM_IN){ outlinedCircle(.42f,.42f,.27f); line(pt(.62f,.62f),pt(.88f,.88f)) } }
             IconKind.IMAGE -> { rect(.12f,.16f,.76f,.68f,.08f); filledCircle(.34f,.36f,.07f); drawPath(poly(false,pt(.16f,.78f),pt(.42f,.52f),pt(.6f,.68f),pt(.72f,.56f),pt(.86f,.72f)),tint,style=st) }
             IconKind.MUSIC, IconKind.MIC -> {
