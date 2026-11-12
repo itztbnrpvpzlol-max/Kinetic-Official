@@ -1,6 +1,9 @@
 #include <jni.h>
 #include <cmath>
 #include <algorithm>
+#include <cstdint>
+#include <cstring>
+#include <vector>
 
 namespace {
 inline float cubic(float t, float a, float b) {
@@ -32,14 +35,34 @@ Java_com_kinetic_app_engine_NativeRenderEngine_nativeEvaluateCurves(
 
     jfloat* values = env->GetFloatArrayElements(input, nullptr);
     if (values == nullptr) return nullptr;
-    jfloatArray output = env->NewFloatArray(length / 5);
+    const jsize count = length / 5;
+    jfloatArray output = env->NewFloatArray(count);
     if (output == nullptr) {
         env->ReleaseFloatArrayElements(input, values, JNI_ABORT);
         return nullptr;
     }
+    if (count == 0) {
+        env->ReleaseFloatArrayElements(input, values, JNI_ABORT);
+        return output;
+    }
 
-    const jsize count = length / 5;
-    jfloat* result = new jfloat[count];
+    // Exact input bits form the dependency fingerprint. Repeated curve batches
+    // can reuse their evaluated values without repeating the binary searches.
+    uint64_t fingerprint = 1469598103934665603ULL;
+    fingerprint = (fingerprint ^ static_cast<uint64_t>(length)) * 1099511628211ULL;
+    for (jsize i = 0; i < length; ++i) {
+        uint32_t bits = 0;
+        std::memcpy(&bits, &values[i], sizeof(bits));
+        fingerprint = (fingerprint ^ bits) * 1099511628211ULL;
+    }
+
+    std::vector<jfloat> result(static_cast<size_t>(count));
+    if (kreGetCalculation(fingerprint, result.data(), result.size())) {
+        env->SetFloatArrayRegion(output, 0, count, result.data());
+        env->ReleaseFloatArrayElements(input, values, JNI_ABORT);
+        return output;
+    }
+
     for (jsize i = 0; i < count; ++i) {
         const jsize offset = i * 5;
         const float u = std::clamp(values[offset], 0.0f, 1.0f);
@@ -50,14 +73,14 @@ Java_com_kinetic_app_engine_NativeRenderEngine_nativeEvaluateCurves(
             if (cubic(mid, values[offset + 1], values[offset + 3]) < u) low = mid;
             else high = mid;
         }
-        result[i] = cubic((low + high) * 0.5f, values[offset + 2], values[offset + 4]);
+        result[static_cast<size_t>(i)] =
+            cubic((low + high) * 0.5f, values[offset + 2], values[offset + 4]);
     }
-    env->SetFloatArrayRegion(output, 0, count, result);
-    delete[] result;
+    krePutCalculation(fingerprint, result.data(), result.size());
+    env->SetFloatArrayRegion(output, 0, count, result.data());
     env->ReleaseFloatArrayElements(input, values, JNI_ABORT);
     return output;
 }
-
 
 #include <chrono>
 #include <cstdint>
