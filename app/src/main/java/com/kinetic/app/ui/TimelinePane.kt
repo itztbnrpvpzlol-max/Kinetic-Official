@@ -128,13 +128,13 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
     val contentW = centerGutter + (contentSec * pps).dp + centerGutter + LEFT_W + 48.dp
 
     // Center the playhead under the preview transport's play control.
-    // During playback, cap timeline auto-scroll to 20 Hz. The preview clock
-    // remains independent; forcing a horizontal-scroll mutation on every
-    // decoded frame repeatedly invalidates the timeline viewport and competes
-    // with composition rendering on low-memory devices.
-    LaunchedEffect(editor.playing, pps, paneW) {
+    // During playback, sample auto-scroll at the composition frame cadence.
+    // The native clock remains authoritative; the scroll is only a visual follow.
+    val playheadSampleMs = (1000f / editor.fps.coerceIn(1, 60))
+        .toLong().coerceAtLeast(1L)
+    LaunchedEffect(editor.playing, pps, paneW, editor.fps) {
         snapshotFlow { editor.time }
-            .let { times -> if (editor.playing) times.sample(50L) else times }
+            .let { times -> if (editor.playing) times.sample(playheadSampleMs) else times }
             .collect { time ->
                 if (paneW > leftPx) {
                     val target = (time * pps * dens).coerceAtLeast(0f)
