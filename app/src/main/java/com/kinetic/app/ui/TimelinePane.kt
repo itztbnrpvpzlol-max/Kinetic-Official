@@ -228,6 +228,31 @@ private fun Ruler(editor: EditorState, pps: Float, contentW: Dp, centerGutter: D
         val secs = (size.width / dens / pps).toInt() + 1
         val tick = Color(0xFF34344A)
         val originX = centerGutter.toPx()
+        // AE-style green cache indicator: only frames with a completed rendered
+        // composition bitmap are marked. Adjacent ready frames are drawn as runs.
+        val readyFrames = editor.cachedFrames.keys.sorted()
+        if (readyFrames.isNotEmpty()) {
+            var runStart = readyFrames.first()
+            var runEnd = runStart
+            fun drawReadyRun(start: Int, end: Int) {
+                val left = originX + start * pps * dens / editor.fps
+                val right = originX + (end + 1) * pps * dens / editor.fps
+                drawRect(
+                    Color(0xFF39D98A),
+                    Offset(left, 1.dp.toPx()),
+                    Size((right - left).coerceAtLeast(1f), 3.dp.toPx())
+                )
+            }
+            readyFrames.drop(1).forEach { frame ->
+                if (frame == runEnd + 1) runEnd = frame
+                else {
+                    drawReadyRun(runStart, runEnd)
+                    runStart = frame
+                    runEnd = frame
+                }
+            }
+            drawReadyRun(runStart, runEnd)
+        }
         val endX = originX + editor.duration * pps * dens
         if (endX < size.width) drawRect(Color(0x55000000), Offset(endX, 0f), Size(size.width - endX, size.height))
         for (s in 0..secs) {
@@ -372,9 +397,6 @@ private fun Clip(editor: EditorState, layer: Layer, pps: Float, selected: Boolea
         }
     }
     val dashed = layer.type == LayerType.ADJUSTMENT || layer.type == LayerType.NULL
-    val cachedFraction = if (editor.settings.autoPreviewCache && layer.type == LayerType.VIDEO)
-        (editor.cacheProgress[layer.id] ?: 0f).coerceIn(0f, 1f) else 0f
-
     Box(
         Modifier
             .offset(x = centerGutter + (layer.start * pps).dp)
@@ -413,14 +435,6 @@ private fun Clip(editor: EditorState, layer: Layer, pps: Float, selected: Boolea
                     )
                 }
             }
-        }
-        if (layer.type == LayerType.VIDEO && cachedFraction > 0f) {
-            Box(
-                Modifier.align(Alignment.TopStart)
-                    .fillMaxWidth(cachedFraction)
-                    .height(2.dp)
-                    .background(Color(0xFF35D07F))
-            )
         }
         if (layer.type == LayerType.AUDIO) Waveform(layer.id, layer.uri)
         Row(
