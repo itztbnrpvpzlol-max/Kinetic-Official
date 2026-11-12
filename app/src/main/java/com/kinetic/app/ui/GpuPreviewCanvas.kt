@@ -49,7 +49,6 @@ import com.kinetic.app.engine.NativeRenderEngine
 import com.kinetic.app.engine.NativePlaybackEngine
 import com.kinetic.app.data.MediaWorkers
 import com.kinetic.app.data.PreviewDiagnostics
-import com.kinetic.app.data.PreviewProxyStore
 import com.kinetic.app.model.COMP_H
 import com.kinetic.app.model.COMP_W
 import com.kinetic.app.model.EditorState
@@ -160,21 +159,8 @@ private fun LivePreviewCanvas(
 }
 
 @Composable
-private fun rememberPlaybackUri(uri: String?, playing: Boolean): Uri? {
-    val context = LocalContext.current.applicationContext
-    // Resolve synchronously: the play action has already awaited this cache,
-    // so the decoder is created against the proxy from its very first frame.
-    return remember(uri, playing) {
-        val source = uri?.let(Uri::parse) ?: return@remember null
-        if (!playing) source
-        else PreviewProxyStore.findExisting(
-            context,
-            source,
-            PreviewProxyStore.PLAYBACK_PROXY_HEIGHT,
-            PreviewProxyStore.PLAYBACK_PROXY_BITRATE
-        ) ?: source
-    }
-}
+private fun rememberPlaybackUri(uri: String?, playing: Boolean): Uri? =
+    uri?.let(Uri::parse)
 
 internal fun resolvePreviewScale(context: Context, qualityIndex: Int, activeLayers: Int): Float {
     // Explicit quality choices remain user-controlled.
