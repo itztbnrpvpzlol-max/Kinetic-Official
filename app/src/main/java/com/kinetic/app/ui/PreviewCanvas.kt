@@ -142,6 +142,46 @@ fun CpuPreviewCanvas(editor: EditorState, modifier: Modifier = Modifier) {
         }
     }
 
+    // Decode one frame ahead on the lower-priority cache worker while the
+    // foreground worker handles the frame currently shown. Each worker has its
+    // own retriever, avoiding native retriever races and unbounded request queues.
+    LaunchedEffect(mediaLayerSignature, previewClock) {
+        val prefetchedBuckets = mutableMapOf<String, Int>()
+        val fps = MediaLoader.CPU_PREVIEW_SAMPLE_FPS
+        while (true) {
+            val timelineTime = previewClock.timeSec
+            if (!previewClock.playing) {
+                prefetchedBuckets.clear()
+                delay(60L)
+                continue
+            }
+            for (layer in mediaLayers) {
+                val rawUri = layer.uri ?: continue
+                if (layer.type != LayerType.VIDEO || !layer.visible || !layer.activeAt(timelineTime)) {
+                    prefetchedBuckets.remove(layer.id)
+                    continue
+                }
+                val sourceTime = (
+                    (timelineTime - layer.start).coerceAtLeast(0f) * layer.speed +
+                        layer.srcOffset
+                ).coerceAtLeast(0f)
+                val nextBucket = (sourceTime * fps.toFloat()).toInt() + 1
+                if (prefetchedBuckets[layer.id] == nextBucket) continue
+                prefetchedBuckets[layer.id] = nextBucket
+                MediaLoader.prefetchUpcomingVideoFrames(
+                    ctx = ctx,
+                    uri = Uri.parse(rawUri),
+                    firstFrameTimeSec = nextBucket / fps.toFloat(),
+                    frameCount = 1,
+                    sampleFps = fps,
+                    maxEdge = 320,
+                    sourceStepSec = 1f / fps.toFloat()
+                )
+            }
+            delay(12L)
+        }
+    }
+
     // The RAM cache warmer is owned by EditorScreen and fills only the current
     // playhead working set while paused. Playback requests use the same keys.
     
