@@ -22,23 +22,16 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.platform.LocalContext
 import com.kinetic.app.data.AppSettings
-import com.kinetic.app.data.CompositionFrameCache
-import kotlinx.coroutines.launch
 
 @Composable
 fun SettingsScreen(settings: AppSettings, onBack: () -> Unit) {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
     Column(Modifier.fillMaxSize().background(KColors.Bg).statusBarsPadding().navigationBarsPadding()) {
         Row(Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = KColors.Text) }
@@ -58,12 +51,7 @@ fun SettingsScreen(settings: AppSettings, onBack: () -> Unit) {
 
             Section("Preview & performance")
             ChoiceRow("Preview quality", AppSettings.PREVIEW_QUALITIES, settings.previewQualityIndex) { settings.updatePreviewQuality(it) }
-            ChoiceRow("Rendered-frame RAM cache", AppSettings.PREVIEW_MEMORY_MB.map { "$it MB" }, settings.previewMemoryIndex) { settings.updatePreviewMemory(it) }
-            SwitchRow("Automatic preview-frame caching", settings.autoPreviewCache) { settings.updateAutoPreviewCache(it) }
-            ChoiceRow("Rendered-frame disk cache", AppSettings.FRAME_CACHE_DISK_MB.map { "$it MB" }, settings.frameCacheDiskIndex) { settings.updateFrameCacheDisk(it) }
-            TextButton(onClick = { scope.launch { CompositionFrameCache.clear(context) } }) {
-                Text("Clear rendered-frame cache", color = KColors.Accent)
-            }
+            ChoiceRow("Media bitmap cache", AppSettings.PREVIEW_MEMORY_MB.map { "$it MB" }, settings.previewMemoryIndex) { settings.updatePreviewMemory(it) }
 
             Section("Properties")
             ChoiceRow("Interaction style", listOf("After Effects", "Alight Motion"), if (settings.afterEffectsScrubbing) 0 else 1) { settings.updateAfterEffectsScrubbing(it == 0) }
