@@ -227,7 +227,8 @@ object MediaLoader {
         lowPriorityPrefetch: Boolean = false
     ): Bitmap? = withContext(if (lowPriorityPrefetch) MediaWorkers.cacheDispatcher else MediaWorkers.cpuDispatcher) {
         val bucket = if (type == LayerType.VIDEO) (timeSec * sampleFps.toFloat()).toInt() else 0
-        val key = if (type == LayerType.IMAGE) "$uri@image@$maxEdge" else "$uri@$sampleFps@$maxEdge@$bucket"
+        val sourceKey = mediaCacheIdentity(uri)
+        val key = if (type == LayerType.IMAGE) "$sourceKey@image@$maxEdge" else "$sourceKey@$sampleFps@$maxEdge@$bucket"
         synchronized(key.intern()) {
             val hit = cache.get(key)
             if (hit != null) return@synchronized hit
@@ -257,6 +258,13 @@ object MediaLoader {
             }
             bmp
         }
+    }
+
+    private fun mediaCacheIdentity(uri: Uri): String {
+        val file = uri.path?.let(::File)
+        return if (file?.isFile == true) {
+            "${uri}|${file.length()}|${file.lastModified()}"
+        } else uri.toString()
     }
 
     private fun previewFrameFile(ctx: Context, key: String, type: LayerType): File {
@@ -318,19 +326,23 @@ object MediaLoader {
         onProgress: suspend (Float) -> Unit
     ) = withContext(MediaWorkers.cacheDispatcher) {
         val duration = durationSec.coerceAtLeast(0.1f)
-        // Import cache is deliberately bounded to 240 low-resolution samples.
-        // Samples are persisted and admitted to RAM only within the LRU budget.
-        val sampleFps = if (duration <= 120f) 2 else 1
-        val sampleCount = (duration * sampleFps).toInt().coerceIn(1, 240)
+        // Cache a uniform sample across the whole clip, not just its first
+        // four minutes. The 240-frame ceiling bounds disk use and decode work.
+        val sampleCount = (duration * 2f).toInt().coerceIn(1, 240)
+        val intervalSec = duration / sampleCount.toFloat()
+        val sampleFps = if (intervalSec < 0.75f) 2 else 1
+        val speed = playbackSpeed.coerceIn(0.1f, 4f)
         trimPreviewDiskCache(ctx)
         for (index in 0 until sampleCount) {
+            currentCoroutineContext().ensureActive()
             bitmapFor(
                 ctx, uri, LayerType.VIDEO,
-                startOffsetSec + index / sampleFps.toFloat() * playbackSpeed.coerceIn(0.1f, 4f),
+                startOffsetSec + index * intervalSec * speed,
                 sampleFps, 240, persistToDisk = true, lowPriorityPrefetch = true
             )
             onProgress((index + 1).toFloat() / sampleCount)
         }
+        trimPreviewDiskCache(ctx)
     }
 
     /**
