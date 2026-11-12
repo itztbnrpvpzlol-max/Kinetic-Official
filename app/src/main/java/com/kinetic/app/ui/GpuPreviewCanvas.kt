@@ -484,6 +484,12 @@ private class CompositionGlRenderer(
     private var externalMatrixHandle = 0
     private val videoOutputs = HashMap<String, VideoOutput>()
     private val textures = HashMap<String, TextureEntry>()
+    // Reuse frame geometry arrays on the GL thread to avoid per-frame heap
+    // churn and garbage-collection pauses during composition playback.
+    private val pointScratch = FloatArray(8)
+    private val quadScratch = FloatArray(16)
+    private val selectionScratch = FloatArray(8)
+    private val activeTextureIds = HashSet<String>()
     private var viewportWidth = 1
     private var viewportHeight = 1
     private val vertices = ByteBuffer.allocateDirect(16 * 4).order(ByteOrder.nativeOrder()).asFloatBuffer()
@@ -583,9 +589,16 @@ private class CompositionGlRenderer(
             if (program == 0) return
             val current = scene
             refreshVideoFrames()
-            val activeTextureIds = current.layers.filterNot { it.isVideo }.mapTo(HashSet<String>()) { it.id }
-            val staleIds = textures.keys.filter { it !in activeTextureIds }
-            staleIds.forEach { id -> textures.remove(id)?.let { GLES20.glDeleteTextures(1, intArrayOf(it.id), 0) } }
+            activeTextureIds.clear()
+            for (layer in current.layers) if (!layer.isVideo) activeTextureIds.add(layer.id)
+            val textureIterator = textures.entries.iterator()
+            while (textureIterator.hasNext()) {
+                val entry = textureIterator.next()
+                if (entry.key !in activeTextureIds) {
+                    GLES20.glDeleteTextures(1, intArrayOf(entry.value.id), 0)
+                    textureIterator.remove()
+                }
+            }
             val scale = minOf(
                 viewportWidth.toFloat() / COMP_W.toFloat(),
                 viewportHeight.toFloat() / COMP_H.toFloat()
@@ -610,14 +623,17 @@ private class CompositionGlRenderer(
         val right = if (layer.mask) layer.width * 0.8f else layer.width
         val bottom = if (layer.mask) layer.height * 0.8f else layer.height
         val uvMax = if (layer.mask) 0.8f else 1f
-        val points = floatArrayOf(0f, 0f, 0f, bottom, right, 0f, right, bottom)
+        val points = pointScratch
+        points[0] = 0f; points[1] = 0f
+        points[2] = 0f; points[3] = bottom
+        points[4] = right; points[5] = 0f
+        points[6] = right; points[7] = bottom
         layer.matrix.mapPoints(points)
-        val data = floatArrayOf(
-            ndcX(points[0], scale, ox), ndcY(points[1], scale, oy), 0f, 0f,
-            ndcX(points[2], scale, ox), ndcY(points[3], scale, oy), 0f, uvMax,
-            ndcX(points[4], scale, ox), ndcY(points[5], scale, oy), uvMax, 0f,
-            ndcX(points[6], scale, ox), ndcY(points[7], scale, oy), uvMax, uvMax
-        )
+        val data = quadScratch
+        data[0] = ndcX(points[0], scale, ox); data[1] = ndcY(points[1], scale, oy); data[2] = 0f; data[3] = 0f
+        data[4] = ndcX(points[2], scale, ox); data[5] = ndcY(points[3], scale, oy); data[6] = 0f; data[7] = uvMax
+        data[8] = ndcX(points[4], scale, ox); data[9] = ndcY(points[5], scale, oy); data[10] = uvMax; data[11] = 0f
+        data[12] = ndcX(points[6], scale, ox); data[13] = ndcY(points[7], scale, oy); data[14] = uvMax; data[15] = uvMax
         NativeRenderEngine.nativeGlDrawTexture(
             texture, data, layer.opacity, if (layer.grayscale) 1f else 0f, blendModeCode(layer.blend)
         )
@@ -629,14 +645,17 @@ private class CompositionGlRenderer(
         val right = if (layer.mask) layer.width * 0.8f else layer.width
         val bottom = if (layer.mask) layer.height * 0.8f else layer.height
         val uvMax = if (layer.mask) 0.8f else 1f
-        val points = floatArrayOf(0f, 0f, 0f, bottom, right, 0f, right, bottom)
+        val points = pointScratch
+        points[0] = 0f; points[1] = 0f
+        points[2] = 0f; points[3] = bottom
+        points[4] = right; points[5] = 0f
+        points[6] = right; points[7] = bottom
         layer.matrix.mapPoints(points)
-        val data = floatArrayOf(
-            ndcX(points[0], scale, ox), ndcY(points[1], scale, oy), 0f, 0f,
-            ndcX(points[2], scale, ox), ndcY(points[3], scale, oy), 0f, uvMax,
-            ndcX(points[4], scale, ox), ndcY(points[5], scale, oy), uvMax, 0f,
-            ndcX(points[6], scale, ox), ndcY(points[7], scale, oy), uvMax, uvMax
-        )
+        val data = quadScratch
+        data[0] = ndcX(points[0], scale, ox); data[1] = ndcY(points[1], scale, oy); data[2] = 0f; data[3] = 0f
+        data[4] = ndcX(points[2], scale, ox); data[5] = ndcY(points[3], scale, oy); data[6] = 0f; data[7] = uvMax
+        data[8] = ndcX(points[4], scale, ox); data[9] = ndcY(points[5], scale, oy); data[10] = uvMax; data[11] = 0f
+        data[12] = ndcX(points[6], scale, ox); data[13] = ndcY(points[7], scale, oy); data[14] = uvMax; data[15] = uvMax
         NativeRenderEngine.nativeGlDrawExternalTexture(
             output.textureId, data, layer.opacity, if (layer.grayscale) 1f else 0f,
             output.transform, blendModeCode(layer.blend)
@@ -661,14 +680,17 @@ private class CompositionGlRenderer(
     }
 
     private fun drawSelection(layer: GpuLayer, scale: Float, ox: Float, oy: Float) {
-        val p = floatArrayOf(0f, 0f, layer.width, 0f, layer.width, layer.height, 0f, layer.height)
+        val p = pointScratch
+        p[0] = 0f; p[1] = 0f
+        p[2] = layer.width; p[3] = 0f
+        p[4] = layer.width; p[5] = layer.height
+        p[6] = 0f; p[7] = layer.height
         layer.matrix.mapPoints(p)
-        val data = floatArrayOf(
-            ndcX(p[0], scale, ox), ndcY(p[1], scale, oy),
-            ndcX(p[2], scale, ox), ndcY(p[3], scale, oy),
-            ndcX(p[4], scale, ox), ndcY(p[5], scale, oy),
-            ndcX(p[6], scale, ox), ndcY(p[7], scale, oy)
-        )
+        val data = selectionScratch
+        data[0] = ndcX(p[0], scale, ox); data[1] = ndcY(p[1], scale, oy)
+        data[2] = ndcX(p[2], scale, ox); data[3] = ndcY(p[3], scale, oy)
+        data[4] = ndcX(p[4], scale, ox); data[5] = ndcY(p[5], scale, oy)
+        data[6] = ndcX(p[6], scale, ox); data[7] = ndcY(p[7], scale, oy)
         NativeRenderEngine.nativeGlDrawSelection(data)
     }
 
