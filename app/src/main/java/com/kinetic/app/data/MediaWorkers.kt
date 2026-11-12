@@ -25,12 +25,12 @@ object MediaWorkers {
         }
     ).asCoroutineDispatcher()
 
-    // Composition pre-rendering must never occupy the interactive media pool.
-    // A single background-priority worker serializes cache writes and keeps
-    // decoder/thumbnail work available to the live preview.
-    val cacheDispatcher = Executors.newSingleThreadExecutor { runnable ->
+    // Two bounded workers let independent composition frames render in parallel.
+    // Background priority keeps interactive preview and the dedicated audio thread
+    // responsive; we deliberately leave CPU headroom for Android and the UI.
+    val cacheDispatcher = Executors.newFixedThreadPool(2) { runnable ->
         Thread({
-            Process.setThreadPriority(Process.THREAD_PRIORITY_LOWEST)
+            Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND)
             runnable.run()
         }, "KineticFrameCache").apply { isDaemon = true }
     }.asCoroutineDispatcher()
