@@ -372,6 +372,8 @@ private fun Clip(editor: EditorState, layer: Layer, pps: Float, selected: Boolea
         }
     }
     val dashed = layer.type == LayerType.ADJUSTMENT || layer.type == LayerType.NULL
+    val cachedFraction = if (editor.settings.autoPreviewCache && layer.type == LayerType.VIDEO)
+        (editor.cacheProgress[layer.id] ?: 0f).coerceIn(0f, 1f) else 0f
 
     Box(
         Modifier
@@ -411,6 +413,14 @@ private fun Clip(editor: EditorState, layer: Layer, pps: Float, selected: Boolea
                     )
                 }
             }
+        }
+        if (layer.type == LayerType.VIDEO && cachedFraction > 0f) {
+            Box(
+                Modifier.align(Alignment.TopStart)
+                    .fillMaxWidth(cachedFraction)
+                    .height(2.dp)
+                    .background(Color(0xFF35D07F))
+            )
         }
         if (layer.type == LayerType.AUDIO) Waveform(layer.id, layer.uri)
         Row(
