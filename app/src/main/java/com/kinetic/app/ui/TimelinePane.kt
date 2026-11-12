@@ -362,7 +362,7 @@ private fun Clip(editor: EditorState, layer: Layer, pps: Float, selected: Boolea
         value = if (u == null || (layer.type != LayerType.IMAGE && layer.type != LayerType.VIDEO)) {
             emptyList()
         } else if (layer.type == LayerType.IMAGE) {
-            listOfNotNull(MediaLoader.bitmapFor(ctx, Uri.parse(u), LayerType.IMAGE, 0f, 1, 320))
+            listOfNotNull(MediaLoader.bitmapFor(ctx, Uri.parse(u), LayerType.IMAGE, 0f, 1, 320, lowPriorityPrefetch = true))
         } else {
             // Four representative frames make a video clip read as a video strip
             // instead of stretching one still frame across its entire duration.
@@ -373,7 +373,7 @@ private fun Clip(editor: EditorState, layer: Layer, pps: Float, selected: Boolea
                     if (layer.srcLength.isFinite()) {
                         sourceTime = sourceTime.coerceAtMost((layer.srcLength - 0.05f).coerceAtLeast(0f))
                     }
-                    MediaLoader.bitmapFor(ctx, Uri.parse(u), LayerType.VIDEO, sourceTime, 2, 240)?.let(::add)
+                    MediaLoader.bitmapFor(ctx, Uri.parse(u), LayerType.VIDEO, sourceTime, 2, 240, lowPriorityPrefetch = true)?.let(::add)
                 }
             }
         }
