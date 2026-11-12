@@ -66,7 +66,7 @@ Java_com_kinetic_app_engine_NativeRenderEngine_nativeEvaluateCurves(
         JNIEnv* env, jobject, jfloatArray input) {
     if (input == nullptr) return nullptr;
     const jsize length = env->GetArrayLength(input);
-    if (length % 5 != 0) return nullptr;
+    if (length % 5 != 0 || length > 5 * 4096) return nullptr;
 
     jfloat* values = env->GetFloatArrayElements(input, nullptr);
     if (values == nullptr) return nullptr;
