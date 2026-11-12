@@ -1,6 +1,7 @@
 plugins {
     id("com.android.application") version "8.9.1"
-    id("org.jetbrains.kotlin.android") version "1.9.24"
+    id("org.jetbrains.kotlin.android") version "2.2.10"
+    id("org.jetbrains.kotlin.plugin.compose") version "2.2.10"
 }
 
 android {
@@ -28,7 +29,6 @@ android {
         compose = true
         prefab = true
     }
-    composeOptions { kotlinCompilerExtensionVersion = "1.5.14" }
     externalNativeBuild {
         cmake {
             path = file("src/main/cpp/CMakeLists.txt")
