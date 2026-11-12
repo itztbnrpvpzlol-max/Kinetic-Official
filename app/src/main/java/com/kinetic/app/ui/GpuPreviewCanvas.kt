@@ -104,9 +104,11 @@ fun PreviewCanvas(
         onVideoReady(true)
     }
 
-    // Use Canvas on constrained/entry-level devices whose GLES3 drivers
-    // expose ES 3 but cannot reliably render the native composition path.
-    if (!supportsGles3(context)) {
+    // The native GLES composition path is not reliable on constrained
+    // four-core / low-heap devices even when the driver advertises GLES 3.
+    // Prefer the established Canvas renderer there so every visual layer stays
+    // visible; use the GPU path only when the device has enough headroom.
+    if (!supportsGles3(context) || MediaWorkers.isConstrainedDevice) {
         CpuPreviewCanvas(editor, modifier)
     } else {
         val visualLayers = editor.layers.filter {
