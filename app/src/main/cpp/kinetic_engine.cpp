@@ -203,6 +203,7 @@ Java_com_kinetic_app_engine_NativePlaybackEngine_nativeRelease(JNIEnv*, jobject,
 
 
 namespace {
+GLuint gVertexBuffer = 0;
 GLuint gTextureProgram = 0;
 GLuint gExternalProgram = 0;
 GLuint gSolidProgram = 0;
@@ -268,13 +269,16 @@ void drawNativeTexture(GLuint program, GLint positionHandle, GLint uvHandle,
                        GLenum target, jint textureId, const jfloat* vertices,
                        jfloat alpha, jfloat gray, jint blendMode) {
     if (!program || !vertices || alpha <= 0.f) return;
+    if (!gVertexBuffer) return;
+    glBindBuffer(GL_ARRAY_BUFFER, gVertexBuffer);
+    glBufferData(GL_ARRAY_BUFFER, 16 * sizeof(jfloat), vertices, GL_STREAM_DRAW);
     glUseProgram(program);
     glEnableVertexAttribArray(static_cast<GLuint>(positionHandle));
     glVertexAttribPointer(static_cast<GLuint>(positionHandle), 2, GL_FLOAT, GL_FALSE,
-                          4 * sizeof(jfloat), vertices);
+                          4 * sizeof(jfloat), reinterpret_cast<const void*>(0));
     glEnableVertexAttribArray(static_cast<GLuint>(uvHandle));
     glVertexAttribPointer(static_cast<GLuint>(uvHandle), 2, GL_FLOAT, GL_FALSE,
-                          4 * sizeof(jfloat), vertices + 2);
+                          4 * sizeof(jfloat), reinterpret_cast<const void*>(2 * sizeof(jfloat)));
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(target, static_cast<GLuint>(textureId));
     glUniform1i(samplerHandle, 0);
@@ -286,6 +290,7 @@ void drawNativeTexture(GLuint program, GLint positionHandle, GLint uvHandle,
     glDisable(GL_BLEND);
     glDisableVertexAttribArray(static_cast<GLuint>(positionHandle));
     glDisableVertexAttribArray(static_cast<GLuint>(uvHandle));
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
 }
 }
 
@@ -296,6 +301,11 @@ Java_com_kinetic_app_engine_NativeRenderEngine_nativeGlInit(JNIEnv*, jobject) {
     GLint glMajor = 0;
     glGetIntegerv(GL_MAJOR_VERSION, &glMajor);
     if (glMajor < 3) return JNI_FALSE;
+    // ES 3.x core requires vertex data to be supplied through buffer objects;
+    // client-memory attribute pointers from the old ES 2 path are not used.
+    gVertexBuffer = 0;
+    glGenBuffers(1, &gVertexBuffer);
+    if (!gVertexBuffer) return JNI_FALSE;
 
     static const char* vertex =
         "attribute vec2 aPosition; attribute vec2 aTexCoord; varying vec2 vTexCoord;"
@@ -322,7 +332,11 @@ Java_com_kinetic_app_engine_NativeRenderEngine_nativeGlInit(JNIEnv*, jobject) {
     static const char* solidVertex =
         "attribute vec2 aPosition; void main(){ gl_Position=vec4(aPosition,0.0,1.0); }";
     gSolidProgram = linkGlProgram(solidVertex, solidFragment);
-    if (!gTextureProgram || !gExternalProgram || !gSolidProgram) return JNI_FALSE;
+    if (!gTextureProgram || !gExternalProgram || !gSolidProgram) {
+        if (gVertexBuffer) glDeleteBuffers(1, &gVertexBuffer);
+        gVertexBuffer = 0;
+        return JNI_FALSE;
+    }
 
     gTexturePosition = glGetAttribLocation(gTextureProgram, "aPosition");
     gTextureUv = glGetAttribLocation(gTextureProgram, "aTexCoord");
@@ -366,13 +380,20 @@ Java_com_kinetic_app_engine_NativeRenderEngine_nativeGlDrawExternalTexture(
         if (matrix) env->ReleaseFloatArrayElements(textureMatrix, matrix, JNI_ABORT);
         return;
     }
+    if (!gVertexBuffer) {
+        env->ReleaseFloatArrayElements(vertices, data, JNI_ABORT);
+        env->ReleaseFloatArrayElements(textureMatrix, matrix, JNI_ABORT);
+        return;
+    }
+    glBindBuffer(GL_ARRAY_BUFFER, gVertexBuffer);
+    glBufferData(GL_ARRAY_BUFFER, 16 * sizeof(jfloat), data, GL_STREAM_DRAW);
     glUseProgram(gExternalProgram);
     glEnableVertexAttribArray(static_cast<GLuint>(gExternalPosition));
     glVertexAttribPointer(static_cast<GLuint>(gExternalPosition), 2, GL_FLOAT, GL_FALSE,
-                          4 * sizeof(jfloat), data);
+                          4 * sizeof(jfloat), reinterpret_cast<const void*>(0));
     glEnableVertexAttribArray(static_cast<GLuint>(gExternalUv));
     glVertexAttribPointer(static_cast<GLuint>(gExternalUv), 2, GL_FLOAT, GL_FALSE,
-                          4 * sizeof(jfloat), data + 2);
+                          4 * sizeof(jfloat), reinterpret_cast<const void*>(2 * sizeof(jfloat)));
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_EXTERNAL_OES, static_cast<GLuint>(textureId));
     glUniform1i(gExternalSampler, 0);
@@ -385,6 +406,7 @@ Java_com_kinetic_app_engine_NativeRenderEngine_nativeGlDrawExternalTexture(
     glDisable(GL_BLEND);
     glDisableVertexAttribArray(static_cast<GLuint>(gExternalPosition));
     glDisableVertexAttribArray(static_cast<GLuint>(gExternalUv));
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
     env->ReleaseFloatArrayElements(vertices, data, JNI_ABORT);
     env->ReleaseFloatArrayElements(textureMatrix, matrix, JNI_ABORT);
 }
@@ -395,13 +417,21 @@ Java_com_kinetic_app_engine_NativeRenderEngine_nativeGlDrawSelection(
     if (!vertices || env->GetArrayLength(vertices) < 8 || !gSolidProgram) return;
     jfloat* data = env->GetFloatArrayElements(vertices, nullptr);
     if (!data) return;
+    if (!gVertexBuffer) {
+        env->ReleaseFloatArrayElements(vertices, data, JNI_ABORT);
+        return;
+    }
+    glBindBuffer(GL_ARRAY_BUFFER, gVertexBuffer);
+    glBufferData(GL_ARRAY_BUFFER, 8 * sizeof(jfloat), data, GL_STREAM_DRAW);
     glUseProgram(gSolidProgram);
     glEnableVertexAttribArray(static_cast<GLuint>(gSolidPosition));
-    glVertexAttribPointer(static_cast<GLuint>(gSolidPosition), 2, GL_FLOAT, GL_FALSE, 0, data);
+    glVertexAttribPointer(static_cast<GLuint>(gSolidPosition), 2, GL_FLOAT, GL_FALSE, 0,
+                          reinterpret_cast<const void*>(0));
     glUniform4f(gSolidColor, 0.52f, 0.40f, 1.f, 1.f);
     glLineWidth(2.f);
     glDrawArrays(GL_LINE_LOOP, 0, 4);
     glDisableVertexAttribArray(static_cast<GLuint>(gSolidPosition));
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
     env->ReleaseFloatArrayElements(vertices, data, JNI_ABORT);
 }
 
@@ -410,5 +440,7 @@ Java_com_kinetic_app_engine_NativeRenderEngine_nativeGlRelease(JNIEnv*, jobject)
     if (gTextureProgram) glDeleteProgram(gTextureProgram);
     if (gExternalProgram) glDeleteProgram(gExternalProgram);
     if (gSolidProgram) glDeleteProgram(gSolidProgram);
+    if (gVertexBuffer) glDeleteBuffers(1, &gVertexBuffer);
+    gVertexBuffer = 0;
     gTextureProgram = gExternalProgram = gSolidProgram = 0;
 }
