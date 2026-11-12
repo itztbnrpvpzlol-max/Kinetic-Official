@@ -126,8 +126,10 @@ object CompositionFrameCache {
         height: Int,
         diskLimitMb: Int
     ): String? {
-        val key = frameKey(projectId, layers, time, fps, width, height)
-        if (isCached(context, key)) return key
+        val key = withContext(MediaWorkers.cpuDispatcher) {
+            frameKey(projectId, layers, time, fps, width, height)
+        }
+        if (withContext(Dispatchers.IO) { isCached(context, key) }) return key
         val rendered = withContext(MediaWorkers.cpuDispatcher) {
             renderCompositionFrame(context, layers, time, fps, width, height)
         } ?: return null
