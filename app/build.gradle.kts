@@ -11,8 +11,10 @@ android {
         applicationId = "com.kinetic.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 3
-        versionName = "0.3"
+        // CI supplies a unique, monotonically increasing version for every APK build.
+        // Local builds retain the last checked-in fallback values.
+        versionCode = providers.gradleProperty("KINETIC_VERSION_CODE").orElse("3").get().toInt()
+        versionName = providers.gradleProperty("KINETIC_VERSION_NAME").orElse("0.3").get()
         ndk {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
         }
