@@ -24,9 +24,6 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -50,7 +47,6 @@ import android.opengl.GLES11Ext
 import java.util.concurrent.ConcurrentHashMap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
-import com.kinetic.app.data.CompositionFrameCache
 import com.kinetic.app.data.MediaLoader
 import com.kinetic.app.data.MediaWorkers
 import com.kinetic.app.data.PreviewDiagnostics
@@ -105,65 +101,10 @@ fun PreviewCanvas(
             it.type != LayerType.NULL && it.type != LayerType.ADJUSTMENT
     }
     val qualityScale = resolvePreviewScale(context, qualityIndex, visualLayers.size)
-    val outputWidth = (COMP_W * qualityScale).toInt().coerceAtLeast(240)
-    val outputHeight = (COMP_H * qualityScale).toInt().coerceAtLeast(135)
-    val frameIndex = (editor.time * editor.fps).toInt().coerceAtLeast(0)
-    val frameTime = frameIndex / editor.fps.toFloat()
-    val frameKeys by androidx.compose.runtime.produceState<Pair<String, String>?>(
-        initialValue = null, editor.projectId, editor.layers, frameIndex,
-        editor.fps, outputWidth, outputHeight, editor.playing
-    ) {
-        if (editor.playing) {
-            value = null
-        } else value = kotlinx.coroutines.withContext(MediaWorkers.cpuDispatcher) {
-            val fullKey = CompositionFrameCache.frameKey(
-                editor.projectId, editor.layers, frameTime, editor.fps,
-                outputWidth, outputHeight
-            )
-            val warmScale = minOf(qualityScale, 0.5f)
-            val warmWidth = (COMP_W * warmScale).toInt().coerceAtLeast(240)
-            val warmHeight = (COMP_H * warmScale).toInt().coerceAtLeast(135)
-            val warmKey = CompositionFrameCache.frameKey(
-                editor.projectId, editor.layers, frameTime, editor.fps,
-                warmWidth, warmHeight
-            )
-            fullKey to warmKey
-        }
-    }
-    val readyKey = if (editor.playing) null else editor.cachedFrames[frameIndex]
-    // Prefer full-quality frames, but use the low-resolution warm frame while
-    // its full-quality replacement is still being rendered.
-    val frameKey = when {
-        readyKey != null && readyKey == frameKeys?.first -> frameKeys?.first
-        readyKey != null && readyKey == frameKeys?.second -> frameKeys?.second
-        else -> null
-    }
-    val frameReady = frameKey != null
 
-    // Composition frames are useful for paused scrubbing, but decoding JPEG
-    // frames on the presentation clock adds variable IO/CPU latency. During
-    // playback always use the live hardware-decoder path instead.
-    var loadedCachedFrame by remember { mutableStateOf<Pair<String, Bitmap>?>(null) }
-    LaunchedEffect(frameKey, editor.playing) {
-        if (editor.playing) return@LaunchedEffect
-        val key = frameKey ?: return@LaunchedEffect
-        val decoded = CompositionFrameCache.loadFrame(context, key)
-        if (decoded != null) loadedCachedFrame = key to decoded
-    }
-    val cachedFrame = if (editor.playing) null
-        else loadedCachedFrame?.takeIf { it.first == frameKey }?.second
-
-    if (cachedFrame != null) {
-        LaunchedEffect(frameKey) { onVideoReady(true) }
-        Image(
-            bitmap = cachedFrame.asImageBitmap(),
-            contentDescription = "Cached composition frame",
-            modifier = modifier.background(androidx.compose.ui.graphics.Color.Black),
-            contentScale = ContentScale.Fit
-        )
-    } else {
-        LivePreviewCanvas(editor, modifier, qualityScale, onVideoReady)
-    }
+    // Always use the live preview renderer. No pre-rendered timeline frames,
+    // disk frame scans, or cache bitmap swaps occur while scrubbing.
+    LivePreviewCanvas(editor, modifier, qualityScale, onVideoReady)
 }
 
 @Composable
