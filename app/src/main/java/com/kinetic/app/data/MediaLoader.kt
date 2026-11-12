@@ -93,17 +93,70 @@ object MediaLoader {
         withContext(MediaWorkers.cpuDispatcher) {
             val bucket = if (type == LayerType.VIDEO) (timeSec * sampleFps.toFloat()).toInt() else 0
             val key = if (type == LayerType.IMAGE) "$uri@image" else "$uri@$sampleFps@$maxEdge@$bucket"
-            val hit = cache.get(key)
-            if (hit != null) return@withContext hit
-            val bmp = try {
-                if (type == LayerType.IMAGE) decodeImage(ctx, uri) else videoFrame(ctx, uri, bucket / sampleFps.toFloat(), maxEdge)
-            } catch (e: Exception) {
-                null
+            synchronized(key.intern()) {
+                val hit = cache.get(key)
+                if (hit != null) return@synchronized hit
+                val diskFile = previewFrameFile(ctx, key)
+                val diskBitmap = if (diskFile.isFile) BitmapFactory.decodeFile(diskFile.absolutePath) else null
+                val bmp = diskBitmap ?: try {
+                    if (type == LayerType.IMAGE) decodeImage(ctx, uri) else videoFrame(ctx, uri, bucket / sampleFps.toFloat(), maxEdge)
+                } catch (e: Exception) {
+                    null
+                }
+                if (bmp != null) {
+                    cache.put(key, bmp)
+                    if (diskBitmap == null) {
+                        runCatching {
+                            diskFile.parentFile?.mkdirs()
+                            FileOutputStream(diskFile).use { output ->
+                                bmp.compress(Bitmap.CompressFormat.JPEG, 86, output)
+                            }
+                        }
+                    }
+                }
+                bmp
             }
-            if (bmp != null) cache.put(key, bmp)
-            bmp
         }
 
+    private fun previewFrameFile(ctx: Context, key: String): File {
+        val digest = MessageDigest.getInstance("SHA-256")
+            .digest(key.toByteArray())
+            .joinToString("") { "%02x".format(it) }
+        return File(File(ctx.cacheDir, "preview-frames"), "$digest.jpg")
+    }
+
+    private fun trimPreviewDiskCache(ctx: Context) {
+        val directory = File(ctx.cacheDir, "preview-frames")
+        val files = directory.listFiles()?.filter { it.isFile } ?: return
+        var total = files.fold(0L) { sum, file -> sum + file.length() }
+        if (total <= 256L * 1024L * 1024L) return
+        for (file in files.sortedBy { it.lastModified() }) {
+            if (total <= 192L * 1024L * 1024L) break
+            val length = file.length()
+            if (file.delete()) total -= length
+        }
+    }
+
+    /**
+     * Fill a low-resolution, persistent frame cache in the background. This is
+     * deliberately independent from playback: the editor never waits for it.
+     * A maximum of 240 samples per clip bounds storage and decoder work.
+     */
+    suspend fun cacheVideoPreviewFrames(
+        ctx: Context,
+        uri: Uri,
+        durationSec: Float,
+        onProgress: suspend (Float) -> Unit
+    ) = withContext(MediaWorkers.cpuDispatcher) {
+        val duration = durationSec.coerceAtLeast(0.1f)
+        val sampleFps = if (duration <= 120f) 2 else 1
+        val sampleCount = (duration * sampleFps).toInt().coerceIn(1, 240)
+        trimPreviewDiskCache(ctx)
+        for (index in 0 until sampleCount) {
+            bitmapFor(ctx, uri, LayerType.VIDEO, index / sampleFps.toFloat(), sampleFps, 240)
+            onProgress((index + 1).toFloat() / sampleCount)
+        }
+    }
 
     /**
      * Copies an imported content URI into app-private storage before it is added
