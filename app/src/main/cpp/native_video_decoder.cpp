@@ -32,6 +32,7 @@ struct NativeVideoDecoder {
     bool stopping = false;
     bool playing = false;
     bool initialized = false;
+    std::atomic<int> state{0}; // 0=starting, 1=ready, -1=failed, 2=stopped
     bool inputEos = false;
     bool outputEos = false;
     int64_t pendingSeekUs = -1;
@@ -80,6 +81,7 @@ struct NativeVideoDecoder {
             close(fd);
             fd = -1;
         }
+        state.store(2, std::memory_order_release);
     }
 
     void seek(int64_t positionUs) {
@@ -193,6 +195,7 @@ struct NativeVideoDecoder {
         }
         dropBeforeUs = initialPositionUs;
         initialized = true;
+        state.store(1, std::memory_order_release);
         return true;
     }
 
@@ -216,6 +219,7 @@ struct NativeVideoDecoder {
             std::lock_guard<std::mutex> lock(mutex);
             initialized = false;
             playing = false;
+            state.store(-1, std::memory_order_release);
             __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, "Video decoder setup failed; preview output unavailable");
             return;
         }
@@ -392,4 +396,10 @@ Java_com_kinetic_app_engine_NativeVideoPlayer_nativeSetSpeed(
 extern "C" JNIEXPORT void JNICALL
 Java_com_kinetic_app_engine_NativeVideoPlayer_nativeRelease(JNIEnv*, jobject, jlong handle) {
     delete reinterpret_cast<NativeVideoDecoder*>(handle);
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_kinetic_app_engine_NativeVideoPlayer_nativeGetState(JNIEnv*, jobject, jlong handle) {
+    auto* decoder = reinterpret_cast<NativeVideoDecoder*>(handle);
+    return decoder ? decoder->state.load(std::memory_order_acquire) : -1;
 }
