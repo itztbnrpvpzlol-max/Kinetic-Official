@@ -24,4 +24,14 @@ object MediaWorkers {
             }, "KineticMediaWorker").apply { isDaemon = true }
         }
     ).asCoroutineDispatcher()
+
+    // Composition pre-rendering must never occupy the interactive media pool.
+    // A single background-priority worker serializes cache writes and keeps
+    // decoder/thumbnail work available to the live preview.
+    val cacheDispatcher = Executors.newSingleThreadExecutor { runnable ->
+        Thread({
+            Process.setThreadPriority(Process.THREAD_PRIORITY_LOWEST)
+            runnable.run()
+        }, "KineticFrameCache").apply { isDaemon = true }
+    }.asCoroutineDispatcher()
 }
