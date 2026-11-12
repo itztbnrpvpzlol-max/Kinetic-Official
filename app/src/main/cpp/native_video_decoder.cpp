@@ -33,6 +33,7 @@ struct NativeVideoDecoder {
     bool outputEos = false;
     int64_t pendingSeekUs = -1;
     int64_t initialPositionUs = 0;
+    int64_t dropBeforeUs = -1;
     int64_t anchorPtsUs = -1;
     int64_t lastPtsUs = 0;
     int64_t anchorNs = 0;
@@ -147,6 +148,7 @@ struct NativeVideoDecoder {
             AMediaExtractor_seekTo(extractor, initialPositionUs, AMEDIAEXTRACTOR_SEEK_PREVIOUS_SYNC);
             AMediaCodec_flush(codec);
         }
+        dropBeforeUs = initialPositionUs;
         initialized = true;
         return true;
     }
@@ -155,6 +157,7 @@ struct NativeVideoDecoder {
         if (!extractor || !codec) return;
         AMediaExtractor_seekTo(extractor, targetUs, AMEDIAEXTRACTOR_SEEK_PREVIOUS_SYNC);
         AMediaCodec_flush(codec);
+        dropBeforeUs = targetUs;
         inputEos = false;
         outputEos = false;
         {
@@ -228,6 +231,13 @@ struct NativeVideoDecoder {
             const ssize_t outputIndex = AMediaCodec_dequeueOutputBuffer(codec, &info, 1000);
             if (outputIndex >= 0) {
                 bool render = info.size > 0;
+                if (render && dropBeforeUs >= 0) {
+                    if (info.presentationTimeUs < dropBeforeUs) {
+                        AMediaCodec_releaseOutputBuffer(codec, static_cast<size_t>(outputIndex), false);
+                        continue;
+                    }
+                    dropBeforeUs = -1;
+                }
                 int64_t targetNs = monotonicNs();
                 if (render) {
                     std::lock_guard<std::mutex> lock(mutex);

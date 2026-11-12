@@ -9,6 +9,7 @@ import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.net.Uri
 import android.os.SystemClock
+import android.os.Process
 import com.kinetic.app.model.Layer
 import com.kinetic.app.model.LayerType
 import java.nio.ByteBuffer
@@ -155,13 +156,13 @@ class AudioEngine(context: Context) {
             if (closed) return
             closed = true
             wantsPlayback = false
+            // The decoder worker owns MediaCodec/AudioTrack and releases them in
+            // its finally block. Never join it from the editor/UI thread.
             synchronized(lock) { lock.notifyAll() }
-            worker.join(1_500L)
-            track?.runCatching { pause(); flush(); release() }
-            track = null
         }
 
         private fun decodeLoop() {
+            runCatching { Process.setThreadPriority(Process.THREAD_PRIORITY_AUDIO) }
             var extractor: MediaExtractor? = null
             var codec: MediaCodec? = null
             var inputEos = false
@@ -339,8 +340,8 @@ class AudioEngine(context: Context) {
     }
 
     companion object {
-        private const val DRIFT_CORRECTION_MS = 500L
-        private const val CORRECTION_COOLDOWN_MS = 1_200L
+        private const val DRIFT_CORRECTION_MS = 250L
+        private const val CORRECTION_COOLDOWN_MS = 700L
         private const val IDLE_PLAYER_RELEASE_MS = 2_500L
     }
 }
