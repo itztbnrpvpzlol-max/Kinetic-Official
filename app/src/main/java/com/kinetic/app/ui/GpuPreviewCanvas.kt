@@ -54,7 +54,6 @@ import com.kinetic.app.model.EditorState
 import com.kinetic.app.model.LayerType
 import com.kinetic.app.model.PropId
 import com.kinetic.app.model.layerMatrix
-import java.nio.FloatBuffer
 import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
 import android.net.Uri
@@ -460,19 +459,6 @@ private class CompositionGlRenderer(
     private var program = 0
     private var solidProgram = 0
     private var externalProgram = 0
-    private var positionHandle = 0
-    private var uvHandle = 0
-    private var samplerHandle = 0
-    private var alphaHandle = 0
-    private var grayHandle = 0
-    private var solidPositionHandle = 0
-    private var solidColorHandle = 0
-    private var externalPositionHandle = 0
-    private var externalUvHandle = 0
-    private var externalSamplerHandle = 0
-    private var externalAlphaHandle = 0
-    private var externalGrayHandle = 0
-    private var externalMatrixHandle = 0
     private val videoOutputs = HashMap<String, VideoOutput>()
     private val textures = HashMap<String, TextureEntry>()
     // Reuse frame geometry arrays on the GL thread to avoid per-frame heap
