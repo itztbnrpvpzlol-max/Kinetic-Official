@@ -226,19 +226,25 @@ class AndroidVideoPlayer(
             while (true) {
                 var seekTargetUs = -1L
                 var shouldDecode = false
+                var shouldStop = false
                 synchronized(lock) {
-                    if (stopping || released || surface !== outputSurface) break
-                    seekTargetUs = pendingSeekUs ?: -1L
-                    pendingSeekUs = null
-                    shouldDecode = playing || stepFramePending
-                    if (!shouldDecode && seekTargetUs < 0L) {
-                        lock.wait(20L)
-                        if (stopping || released || surface !== outputSurface) break
+                    shouldStop = stopping || released || surface !== outputSurface
+                    if (!shouldStop) {
                         seekTargetUs = pendingSeekUs ?: -1L
                         pendingSeekUs = null
                         shouldDecode = playing || stepFramePending
+                        if (!shouldDecode && seekTargetUs < 0L) {
+                            lock.wait(20L)
+                            shouldStop = stopping || released || surface !== outputSurface
+                            if (!shouldStop) {
+                                seekTargetUs = pendingSeekUs ?: -1L
+                                pendingSeekUs = null
+                                shouldDecode = playing || stepFramePending
+                            }
+                        }
                     }
                 }
+                if (shouldStop) break
 
                 if (seekTargetUs >= 0L) {
                     extractor.seekTo(seekTargetUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
