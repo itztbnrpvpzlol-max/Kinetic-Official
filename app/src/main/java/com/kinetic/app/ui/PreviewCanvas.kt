@@ -87,6 +87,42 @@ fun CpuPreviewCanvas(editor: EditorState, modifier: Modifier = Modifier) {
         }
     }
 
+    // Keep the same 360p/12fps buckets used by the CPU preview one step ahead
+    // of the playhead. If the next bucket is missing, the transport can wait
+    // instead of displaying a stale frame while the decoder falls behind.
+    LaunchedEffect(editor.playing, editor.layers.map { listOf(it.id, it.uri, it.visible, it.type) }) {
+        if (!editor.playing) return@LaunchedEffect
+        while (editor.playing) {
+            val playhead = editor.time
+            val activeVideos = editor.layers.filter {
+                it.visible && it.type == LayerType.VIDEO && it.uri != null && it.activeAt(playhead)
+            }
+            for (layer in activeVideos) {
+                val original = Uri.parse(layer.uri!!)
+                val source = PreviewProxyStore.findExisting(
+                    ctx,
+                    original,
+                    PreviewProxyStore.PLAYBACK_PROXY_HEIGHT,
+                    PreviewProxyStore.PLAYBACK_PROXY_BITRATE
+                ) ?: original
+                val speed = layer.speed.coerceIn(0.1f, 4f)
+                val sourceTime = (
+                    (playhead - layer.start).coerceAtLeast(0f) * speed + layer.srcOffset
+                ).coerceAtLeast(0f)
+                MediaLoader.prefetchUpcomingVideoFrames(
+                    ctx,
+                    source,
+                    sourceTime,
+                    frameCount = 3,
+                    sampleFps = 12,
+                    maxEdge = 360,
+                    sourceStepSec = speed / 12f
+                )
+            }
+            kotlinx.coroutines.delay(90L)
+        }
+    }
+
     val paint = remember { Paint(Paint.ANTI_ALIAS_FLAG).apply { isFilterBitmap = true } }
     val textPaint = remember {
         Paint(Paint.ANTI_ALIAS_FLAG).apply {
