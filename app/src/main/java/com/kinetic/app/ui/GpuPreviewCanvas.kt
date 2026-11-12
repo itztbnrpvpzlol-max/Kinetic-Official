@@ -523,16 +523,8 @@ private class CompositionGlRenderer(
     private val selectionScratch = FloatArray(8)
     private val activeTextureIds = HashSet<String>()
     private val fingerprintMatrixScratch = FloatArray(9)
-    // Reused packed scene buffers: one JNI transition per composed frame.
-    private var compositionTextureIds = IntArray(0)
-    private var compositionFlags = IntArray(0)
-    private var compositionParams = FloatArray(0)
-    private var compositionMatrices = FloatArray(0)
-    private var compositionTextureMatrices = FloatArray(0)
-    private val compositionFrameMetrics = FloatArray(4)
-    private val identityTextureMatrix = FloatArray(16) {
-        if (it % 5 == 0) 1f else 0f
-    }
+    // Keep the original per-layer quad path rather than batching scene draws.
+    private val quadScratch = FloatArray(16)
     private var compositionCacheAllocated = false
     private var cachedCompositionFingerprint = Long.MIN_VALUE
     private var viewportWidth = 1
@@ -732,7 +724,7 @@ private class CompositionGlRenderer(
             val offsetX = (viewportWidth - COMP_W * scale) / 2f
             val offsetY = (viewportHeight - COMP_H * scale) / 2f
 
-            drawComposition(current.layers)
+            drawComposition(current.layers, scale, offsetX, offsetY)
             trimGpuTextureCache(activeTextureIds)
             current.selected?.let { drawSelection(it, scale, offsetX, offsetY) }
         } catch (error: Throwable) {
@@ -743,79 +735,60 @@ private class CompositionGlRenderer(
     }
 
     /**
-     * Packs layer state once. KRE evaluates transforms, viewport geometry,
-     * texture sampling and the ordered GLES3 draw pass natively.
+     * Draw the ordered scene using the established per-layer GLES calls.
+     * This avoids the newer packed native batch/transform path.
      */
-    private fun drawComposition(layers: List<GpuLayer>) {
-        val required = layers.size
-        if (required == 0) return
-        if (compositionTextureIds.size < required) {
-            compositionTextureIds = IntArray(required)
-            compositionFlags = IntArray(required)
-            compositionParams = FloatArray(required * 4)
-            compositionMatrices = FloatArray(required * 9)
-            compositionTextureMatrices = FloatArray(required * 16)
-        }
-
-        compositionFrameMetrics[0] = viewportWidth.toFloat()
-        compositionFrameMetrics[1] = viewportHeight.toFloat()
-        compositionFrameMetrics[2] = COMP_W.toFloat()
-        compositionFrameMetrics[3] = COMP_H.toFloat()
-
-        var count = 0
+    private fun drawComposition(layers: List<GpuLayer>, scale: Float, ox: Float, oy: Float) {
         for (layer in layers) {
-            if (layer.opacity <= 0f) continue
-            val externalOutput = if (layer.isVideo) videoOutputs[layer.id] else null
-            val textureId = if (layer.isVideo) {
-                externalOutput?.textureId ?: 0
-            } else {
-                val bitmap = layer.bitmap ?: continue
-                if (bitmap.isRecycled) continue
-                textureFor(layer.id, bitmap) ?: continue
-            }
-            if (textureId == 0) continue
-
-            compositionTextureIds[count] = textureId
-            compositionFlags[count] =
-                (if (externalOutput != null) 1 else 0) or
-                (blendModeCode(layer.blend) shl 1) or
-                (if (layer.mask) 1 shl 5 else 0)
-            val paramOffset = count * 4
-            compositionParams[paramOffset] = layer.opacity.coerceIn(0f, 1f)
-            compositionParams[paramOffset + 1] = if (layer.grayscale) 1f else 0f
-            compositionParams[paramOffset + 2] = layer.width
-            compositionParams[paramOffset + 3] = layer.height
-
-            val matrixOffset = count * 9
-            layer.matrix.getValues(fingerprintMatrixScratch)
-            System.arraycopy(fingerprintMatrixScratch, 0, compositionMatrices, matrixOffset, 9)
-
-            val textureMatrixOffset = count * 16
-            if (externalOutput != null) {
-                System.arraycopy(
-                    externalOutput.transform, 0,
-                    compositionTextureMatrices, textureMatrixOffset, 16
-                )
-            } else {
-                System.arraycopy(
-                    identityTextureMatrix, 0,
-                    compositionTextureMatrices, textureMatrixOffset, 16
-                )
-            }
-            count++
+            if (layer.isVideo) drawVideoLayer(layer, scale, ox, oy)
+            else drawLayer(layer, scale, ox, oy)
         }
+    }
 
-        if (count > 0) {
-            NativeRenderEngine.nativeGlDrawComposition(
-                compositionTextureIds,
-                compositionFlags,
-                compositionParams,
-                compositionMatrices,
-                compositionTextureMatrices,
-                compositionFrameMetrics,
-                count
-            )
-        }
+    private fun drawLayer(layer: GpuLayer, scale: Float, ox: Float, oy: Float) {
+        val bitmap = layer.bitmap ?: return
+        if (bitmap.isRecycled || layer.opacity <= 0f) return
+        val texture = textureFor(layer.id, bitmap) ?: return
+        val right = if (layer.mask) layer.width * 0.8f else layer.width
+        val bottom = if (layer.mask) layer.height * 0.8f else layer.height
+        val uvMax = if (layer.mask) 0.8f else 1f
+        val points = pointScratch
+        points[0] = 0f; points[1] = 0f
+        points[2] = 0f; points[3] = bottom
+        points[4] = right; points[5] = 0f
+        points[6] = right; points[7] = bottom
+        layer.matrix.mapPoints(points)
+        val data = quadScratch
+        data[0] = ndcX(points[0], scale, ox); data[1] = ndcY(points[1], scale, oy); data[2] = 0f; data[3] = 0f
+        data[4] = ndcX(points[2], scale, ox); data[5] = ndcY(points[3], scale, oy); data[6] = 0f; data[7] = uvMax
+        data[8] = ndcX(points[4], scale, ox); data[9] = ndcY(points[5], scale, oy); data[10] = uvMax; data[11] = 0f
+        data[12] = ndcX(points[6], scale, ox); data[13] = ndcY(points[7], scale, oy); data[14] = uvMax; data[15] = uvMax
+        NativeRenderEngine.nativeGlDrawTexture(
+            texture, data, layer.opacity, if (layer.grayscale) 1f else 0f, blendModeCode(layer.blend)
+        )
+    }
+
+    private fun drawVideoLayer(layer: GpuLayer, scale: Float, ox: Float, oy: Float) {
+        val output = videoOutputs[layer.id] ?: return
+        if (layer.opacity <= 0f || externalProgram == 0) return
+        val right = if (layer.mask) layer.width * 0.8f else layer.width
+        val bottom = if (layer.mask) layer.height * 0.8f else layer.height
+        val uvMax = if (layer.mask) 0.8f else 1f
+        val points = pointScratch
+        points[0] = 0f; points[1] = 0f
+        points[2] = 0f; points[3] = bottom
+        points[4] = right; points[5] = 0f
+        points[6] = right; points[7] = bottom
+        layer.matrix.mapPoints(points)
+        val data = quadScratch
+        data[0] = ndcX(points[0], scale, ox); data[1] = ndcY(points[1], scale, oy); data[2] = 0f; data[3] = 0f
+        data[4] = ndcX(points[2], scale, ox); data[5] = ndcY(points[3], scale, oy); data[6] = 0f; data[7] = uvMax
+        data[8] = ndcX(points[4], scale, ox); data[9] = ndcY(points[5], scale, oy); data[10] = uvMax; data[11] = 0f
+        data[12] = ndcX(points[6], scale, ox); data[13] = ndcY(points[7], scale, oy); data[14] = uvMax; data[15] = uvMax
+        NativeRenderEngine.nativeGlDrawExternalTexture(
+            output.textureId, data, layer.opacity, if (layer.grayscale) 1f else 0f,
+            output.transform, blendModeCode(layer.blend)
+        )
     }
 
     private fun textureFor(layerId: String, bitmap: Bitmap): Int? {
