@@ -423,8 +423,8 @@ private fun Clip(editor: EditorState, layer: Layer, pps: Float, selected: Boolea
                 }
             }
         }
-        // The cyan strip shows cumulative per-clip cache preparation progress.
-        // It is independent of the playhead and does not rewind on scrubbing.
+        // The cyan strip shows the contiguous resident portion of the current
+        // playhead-centred RAM working set, not whole-clip scan history.
         if (layer.type == LayerType.VIDEO) {
             val ramWindow = TimelineRamCache.windows[layer.id]
             Box(
@@ -537,10 +537,23 @@ private fun TransformTimelineGroup(
 }
 
 @Composable
+private fun rememberTimelineDisplayTime(editor: EditorState): Float {
+    val displayed = remember(editor) { mutableFloatStateOf(0f) }
+    LaunchedEffect(editor, editor.playing) {
+        displayed.floatValue = editor.time
+        if (!editor.playing) {
+            snapshotFlow { editor.time }.collect { displayed.floatValue = it }
+        }
+    }
+    return displayed.floatValue
+}
+
+@Composable
 private fun PropertyTimelineRow(
     editor: EditorState, layer: Layer, id: PropId, pps: Float, hScroll: ScrollState, contentW: Dp, centerGutter: Dp,
     graphSelected: Boolean, onGraphSelection: (PropId) -> Unit
 ) {
+    val displayTime = rememberTimelineDisplayTime(editor)
     val dens = LocalDensity.current.density
     val prop = layer.p(id)
     val latestKeys by rememberUpdatedState(prop.keys)
@@ -558,11 +571,11 @@ private fun PropertyTimelineRow(
                     } else Modifier
                 ).clickable(enabled = !editor.settings.afterEffectsScrubbing) { editor.selectProp(id) },
                 contentAlignment = Alignment.Center
-            ) { Text(id.format(prop.valueAt(editor.time)), color = KColors.Accent, fontSize = 10.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, maxLines = 1) }
+            ) { Text(id.format(prop.valueAt(displayTime)), color = KColors.Accent, fontSize = 10.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, maxLines = 1) }
             Box(Modifier.size(24.dp).clickable { editor.toggleStopwatch(layer.id, id) }, contentAlignment = Alignment.Center) {
                 KIcon(IconKind.STOPWATCH, if (prop.animated) KColors.Accent else KColors.Dim, Modifier.size(14.dp))
             }
-            val hasKey = prop.keys.any { kotlin.math.abs(it.t - editor.time) <= editor.frame / 2f }
+            val hasKey = prop.keys.any { kotlin.math.abs(it.t - displayTime) <= editor.frame / 2f }
             Box(Modifier.size(24.dp).clickable { editor.toggleKeyAtTime(layer.id, id) }, contentAlignment = Alignment.Center) {
                 KIcon(if (hasKey) IconKind.DIAMOND_FILLED else IconKind.DIAMOND, if (hasKey) KColors.Accent else KColors.Dim, Modifier.size(14.dp))
             }
