@@ -135,6 +135,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
         onDispose {
             playback.release()
             audio.release()
+            TimelineRamCache.clear()
             MediaLoader.releaseAll()
         }
     }
@@ -145,6 +146,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                 when {
                     level >= ComponentCallbacks2.TRIM_MEMORY_COMPLETE -> {
                         KreEngine.clearCalculationCache()
+                        TimelineRamCache.clear()
                         KreEngine.setCalculationCacheBudget(64 * 1024)
                     }
                     level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW -> {
@@ -155,6 +157,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
 
             override fun onLowMemory() {
                 MediaLoader.trimMemory(ComponentCallbacks2.TRIM_MEMORY_COMPLETE)
+                TimelineRamCache.clear()
                 KreEngine.clearCalculationCache()
                 KreEngine.setCalculationCacheBudget(64 * 1024)
             }
