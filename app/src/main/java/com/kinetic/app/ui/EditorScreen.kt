@@ -294,10 +294,9 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                 ) ?: continue
                 editor.markFrameCached(frameIndex, renderedKey)
             }
-            // Keep background rendering deliberately slow and low-priority.
-            // The cache should fill over time without stealing decode time from
-            // the live preview or making audio playback compete for CPU.
-            delay(32)
+            // Yield briefly between idle-cache frames. The dedicated background
+            // workers are priority-limited, so a long fixed sleep only delays cache fill.
+            delay(8)
         }
     }
 
