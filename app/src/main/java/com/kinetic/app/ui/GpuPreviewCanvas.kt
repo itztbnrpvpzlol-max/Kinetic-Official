@@ -445,7 +445,7 @@ private fun GpuVideoPlayerLayer(
         }
     }
 
-    LaunchedEffect(player, layer.id, playback, layer.start, layer.srcOffset, layer.speed, editor.fps) {
+    LaunchedEffect(player, layer.id, playback, layer.start, layer.srcOffset, layer.speed) {
         if (playback != null) {
             val clipStartUs = (layer.start * 1_000_000.0).toLong()
             val sourceOffsetUs = (layer.srcOffset * 1_000_000.0).toLong()
@@ -454,9 +454,7 @@ private fun GpuVideoPlayerLayer(
                 val clock = playback.clockSnapshot()
                 player.syncMasterClock(clock.positionUs, clock.monotonicNs, clock.speed,
                     clock.playing, clipStartUs, sourceOffsetUs, clipSpeed, clock.generation)
-                kotlinx.coroutines.delay(
-                    (1000f / editor.fps.coerceIn(1, 60)).toLong().coerceAtLeast(1L)
-                )
+                kotlinx.coroutines.delay(33L)
             }
         }
     }
