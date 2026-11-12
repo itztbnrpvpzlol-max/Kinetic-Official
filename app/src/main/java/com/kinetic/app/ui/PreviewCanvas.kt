@@ -68,6 +68,7 @@ fun CpuPreviewCanvas(editor: EditorState, modifier: Modifier = Modifier) {
         val validIds = mediaLayers.map { it.id }.toSet()
         bitmaps.keys.toList().filterNot { it in validIds }.forEach { bitmaps.remove(it) }
         val lastRequests = mutableMapOf<String, Pair<Int, Int>>()
+        val retryAfterNs = mutableMapOf<String, Long>()
 
         while (true) {
             val timelineTime = previewClock.timeSec
@@ -88,11 +89,16 @@ fun CpuPreviewCanvas(editor: EditorState, modifier: Modifier = Modifier) {
                         layer.speed + layer.srcOffset).coerceAtLeast(0f)
                 } else 0f
                 val bucket = if (layer.type == LayerType.VIDEO) {
-                    (sourceTime * 12f).toInt()
+                    (sourceTime * MediaLoader.CPU_PREVIEW_SAMPLE_FPS.toFloat()).toInt()
                 } else 0
                 val frameEdge = if (playing && layer.type == LayerType.VIDEO) 320 else 640
                 val requestKey = bucket to frameEdge
-                if (lastRequests[layer.id] == requestKey) continue
+                if (lastRequests[layer.id] == requestKey) {
+                    val retryAt = retryAfterNs[layer.id]
+                    if (retryAt == null || System.nanoTime() < retryAt) continue
+                } else {
+                    retryAfterNs.remove(layer.id)
+                }
                 lastRequests[layer.id] = requestKey
 
                 val frame = MediaLoader.bitmapFor(
@@ -100,7 +106,7 @@ fun CpuPreviewCanvas(editor: EditorState, modifier: Modifier = Modifier) {
                     Uri.parse(rawUri),
                     layer.type,
                     sourceTime,
-                    sampleFps = 12,
+                    sampleFps = MediaLoader.CPU_PREVIEW_SAMPLE_FPS,
                     maxEdge = frameEdge,
                     persistToDisk = !playing
                 )
@@ -113,12 +119,18 @@ fun CpuPreviewCanvas(editor: EditorState, modifier: Modifier = Modifier) {
                         layer.speed + layer.srcOffset).coerceAtLeast(0f)
                 } else 0f
                 val currentBucket = if (layer.type == LayerType.VIDEO) {
-                    (currentSourceTime * 12f).toInt()
+                    (currentSourceTime * MediaLoader.CPU_PREVIEW_SAMPLE_FPS.toFloat()).toInt()
                 } else 0
                 val currentEdge = if (
                     previewClock.playing && layer.type == LayerType.VIDEO
                 ) 320 else 640
                 val maxLag = if (previewClock.playing) 1 else 0
+                if (frame == null) {
+                    // A transient retriever miss must not permanently suppress this bucket.
+                    retryAfterNs[layer.id] = System.nanoTime() + 150_000_000L
+                } else {
+                    retryAfterNs.remove(layer.id)
+                }
                 if (frame != null && currentEdge == frameEdge &&
                     currentBucket >= bucket && currentBucket - bucket <= maxLag
                 ) {
