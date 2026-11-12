@@ -43,7 +43,7 @@ object CompositionFrameCache {
     @Volatile private var knownDiskBytes = -1L
 
     @Synchronized
-    fun configure(memoryMb: Int, diskMb: Int) {
+    fun configure(memoryMb: Int) {
         memoryLimitBytes = memoryMb.coerceIn(16, 256) * 1024 * 1024
         memory.resize(memoryLimitBytes)
         knownDiskBytes = -1L
