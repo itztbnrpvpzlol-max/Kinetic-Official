@@ -211,6 +211,9 @@ private fun Ruler(editor: EditorState, pps: Float, contentW: Dp, centerGutter: D
     val textPaint = remember {
         Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF8D8BA3.toInt() }
     }
+    val readyFrames = remember(editor.cachedFrames.size, editor.cachedFrames.keys.toList()) {
+        editor.cachedFrames.keys.sorted()
+    }
     Canvas(
         Modifier
             .width(contentW)
@@ -230,7 +233,6 @@ private fun Ruler(editor: EditorState, pps: Float, contentW: Dp, centerGutter: D
         val originX = centerGutter.toPx()
         // AE-style green cache indicator: only frames with a completed rendered
         // composition bitmap are marked. Adjacent ready frames are drawn as runs.
-        val readyFrames = editor.cachedFrames.keys.sorted()
         if (readyFrames.isNotEmpty()) {
             var runStart = readyFrames.first()
             var runEnd = runStart
