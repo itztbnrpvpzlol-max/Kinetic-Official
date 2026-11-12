@@ -146,6 +146,7 @@ object MediaLoader {
         ctx: Context,
         uri: Uri,
         durationSec: Float,
+        startOffsetSec: Float = 0f,
         onProgress: suspend (Float) -> Unit
     ) = withContext(MediaWorkers.cpuDispatcher) {
         val duration = durationSec.coerceAtLeast(0.1f)
@@ -153,7 +154,7 @@ object MediaLoader {
         val sampleCount = (duration * sampleFps).toInt().coerceIn(1, 240)
         trimPreviewDiskCache(ctx)
         for (index in 0 until sampleCount) {
-            bitmapFor(ctx, uri, LayerType.VIDEO, index / sampleFps.toFloat(), sampleFps, 240)
+            bitmapFor(ctx, uri, startOffsetSec + index / sampleFps.toFloat(), sampleFps, 240)
             onProgress((index + 1).toFloat() / sampleCount)
         }
     }
