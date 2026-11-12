@@ -308,13 +308,13 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
             // playhead publication at 30 Hz. Publishing 60-120 UI states per
             // second needlessly recomposes the editor and timeline on low-RAM
             // phones; video output is scheduled directly from the native clock.
-            val uiFps = editor.fps.coerceIn(1, 60)
+            val uiFps = editor.fps.coerceIn(1, 30)
             var publishedFrame = (editor.time * uiFps).toInt()
             var lastAudioSyncMs = 0L
             audio.sync(editor.layers, editor.time, true)
 
             while (editor.playing) {
-                delay((1000f / uiFps).toLong().coerceAtLeast(1L))
+                delay(16L)
                 val transportTime = playback.positionSeconds()
                     .coerceIn(0f, editor.duration.coerceAtLeast(0f))
 
