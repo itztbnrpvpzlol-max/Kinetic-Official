@@ -420,15 +420,15 @@ private fun Clip(editor: EditorState, layer: Layer, pps: Float, selected: Boolea
                 }
             }
         }
-        // The cyan strip is the contiguous decoded-frame window resident
-        // in RAM right now. It moves with the playhead as the LRU window rolls.
+        // // The cyan strip shows cumulative per-clip cache preparation progress.
+        // It is independent of the playhead and does not rewind on scrubbing.
         if (layer.type == LayerType.VIDEO) {
             val ramWindow = TimelineRamCache.windows[layer.id]
             Box(
                 Modifier.align(Alignment.BottomStart).fillMaxWidth()
                     .height(2.dp).background(Color.White.copy(alpha = 0.12f))
             )
-            if (ramWindow != null && ramWindow.cachedUntilSec > ramWindow.startSec) {
+            if (ramWindow != null && ramWindow.preparedUntilSec > ramWindow.startSec) {
                 val clipDuration = layer.duration.coerceAtLeast(0.01f)
                 val startFraction = (
                     (ramWindow.startSec - layer.start) / clipDuration
