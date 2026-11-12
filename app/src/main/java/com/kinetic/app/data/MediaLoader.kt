@@ -46,12 +46,12 @@ object MediaLoader {
 
     /**
      * Calculate a safe look-ahead count from the actual source-frame edge
-     * and the current byte budget. The 480px default keeps the cache useful
+     * and the current byte budget. The 448px default keeps the cache useful
      * for preview while preventing large decoded-frame bursts.
      */
     fun recommendedPrefetchFrameCount(
         activeVideoLayers: Int,
-        maxEdge: Int = 480
+        maxEdge: Int = 448
     ): Int {
         val layers = activeVideoLayers.coerceAtLeast(1)
         val edge = maxEdge.coerceIn(240, 960).toLong()
