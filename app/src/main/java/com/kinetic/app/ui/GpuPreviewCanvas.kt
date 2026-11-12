@@ -226,7 +226,7 @@ private fun GpuCompositionPreviewCanvas(
             .forEach { failedVideoIds.remove(it) }
     }
 
-    // Video layers use Media3/MediaCodec Surface outputs and are composited
+    // Video layers use NDK MediaCodec Surface outputs and are composited
     // alongside stills, text and shapes in the same OpenGL draw order.
     for (layer in editor.layers) {
         val uri = layer.uri
