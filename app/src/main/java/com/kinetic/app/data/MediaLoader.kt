@@ -49,9 +49,13 @@ object MediaLoader {
      * video layers. At 240px max edge, even square ARGB frames fit in the
      * constrained-device 4 MiB minimum cache budget.
      */
-    fun recommendedPrefetchFrameCount(activeVideoLayers: Int): Int {
+    fun recommendedPrefetchFrameCount(
+        activeVideoLayers: Int,
+        maxEdge: Int = 480
+    ): Int {
         val layers = activeVideoLayers.coerceAtLeast(1)
-        val worstCaseFrameBytes = 240L * 240L * 4L
+        val edge = maxEdge.coerceIn(240, 960).toLong()
+        val worstCaseFrameBytes = edge * edge * 4L
         return (cache.maxSize().toLong() / worstCaseFrameBytes / layers)
             .toInt().coerceIn(1, 15)
     }
