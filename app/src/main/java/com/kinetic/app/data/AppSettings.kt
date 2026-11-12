@@ -19,6 +19,7 @@ class AppSettings(context: Context) {
         val SENSITIVITY = listOf("Slow", "Normal", "Fast")
         val PREVIEW_MEMORY_MB = listOf(32, 64, 96, 128)
         val PREVIEW_QUALITIES = listOf("Auto", "Full", "Half", "Quarter")
+        val FRAME_CACHE_DISK_MB = listOf(256, 512, 1024, 2048)
         private val SENS_VALUES = listOf(0.25f, 1f, 3f)
     }
 
@@ -45,6 +46,8 @@ class AppSettings(context: Context) {
         private set
     var autoPreviewCache by mutableStateOf(prefs.getBoolean("autoPreviewCache", true))
         private set
+    var frameCacheDiskIndex by mutableIntStateOf(prefs.getInt("frameCacheDiskIndex", 1).coerceIn(0, 3))
+        private set
 
     fun updateResolution(i: Int) { resolution = i; prefs.edit().putInt("resolution", i).apply() }
     fun updateFrameRate(i: Int) { frameRate = i; prefs.edit().putInt("frameRate", i).apply() }
@@ -57,7 +60,9 @@ class AppSettings(context: Context) {
     fun updatePreviewMemory(i: Int) { previewMemoryIndex = i.coerceIn(0, 3); prefs.edit().putInt("previewMemoryIndex", previewMemoryIndex).apply() }
     fun updatePreviewQuality(i: Int) { previewQualityIndex = i.coerceIn(0, 3); prefs.edit().putInt("previewQualityIndex", previewQualityIndex).apply() }
     fun updateAutoPreviewCache(enabled: Boolean) { autoPreviewCache = enabled; prefs.edit().putBoolean("autoPreviewCache", enabled).apply() }
+    fun updateFrameCacheDisk(i: Int) { frameCacheDiskIndex = i.coerceIn(0, 3); prefs.edit().putInt("frameCacheDiskIndex", frameCacheDiskIndex).apply() }
     val previewMemoryMb: Int get() = PREVIEW_MEMORY_MB[previewMemoryIndex]
+    val frameCacheDiskMb: Int get() = FRAME_CACHE_DISK_MB[frameCacheDiskIndex]
 
     val fps: Int get() = FPS[frameRate]
     val compSeconds: Int get() = COMP_LENGTHS[compLength]
