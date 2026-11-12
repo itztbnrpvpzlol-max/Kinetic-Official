@@ -348,7 +348,9 @@ object MediaLoader {
         // four minutes. The 240-frame ceiling bounds disk use and decode work.
         val sampleCount = (duration * 2f).toInt().coerceIn(1, 240)
         val intervalSec = duration / sampleCount.toFloat()
-        val sampleFps = if (intervalSec < 0.75f) 2 else 1
+        // TimelinePane requests the same 2 fps buckets for its four clip-strip
+        // thumbnails, so these prebuilt samples are reusable by the timeline.
+        val sampleFps = 2
         val speed = playbackSpeed.coerceIn(0.1f, 4f)
         trimPreviewDiskCache(ctx)
         for (index in 0 until sampleCount) {
