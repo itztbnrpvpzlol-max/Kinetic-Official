@@ -170,7 +170,7 @@ private fun DirectVideoPreviewCanvas(
         AndroidView(
             factory = { viewContext ->
                 PlayerView(viewContext).apply {
-                    player = player
+                    this.player = player
                     useController = false
                     resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
                     setShutterBackgroundColor(android.graphics.Color.BLACK)
