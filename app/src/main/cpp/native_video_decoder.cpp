@@ -44,6 +44,15 @@ struct NativeVideoDecoder {
     double speed = 1.0;
     int64_t frameDurationNs = 33'333'333;
     uint64_t droppedLateFrames = 0;
+    bool hasMasterClock = false;
+    bool masterPlaying = false;
+    int64_t masterPositionUs = 0;
+    int64_t masterAnchorNs = 0;
+    double masterSpeed = 1.0;
+    int64_t clipStartUs = 0;
+    int64_t sourceOffsetUs = 0;
+    double clipSpeed = 1.0;
+    uint64_t masterGeneration = 0;
 
     NativeVideoDecoder(int sourceFd, int64_t sourceOffset, int64_t sourceLength,
                        ANativeWindow* output, int64_t startUs, double playbackSpeed)
@@ -105,10 +114,27 @@ struct NativeVideoDecoder {
     void setSpeed(double value) {
         std::lock_guard<std::mutex> lock(mutex);
         speed = std::clamp(value, 0.1, 4.0);
-        if (anchorPtsUs >= 0) {
+        clipSpeed = speed;
+        if (!hasMasterClock && anchorPtsUs >= 0) {
             anchorPtsUs = lastPtsUs;
             anchorNs = monotonicNs();
         }
+    }
+
+    void syncMasterClock(int64_t positionUs, int64_t anchorNsValue, double masterRate,
+                         bool isPlaying, int64_t layerStartUs, int64_t sourceStartUs,
+                         double layerRate, uint64_t generationValue) {
+        std::lock_guard<std::mutex> lock(mutex);
+        hasMasterClock = true;
+        masterPositionUs = std::max<int64_t>(0, positionUs);
+        masterAnchorNs = std::max<int64_t>(0, anchorNsValue);
+        masterSpeed = std::clamp(masterRate, 0.1, 4.0);
+        masterPlaying = isPlaying;
+        clipStartUs = layerStartUs;
+        sourceOffsetUs = std::max<int64_t>(0, sourceStartUs);
+        clipSpeed = std::clamp(layerRate, 0.1, 4.0);
+        masterGeneration = generationValue;
+        wake.notify_all();
     }
 
     static int64_t monotonicNs() {
@@ -289,7 +315,7 @@ struct NativeVideoDecoder {
                     std::lock_guard<std::mutex> lock(mutex);
                     // Never publish a frame that completed decoding after a pause,
                     // a newer seek request, or shutdown.
-                    transportAllowsOutput = !stopping && playing && pendingSeekUs < 0;
+                    transportAllowsOutput = !stopping && playing && pendingSeekUs < 0 && (!hasMasterClock || masterPlaying);
                 }
                 const bool render = !endOfStream && transportAllowsOutput;
                 static std::atomic<uint32_t> outputBuffers{0};
@@ -319,13 +345,23 @@ struct NativeVideoDecoder {
                 int64_t targetNs = monotonicNs();
                 if (render) {
                     std::lock_guard<std::mutex> lock(mutex);
-                    if (anchorPtsUs < 0) {
-                        anchorPtsUs = info.presentationTimeUs;
-                        anchorNs = monotonicNs();
+                    if (hasMasterClock) {
+                        const long double timelineUs = static_cast<long double>(clipStartUs) +
+                            (static_cast<long double>(info.presentationTimeUs) -
+                             static_cast<long double>(sourceOffsetUs)) /
+                                static_cast<long double>(clipSpeed);
+                        const long double deltaUs = timelineUs - static_cast<long double>(masterPositionUs);
+                        targetNs = masterAnchorNs + static_cast<int64_t>(
+                            deltaUs * 1000.0L / static_cast<long double>(masterSpeed));
+                    } else {
+                        if (anchorPtsUs < 0) {
+                            anchorPtsUs = info.presentationTimeUs;
+                            anchorNs = monotonicNs();
+                        }
+                        const double rate = std::clamp(speed, 0.1, 4.0);
+                        targetNs = anchorNs + static_cast<int64_t>(
+                            (info.presentationTimeUs - anchorPtsUs) * 1000.0 / rate);
                     }
-                    const double rate = std::clamp(speed, 0.1, 4.0);
-                    targetNs = anchorNs + static_cast<int64_t>(
-                        (info.presentationTimeUs - anchorPtsUs) * 1000.0 / rate);
                     lastPtsUs = info.presentationTimeUs;
                 }
 
@@ -400,6 +436,18 @@ Java_com_kinetic_app_engine_NativeVideoPlayer_nativeSetSpeed(
         JNIEnv*, jobject, jlong handle, jfloat speed) {
     auto* decoder = reinterpret_cast<NativeVideoDecoder*>(handle);
     if (decoder) decoder->setSpeed(speed);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_kinetic_app_engine_NativeVideoPlayer_nativeSyncMasterClock(
+        JNIEnv*, jobject, jlong handle, jlong positionUs, jlong anchorNs,
+        jdouble masterSpeed, jboolean playing, jlong clipStartUs,
+        jlong sourceOffsetUs, jdouble clipSpeed, jlong generation) {
+    auto* decoder = reinterpret_cast<NativeVideoDecoder*>(handle);
+    if (!decoder) return;
+    decoder->syncMasterClock(positionUs, anchorNs, masterSpeed, playing == JNI_TRUE,
+        clipStartUs, sourceOffsetUs, clipSpeed,
+        static_cast<uint64_t>(std::max<jlong>(0, generation)));
 }
 
 extern "C" JNIEXPORT void JNICALL
