@@ -318,30 +318,38 @@ Java_com_kinetic_app_engine_NativeRenderEngine_nativeGlInit(JNIEnv*, jobject) {
     }
     glBindVertexArray(gVertexArrayObject);
 
+    // KRE uses GLSL ES 3.00 exclusively; no ES 2 shader fallback is
+    // silently accepted after requesting an ES 3.x context.
     static const char* vertex =
-        "attribute vec2 aPosition; attribute vec2 aTexCoord; varying vec2 vTexCoord;"
+        "#version 300 es\\n"
+        "in vec2 aPosition; in vec2 aTexCoord; out vec2 vTexCoord;"
         "void main(){ gl_Position=vec4(aPosition,0.0,1.0); vTexCoord=aTexCoord; }";
     static const char* textureFragment =
+        "#version 300 es\\n"
         "precision mediump float; uniform sampler2D uTexture; uniform float uAlpha;"
-        "uniform float uGray; varying vec2 vTexCoord;"
-        "void main(){ vec4 c=texture2D(uTexture,vTexCoord);"
+        "uniform float uGray; in vec2 vTexCoord; out vec4 fragColor;"
+        "void main(){ vec4 c=texture(uTexture,vTexCoord);"
         "if(uGray>0.5){ float y=dot(c.rgb,vec3(0.299,0.587,0.114)); c.rgb=vec3(y); }"
-        "gl_FragColor=vec4(c.rgb*uAlpha,c.a*uAlpha); }";
+        "fragColor=vec4(c.rgb*uAlpha,c.a*uAlpha); }";
     static const char* externalFragment =
-        "#extension GL_OES_EGL_image_external : require\n"
+        "#version 300 es\\n"
+        "#extension GL_OES_EGL_image_external_essl3 : require\\n"
         "precision mediump float; uniform samplerExternalOES uTexture; uniform float uAlpha;"
-        "uniform float uGray; uniform mat4 uTexMatrix; varying vec2 vTexCoord;"
+        "uniform float uGray; uniform mat4 uTexMatrix; in vec2 vTexCoord; out vec4 fragColor;"
         "void main(){ vec2 uv=(uTexMatrix*vec4(vTexCoord,0.0,1.0)).xy;"
-        "vec4 c=texture2D(uTexture,uv);"
+        "vec4 c=texture(uTexture,uv);"
         "if(uGray>0.5){ float y=dot(c.rgb,vec3(0.299,0.587,0.114)); c.rgb=vec3(y); }"
-        "gl_FragColor=vec4(c.rgb*uAlpha,c.a*uAlpha); }";
+        "fragColor=vec4(c.rgb*uAlpha,c.a*uAlpha); }";
+    static const char* solidVertex =
+        "#version 300 es\\n"
+        "in vec2 aPosition; void main(){ gl_Position=vec4(aPosition,0.0,1.0); }";
     static const char* solidFragment =
-        "precision mediump float; uniform vec4 uColor; void main(){ gl_FragColor=uColor; }";
+        "#version 300 es\\n"
+        "precision mediump float; uniform vec4 uColor; out vec4 fragColor;"
+        "void main(){ fragColor=uColor; }";
 
     gTextureProgram = linkGlProgram(vertex, textureFragment);
     gExternalProgram = linkGlProgram(vertex, externalFragment);
-    static const char* solidVertex =
-        "attribute vec2 aPosition; void main(){ gl_Position=vec4(aPosition,0.0,1.0); }";
     gSolidProgram = linkGlProgram(solidVertex, solidFragment);
     if (!gTextureProgram || !gExternalProgram || !gSolidProgram) {
         if (gVertexBuffer) glDeleteBuffers(1, &gVertexBuffer);
@@ -423,6 +431,101 @@ Java_com_kinetic_app_engine_NativeRenderEngine_nativeGlDrawExternalTexture(
     glBindBuffer(GL_ARRAY_BUFFER, 0);
     env->ReleaseFloatArrayElements(vertices, data, JNI_ABORT);
     env->ReleaseFloatArrayElements(textureMatrix, matrix, JNI_ABORT);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_kinetic_app_engine_NativeRenderEngine_nativeGlDrawComposition(
+        JNIEnv* env, jobject, jintArray textureIds, jintArray flags,
+        jfloatArray params, jfloatArray vertices, jfloatArray matrices) {
+    if (!textureIds || !flags || !params || !vertices || !matrices) return;
+    const jsize count = env->GetArrayLength(textureIds);
+    if (count <= 0 || count > 256 ||
+        env->GetArrayLength(flags) < count ||
+        env->GetArrayLength(params) < count * 2 ||
+        env->GetArrayLength(vertices) < count * 16 ||
+        env->GetArrayLength(matrices) < count * 16 ||
+        !gVertexBuffer || !gVertexArrayObject) return;
+
+    jint* ids = env->GetIntArrayElements(textureIds, nullptr);
+    jint* layerFlags = env->GetIntArrayElements(flags, nullptr);
+    jfloat* layerParams = env->GetFloatArrayElements(params, nullptr);
+    jfloat* layerVertices = env->GetFloatArrayElements(vertices, nullptr);
+    jfloat* layerMatrices = env->GetFloatArrayElements(matrices, nullptr);
+    if (!ids || !layerFlags || !layerParams || !layerVertices || !layerMatrices) {
+        if (ids) env->ReleaseIntArrayElements(textureIds, ids, JNI_ABORT);
+        if (layerFlags) env->ReleaseIntArrayElements(flags, layerFlags, JNI_ABORT);
+        if (layerParams) env->ReleaseFloatArrayElements(params, layerParams, JNI_ABORT);
+        if (layerVertices) env->ReleaseFloatArrayElements(vertices, layerVertices, JNI_ABORT);
+        if (layerMatrices) env->ReleaseFloatArrayElements(matrices, layerMatrices, JNI_ABORT);
+        return;
+    }
+
+    glBindVertexArray(gVertexArrayObject);
+    glBindBuffer(GL_ARRAY_BUFFER, gVertexBuffer);
+    for (jsize i = 0; i < count; ++i) {
+        const jint mode = (layerFlags[i] >> 1) & 0x0F;
+        const bool external = (layerFlags[i] & 1) != 0;
+        const jfloat alpha = std::clamp(layerParams[i * 2], 0.0f, 1.0f);
+        if (alpha <= 0.0f || ids[i] <= 0) continue;
+        const jfloat gray = layerParams[i * 2 + 1] > 0.5f ? 1.0f : 0.0f;
+        const jfloat* quad = layerVertices + static_cast<size_t>(i) * 16;
+
+        if (external) {
+            if (!gExternalProgram) continue;
+            glUseProgram(gExternalProgram);
+            glBufferData(GL_ARRAY_BUFFER, 16 * sizeof(jfloat), quad, GL_STREAM_DRAW);
+            glEnableVertexAttribArray(static_cast<GLuint>(gExternalPosition));
+            glVertexAttribPointer(static_cast<GLuint>(gExternalPosition), 2, GL_FLOAT, GL_FALSE,
+                                  4 * sizeof(jfloat), reinterpret_cast<const void*>(0));
+            glEnableVertexAttribArray(static_cast<GLuint>(gExternalUv));
+            glVertexAttribPointer(static_cast<GLuint>(gExternalUv), 2, GL_FLOAT, GL_FALSE,
+                                  4 * sizeof(jfloat), reinterpret_cast<const void*>(2 * sizeof(jfloat)));
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_EXTERNAL_OES, static_cast<GLuint>(ids[i]));
+            glUniform1i(gExternalSampler, 0);
+            glUniform1f(gExternalAlpha, alpha);
+            glUniform1f(gExternalGray, gray);
+            glUniformMatrix4fv(gExternalMatrix, 1, GL_FALSE,
+                               layerMatrices + static_cast<size_t>(i) * 16);
+            applyNativeBlend(mode);
+            glEnable(GL_BLEND);
+            glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+            glDisable(GL_BLEND);
+            glDisableVertexAttribArray(static_cast<GLuint>(gExternalPosition));
+            glDisableVertexAttribArray(static_cast<GLuint>(gExternalUv));
+        } else {
+            if (!gTextureProgram) continue;
+            glUseProgram(gTextureProgram);
+            glBufferData(GL_ARRAY_BUFFER, 16 * sizeof(jfloat), quad, GL_STREAM_DRAW);
+            glEnableVertexAttribArray(static_cast<GLuint>(gTexturePosition));
+            glVertexAttribPointer(static_cast<GLuint>(gTexturePosition), 2, GL_FLOAT, GL_FALSE,
+                                  4 * sizeof(jfloat), reinterpret_cast<const void*>(0));
+            glEnableVertexAttribArray(static_cast<GLuint>(gTextureUv));
+            glVertexAttribPointer(static_cast<GLuint>(gTextureUv), 2, GL_FLOAT, GL_FALSE,
+                                  4 * sizeof(jfloat), reinterpret_cast<const void*>(2 * sizeof(jfloat)));
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(ids[i]));
+            glUniform1i(gTextureSampler, 0);
+            glUniform1f(gTextureAlpha, alpha);
+            glUniform1f(gTextureGray, gray);
+            applyNativeBlend(mode);
+            glEnable(GL_BLEND);
+            glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+            glDisable(GL_BLEND);
+            glDisableVertexAttribArray(static_cast<GLuint>(gTexturePosition));
+            glDisableVertexAttribArray(static_cast<GLuint>(gTextureUv));
+        }
+    }
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glBindTexture(GL_TEXTURE_EXTERNAL_OES, 0);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindVertexArray(0);
+
+    env->ReleaseIntArrayElements(textureIds, ids, JNI_ABORT);
+    env->ReleaseIntArrayElements(flags, layerFlags, JNI_ABORT);
+    env->ReleaseFloatArrayElements(params, layerParams, JNI_ABORT);
+    env->ReleaseFloatArrayElements(vertices, layerVertices, JNI_ABORT);
+    env->ReleaseFloatArrayElements(matrices, layerMatrices, JNI_ABORT);
 }
 
 extern "C" JNIEXPORT void JNICALL
