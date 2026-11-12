@@ -802,8 +802,8 @@ private fun PreviewToolsBar(
     onTogglePreview: () -> Unit,
     onPlay: () -> Unit
 ) {
-    // The side actions are anchored to the left; transport controls are centered
-    // against the full preview width and cannot drift when the side group changes.
+    // Undo/redo stay on the left; Add Layer and fullscreen controls are grouped
+    // on the right. Transport remains centered against the full preview width.
     Box(Modifier.fillMaxWidth().height(48.dp)) {
         Row(
             Modifier.align(Alignment.CenterStart).padding(start = 4.dp),
@@ -812,8 +812,6 @@ private fun PreviewToolsBar(
         ) {
             PreviewTool(IconKind.UNDO, editor.canUndo) { editor.undo() }
             PreviewTool(IconKind.REDO, editor.canRedo) { editor.redo() }
-            PreviewTool(IconKind.PLUS, onClick = onAddLayer)
-            PreviewTool(if (isExpanded) IconKind.FIT else IconKind.FULLSCREEN, onClick = onTogglePreview)
         }
         Row(
             Modifier.align(Alignment.Center),
@@ -823,6 +821,14 @@ private fun PreviewToolsBar(
             PreviewTool(IconKind.BACK) { editor.playing = false; editor.seek(0f) }
             PreviewTool(if (editor.playing) IconKind.PAUSE else IconKind.PLAY, onClick = onPlay)
             PreviewTool(IconKind.NEXT) { editor.playing = false; editor.seek(editor.duration) }
+        }
+        Row(
+            Modifier.align(Alignment.CenterEnd).padding(end = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            PreviewTool(IconKind.PLUS, onClick = onAddLayer)
+            PreviewTool(if (isExpanded) IconKind.FIT else IconKind.FULLSCREEN, onClick = onTogglePreview)
         }
     }
 }
