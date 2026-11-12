@@ -706,26 +706,24 @@ private class CompositionGlRenderer(
         val startedNs = System.nanoTime()
         try {
             if (program == 0) return
+
+            // Render directly to the GLSurfaceView window framebuffer.
+            // The previous paused-preview FBO/blit cache could report a
+            // successful present while leaving the device preview black on
+            // some GLES drivers. Visual layers must not depend on that cache.
+            if (compositionCacheAllocated) releaseCompositeTarget()
+            cachedCompositionFingerprint = Long.MIN_VALUE
+
             val current = scene
-            val videoSignature = refreshVideoFrames()
-            val fingerprint = sceneFingerprint(current, videoSignature)
-            // Never add an offscreen pass to active playback. The composition
-            // cache is used for paused redraws and released when playback starts.
-            if (!current.cacheAllowed && compositionCacheAllocated) releaseCompositeTarget()
-            var cacheReady = current.cacheAllowed &&
-                ensureCompositeTarget(viewportWidth, viewportHeight)
-            if (cacheReady && fingerprint == cachedCompositionFingerprint) {
-                if (presentCompositeTarget()) return
-                releaseCompositeTarget()
-                cacheReady = false
-            }
+            refreshVideoFrames()
             NativeRenderEngine.nativeGlBeginFrame(
-                current.background, viewportWidth, viewportHeight, cacheReady
+                current.background, viewportWidth, viewportHeight, false
             )
+
             activeTextureIds.clear()
-            for (layer in current.layers) if (!layer.isVideo) activeTextureIds.add(layer.id)
-            // Keep recently used source textures warm across playhead movement.
-            // Only inactive LRU entries are eligible for eviction.
+            for (layer in current.layers) {
+                if (!layer.isVideo && layer.bitmap != null) activeTextureIds.add(layer.id)
+            }
 
             val scale = minOf(
                 viewportWidth.toFloat() / COMP_W.toFloat(),
@@ -733,22 +731,10 @@ private class CompositionGlRenderer(
             )
             val offsetX = (viewportWidth - COMP_W * scale) / 2f
             val offsetY = (viewportHeight - COMP_H * scale) / 2f
+
             drawComposition(current.layers)
             trimGpuTextureCache(activeTextureIds)
             current.selected?.let { drawSelection(it, scale, offsetX, offsetY) }
-            if (cacheReady) {
-                cachedCompositionFingerprint = fingerprint
-                if (!presentCompositeTarget()) {
-                    // If the driver's framebuffer blit path fails, release the
-                    // cache and redraw directly to the window rather than blanking.
-                    releaseCompositeTarget()
-                    NativeRenderEngine.nativeGlBeginFrame(
-                        current.background, viewportWidth, viewportHeight, false
-                    )
-                    drawComposition(current.layers)
-                    current.selected?.let { drawSelection(it, scale, offsetX, offsetY) }
-                }
-            }
         } catch (error: Throwable) {
             reportGpuFailure(error)
         } finally {
