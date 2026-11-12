@@ -410,7 +410,9 @@ private fun GpuVideoPlayerLayer(
                 val clock = playback.clockSnapshot()
                 player.syncMasterClock(clock.positionUs, clock.monotonicNs, clock.speed,
                     clock.playing, clipStartUs, sourceOffsetUs, clipSpeed, clock.generation)
-                kotlinx.coroutines.delay(33L)
+                kotlinx.coroutines.delay(
+                    (1000f / editor.fps.coerceIn(1, 60)).toLong().coerceAtLeast(1L)
+                )
             }
         }
     }
