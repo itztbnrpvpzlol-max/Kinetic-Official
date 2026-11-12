@@ -208,6 +208,19 @@ Java_com_kinetic_app_engine_NativePlaybackEngine_nativeRelease(JNIEnv*, jobject,
 namespace {
 GLuint gVertexArrayObject = 0;
 GLuint gVertexBuffer = 0;
+GLuint gCompositionFramebuffer = 0;
+GLuint gCompositionTexture = 0;
+GLsizei gCompositionWidth = 0;
+GLsizei gCompositionHeight = 0;
+
+void releaseCompositionTarget() {
+    if (gCompositionFramebuffer) glDeleteFramebuffers(1, &gCompositionFramebuffer);
+    if (gCompositionTexture) glDeleteTextures(1, &gCompositionTexture);
+    gCompositionFramebuffer = 0;
+    gCompositionTexture = 0;
+    gCompositionWidth = 0;
+    gCompositionHeight = 0;
+}
 GLuint gTextureProgram = 0;
 GLuint gExternalProgram = 0;
 GLuint gSolidProgram = 0;
@@ -313,13 +326,91 @@ void drawNativeTexture(GLuint program, GLint positionHandle, GLint uvHandle,
 }
 }
 
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_kinetic_app_engine_NativeRenderEngine_nativeGlEnsureCompositionCache(
+        JNIEnv*, jobject, jint width, jint height, jlong budgetBytes) {
+    const int safeWidth = std::max(1, width);
+    const int safeHeight = std::max(1, height);
+    const int64_t requiredBytes = static_cast<int64_t>(safeWidth) *
+                                  static_cast<int64_t>(safeHeight) * 4LL;
+    if (width <= 0 || height <= 0 || budgetBytes <= 0 || requiredBytes > budgetBytes) {
+        releaseCompositionTarget();
+        return JNI_FALSE;
+    }
+    if (gCompositionFramebuffer && gCompositionTexture &&
+        gCompositionWidth == width && gCompositionHeight == height) return JNI_TRUE;
+
+    releaseCompositionTarget();
+    GLuint texture = 0;
+    GLuint framebuffer = 0;
+    glGenTextures(1, &texture);
+    glGenFramebuffers(1, &framebuffer);
+    if (!texture || !framebuffer) {
+        if (texture) glDeleteTextures(1, &texture);
+        if (framebuffer) glDeleteFramebuffers(1, &framebuffer);
+        return JNI_FALSE;
+    }
+    glBindTexture(GL_TEXTURE_2D, texture);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0,
+                 GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                           GL_TEXTURE_2D, texture, 0);
+    const bool complete = glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    if (!complete) {
+        glDeleteFramebuffers(1, &framebuffer);
+        glDeleteTextures(1, &texture);
+        __android_log_print(ANDROID_LOG_WARN, "KRE", "Composition cache framebuffer incomplete");
+        return JNI_FALSE;
+    }
+    gCompositionFramebuffer = framebuffer;
+    gCompositionTexture = texture;
+    gCompositionWidth = width;
+    gCompositionHeight = height;
+    return JNI_TRUE;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_kinetic_app_engine_NativeRenderEngine_nativeGlReleaseCompositionCache(JNIEnv*, jobject) {
+    releaseCompositionTarget();
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_kinetic_app_engine_NativeRenderEngine_nativeGlPresentCompositionCache(
+        JNIEnv*, jobject, jint viewportWidth, jint viewportHeight) {
+    if (!gCompositionFramebuffer) return JNI_FALSE;
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, gCompositionFramebuffer);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+    glBlitFramebuffer(
+        0, 0, gCompositionWidth, gCompositionHeight,
+        0, 0, std::max(1, viewportWidth), std::max(1, viewportHeight),
+        GL_COLOR_BUFFER_BIT, GL_NEAREST
+    );
+    const GLenum error = glGetError();
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    if (error != GL_NO_ERROR) {
+        __android_log_print(ANDROID_LOG_WARN, "KRE", "Composition cache present failed: 0x%x", error);
+        return JNI_FALSE;
+    }
+    return JNI_TRUE;
+}
+
 extern "C" JNIEXPORT void JNICALL
 Java_com_kinetic_app_engine_NativeRenderEngine_nativeGlBeginFrame(
-        JNIEnv*, jobject, jint backgroundArgb, jint width, jint height) {
+        JNIEnv*, jobject, jint backgroundArgb, jint width, jint height,
+        jboolean useCompositionCache) {
     const float alpha = static_cast<float>((backgroundArgb >> 24) & 0xFF) / 255.0f;
     const float red = static_cast<float>((backgroundArgb >> 16) & 0xFF) / 255.0f;
     const float green = static_cast<float>((backgroundArgb >> 8) & 0xFF) / 255.0f;
     const float blue = static_cast<float>(backgroundArgb & 0xFF) / 255.0f;
+    const GLuint target = useCompositionCache == JNI_TRUE ? gCompositionFramebuffer : 0;
+    glBindFramebuffer(GL_FRAMEBUFFER, target);
     glViewport(0, 0, std::max(1, width), std::max(1, height));
     glClearColor(red, green, blue, alpha);
     glClear(GL_COLOR_BUFFER_BIT);
@@ -345,6 +436,11 @@ Java_com_kinetic_app_engine_NativeRenderEngine_nativeGlInit(JNIEnv*, jobject) {
         gVertexBuffer = 0;
         return JNI_FALSE;
     }
+    // The previous EGL context may have been destroyed; discard stale names.
+    gCompositionFramebuffer = 0;
+    gCompositionTexture = 0;
+    gCompositionWidth = 0;
+    gCompositionHeight = 0;
     glBindVertexArray(gVertexArrayObject);
     // Allocate the streaming vertex store once. Per-layer draws update only
     // its small fixed-size range instead of reallocating a GL buffer each time.
@@ -656,6 +752,7 @@ extern "C" JNIEXPORT void JNICALL
 Java_com_kinetic_app_engine_NativeRenderEngine_nativeGlRelease(JNIEnv*, jobject) {
     if (gTextureProgram) glDeleteProgram(gTextureProgram);
     if (gExternalProgram) glDeleteProgram(gExternalProgram);
+    releaseCompositionTarget();
     if (gSolidProgram) glDeleteProgram(gSolidProgram);
     if (gVertexBuffer) glDeleteBuffers(1, &gVertexBuffer);
     if (gVertexArrayObject) glDeleteVertexArrays(1, &gVertexArrayObject);
