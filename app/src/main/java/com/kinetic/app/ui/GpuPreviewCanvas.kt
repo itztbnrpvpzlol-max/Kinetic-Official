@@ -160,28 +160,25 @@ private fun LivePreviewCanvas(
 }
 
 @Composable
-private fun rememberPlaybackUri(uri: String?, qualityScale: Float, playing: Boolean): Uri? {
+private fun rememberPlaybackUri(uri: String?, playing: Boolean): Uri? {
     val context = LocalContext.current.applicationContext
-    var proxy by remember(uri, qualityScale) { mutableStateOf<Uri?>(null) }
-    LaunchedEffect(uri, qualityScale, playing) {
-        val source = uri?.let(Uri::parse)
-        if (source == null || qualityScale >= 0.99f) {
+    var proxy by remember(uri) { mutableStateOf<Uri?>(null) }
+    LaunchedEffect(uri, playing) {
+        if (!playing) {
             proxy = null
             return@LaunchedEffect
         }
-        val targetHeight = when {
-            qualityScale <= 0.40f -> 360
-            qualityScale <= 0.60f -> 540
-            else -> 720
-        }
-        proxy = PreviewProxyStore.findExisting(context, source, targetHeight)
-        if (proxy == null && !playing) {
-            proxy = runCatching {
-                PreviewProxyStore.getOrCreate(context, source, targetHeight)
-            }.getOrNull()
-        }
+        val source = uri?.let(Uri::parse) ?: return@LaunchedEffect
+        // Playback always decodes the prepared 360p/3 Mbps proxy. Paused
+        // scrubbing returns to the original source for full-quality inspection.
+        proxy = PreviewProxyStore.findExisting(
+            context,
+            source,
+            PreviewProxyStore.PLAYBACK_PROXY_HEIGHT,
+            PreviewProxyStore.PLAYBACK_PROXY_BITRATE
+        )
     }
-    return proxy ?: uri?.let(Uri::parse)
+    return if (playing) proxy ?: uri?.let(Uri::parse) else uri?.let(Uri::parse)
 }
 
 internal fun resolvePreviewScale(context: Context, qualityIndex: Int, activeLayers: Int): Float {
@@ -361,7 +358,7 @@ private fun GpuCompositionPreviewCanvas(
                     key(layer.id) {
                         val uri = layer.uri
                         if (uri != null) {
-                            val playbackUri = rememberPlaybackUri(uri, qualityScale, editor.playing)
+                            val playbackUri = rememberPlaybackUri(uri, editor.playing)
                             val player = remember(playbackUri, qualityScale) {
                                 com.kinetic.app.engine.NativeVideoPlayer(
                                     context, playbackUri ?: Uri.parse(uri)
