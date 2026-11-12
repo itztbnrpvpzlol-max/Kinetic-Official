@@ -27,6 +27,11 @@ object MediaWorkers {
     // Hardware decoders are scarce system resources, not a thread pool.
     // Keep one on low-RAM/four-core phones; raise concurrency only with
     // substantially more CPU and heap headroom.
+    private val playbackRequestCount = java.util.concurrent.atomic.AtomicInteger(0)
+    val isPlaybackRequested: Boolean get() = playbackRequestCount.get() > 0
+    fun beginPlaybackRequest() { playbackRequestCount.incrementAndGet() }
+    fun endPlaybackRequest() { playbackRequestCount.updateAndGet { (it - 1).coerceAtLeast(0) } }
+
     val maxConcurrentVideoDecoders: Int = when {
         isConstrainedDevice -> 1
         cpuCores >= 8 && heapMb >= 512 -> 4

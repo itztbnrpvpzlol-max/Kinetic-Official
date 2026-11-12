@@ -50,6 +50,7 @@ object MediaLoader {
     private val retrievers = ConcurrentHashMap<String, MediaMetadataRetriever>()
     private val retrieverLocks = ConcurrentHashMap<String, Any>()
     private val videoFrameSpecs = ConcurrentHashMap<String, VideoFrameSpec>()
+    private val sequentialVideoDecoder = SequentialVideoFrameDecoder()
     private val retrieverRegistryLock = Any()
     private val retrieverLru = LinkedHashMap<String, Unit>(8, 0.75f, true)
     @Volatile private var maxCachedRetrievers = if (MediaWorkers.isConstrainedDevice) 2 else 4
@@ -132,6 +133,7 @@ object MediaLoader {
     }
 
     fun releaseAll() {
+        sequentialVideoDecoder.release()
         val toRelease = synchronized(retrieverRegistryLock) {
             val snapshot = retrievers.entries.map { it.key to it.value }
             retrievers.clear()
@@ -243,6 +245,9 @@ object MediaLoader {
     ): Bitmap? {
         val requestNs = System.nanoTime()
         return withContext(if (lowPriorityPrefetch) MediaWorkers.cacheDispatcher else MediaWorkers.previewDispatcher) {
+            if (lowPriorityPrefetch && MediaWorkers.isPlaybackRequested) return@withContext null
+            if (!lowPriorityPrefetch) MediaWorkers.beginPlaybackRequest()
+            try {
             val workerStartNs = System.nanoTime()
             val bucket = if (type == LayerType.VIDEO) (timeSec * sampleFps.toFloat()).toInt() else 0
             val sourceKey = mediaCacheIdentity(uri)
@@ -267,11 +272,20 @@ object MediaLoader {
                 val decodeStartedNs = System.nanoTime()
                 val bmp = diskBitmap ?: try {
                     if (type == LayerType.IMAGE) decodeImage(ctx, uri, maxEdge)
-                    else videoFrame(
-                        ctx, uri, bucket / sampleFps.toFloat(), maxEdge,
-                        if (sampleFps <= 2) MediaMetadataRetriever.OPTION_CLOSEST_SYNC
-                        else MediaMetadataRetriever.OPTION_CLOSEST
-                    )
+                    else if (lowPriorityPrefetch) {
+                        videoFrame(
+                            ctx, uri, bucket / sampleFps.toFloat(), maxEdge,
+                            if (sampleFps <= 2) MediaMetadataRetriever.OPTION_CLOSEST_SYNC
+                            else MediaMetadataRetriever.OPTION_CLOSEST
+                        )
+                    } else {
+                        sequentialVideoDecoder.decodeFrame(
+                            ctx, uri, sourceKey, bucket.toLong() * 1_000_000L / sampleFps.coerceAtLeast(1), maxEdge
+                        ) ?: videoFrame(
+                            ctx, uri, bucket / sampleFps.toFloat(), maxEdge,
+                            MediaMetadataRetriever.OPTION_CLOSEST
+                        )
+                    }
                 } catch (e: Exception) {
                     null
                 }
@@ -295,6 +309,9 @@ object MediaLoader {
                     }
                 }
                 bmp
+            }
+            } finally {
+                if (!lowPriorityPrefetch) MediaWorkers.endPlaybackRequest()
             }
         }
     }
