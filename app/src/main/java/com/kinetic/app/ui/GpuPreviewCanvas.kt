@@ -223,19 +223,33 @@ private fun applyPlaybackDecodeLimit(player: ExoPlayer, playing: Boolean) {
 }
 
 internal fun resolvePreviewScale(context: Context, qualityIndex: Int, activeLayers: Int): Float {
+    // Explicit quality choices remain user-controlled.
     if (qualityIndex == 1) return 1f
     if (qualityIndex == 2) return 0.5f
     if (qualityIndex == 3) return 0.25f
-    val memory = android.app.ActivityManager.MemoryInfo()
-    (context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager)?.getMemoryInfo(memory)
+
+    val manager = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+    val memory = ActivityManager.MemoryInfo()
+    manager?.getMemoryInfo(memory)
     val totalGb = memory.totalMem / (1024.0 * 1024.0 * 1024.0)
     val availableGb = memory.availMem / (1024.0 * 1024.0 * 1024.0)
+    val lowRam = manager?.isLowRamDevice == true ||
+        totalGb < 3.0 || MediaWorkers.isConstrainedDevice
+
+    // Auto targets a 360p-class preview on 2 GB / low-RAM phones rather than
+    // decoding full-resolution frames and scaling them down only at display time.
+    val lowRamScale = minOf(360f / COMP_H.toFloat(), 640f / COMP_W.toFloat())
     val base = when {
-        totalGb >= 8.0 && availableGb >= 2.0 -> 1f
+        lowRam -> lowRamScale
+        totalGb >= 10.0 && availableGb >= 2.0 -> 1f
+        totalGb >= 8.0 && availableGb >= 1.5 -> 0.75f
         totalGb >= 6.0 && availableGb >= 1.0 -> 0.5f
-        else -> 0.25f
+        totalGb >= 3.0 && availableGb >= 0.5 -> 0.5f
+        else -> lowRamScale
     }
-    return if (activeLayers >= 3) (base * 0.5f).coerceAtLeast(0.25f) else base
+    val pressureAdjusted = if (availableGb < 0.25) minOf(base, 0.25f) else base
+    return if (activeLayers >= 3) (pressureAdjusted * 0.5f).coerceAtLeast(0.25f)
+        else pressureAdjusted
 }
 
 
