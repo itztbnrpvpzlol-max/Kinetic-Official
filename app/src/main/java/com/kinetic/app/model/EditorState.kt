@@ -22,7 +22,8 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
         private set
     var time by mutableFloatStateOf(0f)
     var playing by mutableStateOf(false)
-    val cacheProgress = mutableStateMapOf<String, Float>()
+    /** Frame index -> rendered-scene cache key for the current composition state. */
+    val cachedFrames = mutableStateMapOf<Int, String>()
     var selectedId by mutableStateOf<String?>(null)
     var selectedProp by mutableStateOf<PropId?>(null)
     var selectedKey by mutableIntStateOf(-1)
@@ -104,6 +105,9 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
     }
 
     fun seek(t: Float) { val target = t.coerceAtLeast(0f); if (target > duration) baseDuration = target; time = target }
+
+    fun clearCachedFrameMarks() { cachedFrames.clear() }
+    fun markFrameCached(index: Int, key: String) { cachedFrames[index] = key }
 
     fun seekSnap(t: Float, windowSec: Float) {
         val raw = t.coerceAtLeast(0f)
