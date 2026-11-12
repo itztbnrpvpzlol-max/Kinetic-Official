@@ -96,7 +96,7 @@ object MediaLoader {
             synchronized(key.intern()) {
                 val hit = cache.get(key)
                 if (hit != null) return@synchronized hit
-                val diskFile = previewFrameFile(ctx, key)
+                val diskFile = previewFrameFile(ctx, key, type)
                 val diskBitmap = if (diskFile.isFile) BitmapFactory.decodeFile(diskFile.absolutePath) else null
                 val bmp = diskBitmap ?: try {
                     if (type == LayerType.IMAGE) decodeImage(ctx, uri) else videoFrame(ctx, uri, bucket / sampleFps.toFloat(), maxEdge)
@@ -109,7 +109,8 @@ object MediaLoader {
                         runCatching {
                             diskFile.parentFile?.mkdirs()
                             FileOutputStream(diskFile).use { output ->
-                                bmp.compress(Bitmap.CompressFormat.JPEG, 86, output)
+                                val format = if (type == LayerType.IMAGE) Bitmap.CompressFormat.PNG else Bitmap.CompressFormat.JPEG
+                                bmp.compress(format, 86, output)
                             }
                         }
                     }
@@ -118,11 +119,12 @@ object MediaLoader {
             }
         }
 
-    private fun previewFrameFile(ctx: Context, key: String): File {
+    private fun previewFrameFile(ctx: Context, key: String, type: LayerType): File {
         val digest = MessageDigest.getInstance("SHA-256")
             .digest(key.toByteArray())
             .joinToString("") { "%02x".format(it) }
-        return File(File(ctx.cacheDir, "preview-frames"), "$digest.jpg")
+        val extension = if (type == LayerType.IMAGE) "png" else "jpg"
+        return File(File(ctx.cacheDir, "preview-frames"), "$digest.$extension")
     }
 
     private fun trimPreviewDiskCache(ctx: Context) {
