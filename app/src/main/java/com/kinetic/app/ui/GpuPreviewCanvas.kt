@@ -85,6 +85,21 @@ private fun supportsGles3(context: Context): Boolean = runCatching {
     manager.deviceConfigurationInfo.reqGlEsVersion >= 0x30000
 }.getOrDefault(false)
 
+/**
+ * Mali/entry-level GLES drivers on low-memory devices can expose GLES 3 while
+ * still failing the native composition path. Prefer the existing Canvas
+ * renderer on these devices so basic visual layers remain visible; stronger
+ * devices continue using the native GLES3 renderer.
+ */
+private fun shouldUseCpuPreview(context: Context): Boolean {
+    val manager = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+    val memory = ActivityManager.MemoryInfo()
+    manager?.getMemoryInfo(memory)
+    return manager?.isLowRamDevice == true ||
+        memory.totalMem < 3L * 1024L * 1024L * 1024L ||
+        MediaWorkers.isConstrainedDevice
+}
+
 @Composable
 fun PreviewCanvas(
     editor: EditorState,
@@ -323,7 +338,7 @@ private fun GpuCompositionPreviewCanvas(
 
     // Low RAM is not a reason to disable the GPU. KRE uses a lower preview
     // resolution and bounded decoder/cache budgets on constrained devices.
-    if (gpuFailed.value || !supportsGles3(context)) {
+    if (gpuFailed.value || !supportsGles3(context) || shouldUseCpuPreview(context)) {
         CpuPreviewCanvas(editor, modifier)
     } else {
         val view = remember(context) { GpuPreviewSurfaceView(context) { gpuFailed.value = true } }
