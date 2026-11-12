@@ -36,8 +36,16 @@ object MediaWorkers {
     // Cache generation stays separately bounded and never takes all CPU cores.
     val cacheDispatcher = Executors.newFixedThreadPool(
         cacheWorkerCount,
-        backgroundThreadFactory("KineticFrameCache")
+        cacheThreadFactory("KineticFrameCache")
     ).asCoroutineDispatcher()
+
+    private fun cacheThreadFactory(name: String): ThreadFactory = ThreadFactory { runnable ->
+        Thread({
+            // Look-ahead work should yield CPU time to the live preview decoder.
+            Process.setThreadPriority(Process.THREAD_PRIORITY_LOWEST)
+            runnable.run()
+        }, name).apply { isDaemon = true }
+    }
 
     private fun backgroundThreadFactory(name: String): ThreadFactory = ThreadFactory { runnable ->
         Thread({
