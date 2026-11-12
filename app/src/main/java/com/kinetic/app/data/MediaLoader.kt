@@ -154,7 +154,7 @@ object MediaLoader {
         val sampleCount = (duration * sampleFps).toInt().coerceIn(1, 240)
         trimPreviewDiskCache(ctx)
         for (index in 0 until sampleCount) {
-            bitmapFor(ctx, uri, startOffsetSec + index / sampleFps.toFloat(), sampleFps, 240)
+            bitmapFor(ctx, uri, LayerType.VIDEO, startOffsetSec + index / sampleFps.toFloat(), sampleFps, 240)
             onProgress((index + 1).toFloat() / sampleCount)
         }
     }
