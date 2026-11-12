@@ -2,6 +2,7 @@ package com.kinetic.app.data
 
 import android.content.Context
 import android.os.Build
+import android.app.ActivityManager
 import android.graphics.Bitmap
 import android.media.AudioFormat
 import android.media.MediaCodec
@@ -15,6 +16,8 @@ import android.provider.OpenableColumns
 import android.util.LruCache
 import com.kinetic.app.model.LayerType
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
@@ -36,12 +39,44 @@ object MediaLoader {
     }
     private val retrievers = ConcurrentHashMap<String, MediaMetadataRetriever>()
     private val retrieverLocks = ConcurrentHashMap<String, Any>()
-    private val waveformCache = ConcurrentHashMap<String, FloatArray>()
+    private val waveformCache = object : LruCache<String, FloatArray>(if (MediaWorkers.isConstrainedDevice) 2 * 1024 * 1024 else 8 * 1024 * 1024) {
+        override fun sizeOf(key: String, value: FloatArray): Int = value.size * 4
+    }
     private val sourceProxyWrites = AtomicInteger()
 
-    fun configureCache(memoryMb: Int) {
-        val safeMb = memoryMb.coerceIn(16, 512).coerceAtMost(cacheBudgetMb)
-        cache.resize(safeMb * 1024 * 1024)
+    /**
+     * Keep decoded frames in a bounded RAM LRU. The user preference is only a
+     * requested ceiling: the app heap and currently available system memory
+     * always win, especially on 2 GB devices.
+     */
+    fun configureCache(context: Context, memoryMb: Int) {
+        val manager = context.applicationContext.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+        val memoryInfo = ActivityManager.MemoryInfo()
+        runCatching { manager?.getMemoryInfo(memoryInfo) }
+        val availableMb = (memoryInfo.availMem / (1024L * 1024L)).toInt()
+        val requested = memoryMb.coerceIn(16, 512).coerceAtMost(cacheBudgetMb)
+        val adaptiveLimit = when {
+            memoryInfo.lowMemory || availableMb < 160 -> 4
+            availableMb < 256 -> 6
+            availableMb < 384 -> 8
+            else -> requested
+        }
+        cache.resize(minOf(requested, adaptiveLimit).coerceAtLeast(4) * 1024 * 1024)
+    }
+
+    /** Called from Android memory callbacks. Keep only a small warm cache under pressure. */
+    fun trimMemory(level: Int) {
+        when {
+            level >= android.content.ComponentCallbacks2.TRIM_MEMORY_COMPLETE ->
+                cache.evictAll()
+            level >= android.content.ComponentCallbacks2.TRIM_MEMORY_BACKGROUND ->
+                cache.trimToSize((cache.maxSize() / 4).coerceAtLeast(2 * 1024 * 1024))
+            level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW ->
+                cache.trimToSize((cache.maxSize() / 2).coerceAtLeast(2 * 1024 * 1024))
+        }
+        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_BACKGROUND) {
+            waveformCache.evictAll()
+        }
     }
 
     fun releaseAll() {
@@ -153,6 +188,31 @@ object MediaLoader {
     }
 
     /**
+     * Pre-decode a short look-ahead window into the RAM LRU while playback runs.
+     * It is deliberately tiny and never writes to disk: playback remains the
+     * priority, and the cache evicts older frames automatically.
+     */
+    suspend fun prefetchUpcomingVideoFrames(
+        ctx: Context,
+        uri: Uri,
+        firstFrameTimeSec: Float,
+        frameCount: Int = 2,
+        sampleFps: Int = 12,
+        maxEdge: Int = 640,
+        sourceStepSec: Float = 1f / sampleFps
+    ) = withContext(MediaWorkers.cacheDispatcher) {
+        val count = frameCount.coerceIn(1, if (MediaWorkers.isConstrainedDevice) 2 else 4)
+        for (index in 0 until count) {
+            currentCoroutineContext().ensureActive()
+            bitmapFor(
+                ctx, uri, LayerType.VIDEO,
+                firstFrameTimeSec + index * sourceStepSec.coerceAtLeast(0.001f),
+                sampleFps, maxEdge, persistToDisk = false
+            )
+        }
+    }
+
+    /**
      * Fill a low-resolution, persistent frame cache in the background. This is
      * deliberately independent from playback: the editor never waits for it.
      * A maximum of 240 samples per clip bounds storage and decoder work.
@@ -231,8 +291,8 @@ object MediaLoader {
     suspend fun waveform(ctx: Context, uri: Uri, bins: Int = 240): FloatArray? =
         withContext(MediaWorkers.cpuDispatcher) {
             val key = uri.toString() + "#waveform#" + bins
-            waveformCache[key]?.clone() ?: decodeWaveform(ctx, uri, bins.coerceIn(32, 1024))?.also {
-                waveformCache[key] = it
+            waveformCache.get(key)?.clone() ?: decodeWaveform(ctx, uri, bins.coerceIn(32, 1024))?.also {
+                waveformCache.put(key, it)
             }?.clone()
         }
 
