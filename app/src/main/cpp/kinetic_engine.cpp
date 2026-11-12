@@ -436,10 +436,11 @@ Java_com_kinetic_app_engine_NativeRenderEngine_nativeGlDrawExternalTexture(
 extern "C" JNIEXPORT void JNICALL
 Java_com_kinetic_app_engine_NativeRenderEngine_nativeGlDrawComposition(
         JNIEnv* env, jobject, jintArray textureIds, jintArray flags,
-        jfloatArray params, jfloatArray vertices, jfloatArray matrices) {
+        jfloatArray params, jfloatArray vertices, jfloatArray matrices, jint layerCount) {
     if (!textureIds || !flags || !params || !vertices || !matrices) return;
-    const jsize count = env->GetArrayLength(textureIds);
+    const jsize count = static_cast<jsize>(layerCount);
     if (count <= 0 || count > 256 ||
+        env->GetArrayLength(textureIds) < count ||
         env->GetArrayLength(flags) < count ||
         env->GetArrayLength(params) < count * 2 ||
         env->GetArrayLength(vertices) < count * 16 ||
