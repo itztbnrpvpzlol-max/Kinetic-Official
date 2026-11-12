@@ -107,6 +107,7 @@ object CompositionFrameCache {
 
     suspend fun renderAndStore(
         context: Context,
+        projectId: String,
         layers: List<Layer>,
         time: Float,
         fps: Int,
@@ -114,10 +115,10 @@ object CompositionFrameCache {
         height: Int,
         diskLimitMb: Int
     ): String? {
-        val key = frameKey("project", layers, time, fps, width, height)
+        val key = frameKey(projectId, layers, time, fps, width, height)
         if (isCached(context, key)) return key
         val rendered = withContext(MediaWorkers.cpuDispatcher) {
-            renderCompositionFrame(context, layers, time, width, height)
+            renderCompositionFrame(context, layers, time, fps, width, height)
         } ?: return null
         val saved = withContext(Dispatchers.IO) {
             val directory = frameDirectory(context).apply { mkdirs() }
@@ -176,6 +177,7 @@ object CompositionFrameCache {
         context: Context,
         layers: List<Layer>,
         time: Float,
+        fps: Int,
         width: Int,
         height: Int
     ): Bitmap? {
@@ -198,11 +200,17 @@ object CompositionFrameCache {
                     val uri = layer.uri ?: continue
                     val sourceTime = ((time - layer.start).coerceAtLeast(0f) * layer.speed + layer.srcOffset)
                         .coerceAtLeast(0f)
-                    MediaLoader.bitmapFor(context, Uri.parse(uri), LayerType.VIDEO, sourceTime, fpsFor(width), max(width, height))
+                    MediaLoader.bitmapFor(context, Uri.parse(uri), LayerType.VIDEO, sourceTime, fps, max(width, height))
                 }
                 LayerType.TEXT, LayerType.SHAPE -> makeTextOrShapeBitmap(layer)
                 else -> null
-            } ?: continue
+            } ?: run {
+                if (layer.type == LayerType.IMAGE || layer.type == LayerType.VIDEO) {
+                    output.recycle()
+                    return null
+                }
+                continue
+            }
 
             val opacity = (layer.p(PropId.OPACITY).valueAt(time) / 100f).coerceIn(0f, 1f)
             if (opacity <= 0f) continue
@@ -235,12 +243,6 @@ object CompositionFrameCache {
             if (layer.type == LayerType.TEXT || layer.type == LayerType.SHAPE) bitmap.recycle()
         }
         return output
-    }
-
-    private fun fpsFor(width: Int): Int = when {
-        width >= 1600 -> 60
-        width >= 800 -> 30
-        else -> 24
     }
 
     private fun makeTextOrShapeBitmap(layer: Layer): Bitmap {
