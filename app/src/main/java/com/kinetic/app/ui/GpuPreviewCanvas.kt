@@ -108,59 +108,25 @@ fun PreviewCanvas(
     playback: NativePlaybackEngine? = null
 ) {
     val context = LocalContext.current
-    val visualLayers = editor.layers.filter {
-        it.visible && it.type != LayerType.AUDIO &&
-            it.type != LayerType.NULL && it.type != LayerType.ADJUSTMENT
-    }
-    val qualityScale = resolvePreviewScale(context, qualityIndex, visualLayers.size)
 
-    // Always use the live preview renderer. No pre-rendered timeline frames,
-    // disk frame scans, or cache bitmap swaps occur while scrubbing.
-    LivePreviewCanvas(editor, modifier, qualityScale, onVideoReady, playback)
+    LaunchedEffect(editor.layers.map { it.id }, editor.playing) {
+        onVideoReady(true)
+    }
+
+    // Select the constrained-device path before composing any GPU scene data.
+    // This avoids rebuilding active-layer lists, transforms and GPU draw packets
+    // on every playhead tick when the device will use CPU Canvas anyway.
+    if (shouldUseCpuPreview(context) || !supportsGles3(context)) {
+        CpuPreviewCanvas(editor, modifier)
+    } else {
+        val visualLayers = editor.layers.filter {
+            it.visible && it.type != LayerType.AUDIO &&
+                it.type != LayerType.NULL && it.type != LayerType.ADJUSTMENT
+        }
+        val qualityScale = resolvePreviewScale(context, qualityIndex, visualLayers.size)
+        GpuCompositionPreviewCanvas(editor, modifier, qualityScale, playback)
+    }
 }
-
-@Composable
-private fun LivePreviewCanvas(
-    editor: EditorState,
-    modifier: Modifier,
-    qualityScale: Float,
-    onVideoReady: (Boolean) -> Unit,
-    playback: NativePlaybackEngine?
-) {
-    val context = LocalContext.current
-    val activeVisualLayers = editor.layers.filter { layer ->
-        layer.visible && layer.activeAt(editor.time) &&
-            layer.type != LayerType.AUDIO &&
-            layer.type != LayerType.NULL &&
-            layer.type != LayerType.ADJUSTMENT
-    }
-    val multiVideo = activeVisualLayers.takeIf { layers ->
-        layers.size > 1 && layers.all { it.type == LayerType.VIDEO &&
-            !it.maskEnabled && it.effects.isEmpty() && it.blendMode == "Normal" }
-    }
-    val directVideo = activeVisualLayers.singleOrNull()?.takeIf { layer ->
-        layer.type == LayerType.VIDEO &&
-            layer.width > 0f && layer.height > 0f &&
-            (layer.width / COMP_W).coerceAtMost(1f) > 0f &&
-            (layer.height / COMP_H).coerceAtMost(1f) > 0f &&
-            kotlin.math.abs(layer.width / COMP_W - layer.height / COMP_H) < 0.002f &&
-            layer.width <= COMP_W && layer.height <= COMP_H &&
-            !layer.maskEnabled && layer.effects.isEmpty() && layer.blendMode == "Normal" &&
-            kotlin.math.abs(layer.p(PropId.OPACITY).valueAt(editor.time) - 100f) < 0.01f &&
-            kotlin.math.abs(layer.p(PropId.POS_X).valueAt(editor.time) - COMP_W / 2f) < 0.01f &&
-            kotlin.math.abs(layer.p(PropId.POS_Y).valueAt(editor.time) - COMP_H / 2f) < 0.01f &&
-            kotlin.math.abs(layer.p(PropId.SCALE_X).valueAt(editor.time) - 100f) < 0.01f &&
-            kotlin.math.abs(layer.p(PropId.SCALE_Y).valueAt(editor.time) - 100f) < 0.01f &&
-            kotlin.math.abs(layer.p(PropId.ROTATION).valueAt(editor.time)) < 0.01f
-    }
-
-    LaunchedEffect(editor.layers.map { it.id }, editor.playing) { onVideoReady(true) }
-    GpuCompositionPreviewCanvas(editor, modifier, qualityScale, playback)
-}
-
-@Composable
-private fun rememberPlaybackUri(uri: String?, playing: Boolean): Uri? =
-    uri?.let(Uri::parse)
 
 internal fun resolvePreviewScale(context: Context, qualityIndex: Int, activeLayers: Int): Float {
     // Explicit quality choices remain user-controlled.
@@ -200,6 +166,14 @@ private fun GpuCompositionPreviewCanvas(
     qualityScale: Float,
     playback: NativePlaybackEngine?
 ) {
+    val gpuFailed = remember { androidx.compose.runtime.mutableStateOf(false) }
+    if (gpuFailed.value) {
+        // Once a GPU failure is known, do not keep rebuilding the abandoned
+        // GPU scene on every playback tick.
+        CpuPreviewCanvas(editor, modifier)
+        return
+    }
+
     val context = LocalContext.current
     val frames = remember { mutableStateMapOf<String, Bitmap>() }
     val textTextures = remember { mutableMapOf<String, Pair<Int, Bitmap>>() }
@@ -356,15 +330,7 @@ private fun GpuCompositionPreviewCanvas(
         )
     }
     val scene = GpuScene(renderLayers, selectedLayer, cacheAllowed = !editor.playing)
-    val gpuFailed = remember { androidx.compose.runtime.mutableStateOf(false) }
-
-    // Constrained devices use the CPU Canvas fallback because this class of
-    // Mali/entry-level driver has shown unreliable native composition behavior.
-    // KRE/GLES3 remains enabled for devices that pass the capability checks.
-    if (gpuFailed.value || !supportsGles3(context) || shouldUseCpuPreview(context)) {
-        CpuPreviewCanvas(editor, modifier)
-    } else {
-        val view = remember(context) { GpuPreviewSurfaceView(context) { gpuFailed.value = true } }
+    val view = remember(context) { GpuPreviewSurfaceView(context) { gpuFailed.value = true } }
         BoxWithConstraints(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             val fitScale = minOf(maxWidth.value / COMP_W, maxHeight.value / COMP_H)
             val compositionWidth = (COMP_W * fitScale).dp
@@ -399,9 +365,8 @@ private fun GpuCompositionPreviewCanvas(
                 }
             }
         }
-        DisposableEffect(view) {
-            onDispose { view.releaseRenderer() }
-        }
+    DisposableEffect(view) {
+        onDispose { view.releaseRenderer() }
     }
 }
 
