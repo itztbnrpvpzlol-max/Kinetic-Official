@@ -25,7 +25,8 @@ object TimelineRamCache {
     }
 
     fun retain(layerIds: Set<String>) {
-        windows.keys.toList().filterNot { it in layerIds }.forEach(windows::remove)
+        val staleKeys = windows.keys.toList().filterNot { it in layerIds }
+        for (key in staleKeys) windows.remove(key)
     }
 
     fun clear() {
