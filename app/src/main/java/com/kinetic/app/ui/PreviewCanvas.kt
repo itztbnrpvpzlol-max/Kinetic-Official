@@ -112,8 +112,10 @@ fun CpuPreviewCanvas(editor: EditorState, modifier: Modifier = Modifier) {
                     sourceTime,
                     sampleFps = MediaLoader.CPU_PREVIEW_SAMPLE_FPS,
                     maxEdge = frameEdge,
-                    // Persist every foreground frame, including playback frames.
-                    persistToDisk = true
+                    // Playback frames stay RAM-only: synchronous JPEG compression and
+                    // app-private file writes must never sit on the frame delivery path.
+                    // Paused frames remain persistent so seeking back is still fast.
+                    persistToDisk = !playing
                 )
 
                 // The decode may finish after the playhead moved. Drop stale
@@ -129,7 +131,11 @@ fun CpuPreviewCanvas(editor: EditorState, modifier: Modifier = Modifier) {
                 val currentEdge = if (
                     previewClock.playing && layer.type == LayerType.VIDEO
                 ) 320 else 640
-                val maxLag = if (previewClock.playing) 1 else 0
+                // Decode on constrained devices can take several hundred milliseconds.
+                // Do not discard a successfully decoded frame just because the playhead
+                // advanced while it was decoding: that creates a permanent stale-frame
+                // loop (decode -> reject -> decode -> reject) and looks like a frozen
+                // preview. Keep the latest available frame until the next one arrives.
                 if (frame == null) {
                     // A transient retriever miss must not permanently suppress this bucket.
                     retryAfterNs[layer.id] = System.nanoTime() + 150_000_000L
@@ -137,7 +143,7 @@ fun CpuPreviewCanvas(editor: EditorState, modifier: Modifier = Modifier) {
                     retryAfterNs.remove(layer.id)
                 }
                 if (frame != null && currentEdge == frameEdge &&
-                    currentBucket >= bucket && currentBucket - bucket <= maxLag
+                    currentBucket >= bucket
                 ) {
                     bitmaps[layer.id] = frame
                 }
