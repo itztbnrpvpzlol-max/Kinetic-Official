@@ -94,7 +94,7 @@ class AudioEngine(context: Context) {
             if (layer.type != LayerType.AUDIO && layer.type != LayerType.VIDEO) continue
             activeIds.add(layer.id)
 
-            val shouldPlay = request.playing && layer.visible && layer.activeAt(request.time)
+            val shouldPlay = request.playing && layer.visible && layer.volume > 0f && layer.activeAt(request.time)
             var player = players[layer.id]
 
             if (player != null && playerUris[layer.id] != uri) {
