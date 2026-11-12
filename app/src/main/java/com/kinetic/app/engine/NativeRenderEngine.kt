@@ -1,10 +1,11 @@
 package com.kinetic.app.engine
 
 /**
- * Native math boundary for the rendering engine.
+ * JNI boundary for Kinetic Render Engine.
  *
- * Batch APIs are intentional: avoid one JNI transition per property or layer.
- * The Kotlin renderer remains the fallback when the native library is unavailable.
+ * Android owns lifecycle objects (Bitmap, SurfaceTexture, Surface); KRE owns
+ * native scene transforms, ordered GLES3 composition, shaders and GL draws.
+ * Scene data is transferred in batches to minimize JNI overhead.
  */
 object NativeRenderEngine {
     val available: Boolean = runCatching {
