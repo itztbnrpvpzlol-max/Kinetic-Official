@@ -29,11 +29,11 @@ uint64_t curveFingerprint(float x1, float y1, float x2, float y2) {
 
 /** Reusable 257-point easing LUT: the cache key excludes progress by design. */
 float evaluateCurveCached(float progress, float x1, float y1, float x2, float y2) {
-    constexpr size_t LUT_SIZE = 257;
+    constexpr std::size_t LUT_SIZE = 257;
     float table[LUT_SIZE];
     const uint64_t fingerprint = curveFingerprint(x1, y1, x2, y2);
     if (!kreGetCalculation(fingerprint, table, LUT_SIZE)) {
-        for (size_t sample = 0; sample < LUT_SIZE; ++sample) {
+        for (std::size_t sample = 0; sample < LUT_SIZE; ++sample) {
             const float targetX = static_cast<float>(sample) / 256.0f;
             float low = 0.0f;
             float high = 1.0f;
@@ -48,7 +48,7 @@ float evaluateCurveCached(float progress, float x1, float y1, float x2, float y2
     }
 
     const float u = std::clamp(progress, 0.0f, 1.0f) * 256.0f;
-    const size_t lower = static_cast<size_t>(u);
+    const std::size_t lower = static_cast<std::size_t>(u);
     if (lower >= 256) return table[256];
     const float fraction = u - static_cast<float>(lower);
     return table[lower] + (table[lower + 1] - table[lower]) * fraction;
@@ -76,10 +76,10 @@ Java_com_kinetic_app_engine_NativeRenderEngine_nativeEvaluateCurves(
         env->ReleaseFloatArrayElements(input, values, JNI_ABORT);
         return nullptr;
     }
-    std::vector<jfloat> result(static_cast<size_t>(count));
+    std::vector<jfloat> result(static_cast<std::size_t>(count));
     for (jsize i = 0; i < count; ++i) {
         const jsize offset = i * 5;
-        result[static_cast<size_t>(i)] = evaluateCurveCached(
+        result[static_cast<std::size_t>(i)] = evaluateCurveCached(
             values[offset], values[offset + 1], values[offset + 2],
             values[offset + 3], values[offset + 4]
         );
@@ -241,7 +241,7 @@ GLuint compileGlShader(GLenum type, const char* source) {
         GLint logLength = 0;
         glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &logLength);
         if (logLength > 1) {
-            std::vector<char> log(static_cast<size_t>(logLength));
+            std::vector<char> log(static_cast<std::size_t>(logLength));
             glGetShaderInfoLog(shader, logLength, nullptr, log.data());
             __android_log_print(ANDROID_LOG_ERROR, "KRE", "Shader compile failed: %s", log.data());
         }
@@ -276,7 +276,7 @@ GLuint linkGlProgram(const char* vertexSource, const char* fragmentSource) {
         GLint logLength = 0;
         glGetProgramiv(program, GL_INFO_LOG_LENGTH, &logLength);
         if (logLength > 1) {
-            std::vector<char> log(static_cast<size_t>(logLength));
+            std::vector<char> log(static_cast<std::size_t>(logLength));
             glGetProgramInfoLog(program, logLength, nullptr, log.data());
             __android_log_print(ANDROID_LOG_ERROR, "KRE", "Program link failed: %s", log.data());
         }
@@ -643,8 +643,8 @@ Java_com_kinetic_app_engine_NativeRenderEngine_nativeGlDrawComposition(
         const float right = masked ? width * 0.8f : width;
         const float bottom = masked ? height * 0.8f : height;
         const float uvMax = masked ? 0.8f : 1.0f;
-        const float* transform = transforms + static_cast<size_t>(i) * 9;
-        const float* texMatrix = textureTransforms + static_cast<size_t>(i) * 16;
+        const float* transform = transforms + static_cast<std::size_t>(i) * 9;
+        const float* texMatrix = textureTransforms + static_cast<std::size_t>(i) * 16;
 
         const float sourceX[4] = {0.0f, 0.0f, right, right};
         const float sourceY[4] = {0.0f, bottom, 0.0f, bottom};
