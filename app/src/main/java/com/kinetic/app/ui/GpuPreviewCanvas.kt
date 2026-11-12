@@ -113,11 +113,20 @@ fun PreviewCanvas(
             it.type != LayerType.AUDIO && it.type != LayerType.NULL &&
             it.type != LayerType.ADJUSTMENT
     }
-    val directVideo = activeVisualLayers.singleOrNull()
-        ?.takeIf { it.type == LayerType.VIDEO && canUseDirectSurfaceVideo(it) }
+    val videoLayers = activeVisualLayers.filter { it.type == LayerType.VIDEO && it.uri != null }
+    // TextureView is a bottom-layer surface. Keep it only when the one active
+    // video is the lowest visual layer; Canvas then draws stills/text/shapes
+    // above it without ever copying the decoded video frame into a Bitmap.
+    val directVideo = videoLayers.singleOrNull()
+        ?.takeIf {
+            activeVisualLayers.lastOrNull()?.id == it.id && canUseDirectSurfaceVideo(it)
+        }
 
     if (directVideo != null) {
-        DirectSurfaceVideoPreview(editor, directVideo, modifier, playback)
+        Box(modifier.fillMaxSize()) {
+            DirectSurfaceVideoPreview(editor, directVideo, Modifier.fillMaxSize(), playback)
+            CpuPreviewCanvas(editor, Modifier.fillMaxSize(), directVideoLayerId = directVideo.id)
+        }
     } else if (!supportsGles3(context) || MediaWorkers.isConstrainedDevice) {
         CpuPreviewCanvas(editor, modifier)
     } else {

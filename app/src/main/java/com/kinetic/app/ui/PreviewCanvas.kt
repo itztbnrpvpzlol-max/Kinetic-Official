@@ -43,12 +43,16 @@ private class CpuPreviewClock {
 }
 
 @Composable
-fun CpuPreviewCanvas(editor: EditorState, modifier: Modifier = Modifier) {
+fun CpuPreviewCanvas(
+    editor: EditorState,
+    modifier: Modifier = Modifier,
+    directVideoLayerId: String? = null
+) {
     val ctx = LocalContext.current
     val bitmaps = remember { mutableStateMapOf<String, Bitmap>() }
     val previewClock = remember(editor) { CpuPreviewClock() }
     val mediaLayers = editor.layers.filter {
-        it.uri != null && (it.type == LayerType.IMAGE || it.type == LayerType.VIDEO)
+        it.id != directVideoLayerId && it.uri != null && (it.type == LayerType.IMAGE || it.type == LayerType.VIDEO)
     }
     val mediaLayerSignature = mediaLayers.map {
         "${it.id}|${it.uri}|${it.type}|${it.start}|${it.duration}|${it.srcOffset}|${it.speed}|${it.visible}"
@@ -187,7 +191,9 @@ fun CpuPreviewCanvas(editor: EditorState, modifier: Modifier = Modifier) {
         Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; color = 0xFF8466FF.toInt() }
     }
 
-    Canvas(modifier.background(Color(0xFF0A0A0F))) {
+    Canvas(
+        if (directVideoLayerId == null) modifier.background(Color(0xFF0A0A0F)) else modifier
+    ) {
         val drawStartedNs = System.nanoTime()
         val s = minOf(size.width / COMP_W, size.height / COMP_H)
         val ox = (size.width - COMP_W * s) / 2f
@@ -203,10 +209,10 @@ fun CpuPreviewCanvas(editor: EditorState, modifier: Modifier = Modifier) {
             nc.translate(ox, oy)
             nc.scale(s, s)
             nc.clipRect(0f, 0f, COMP_W, COMP_H)
-            nc.drawColor(android.graphics.Color.BLACK)
+            if (directVideoLayerId == null) nc.drawColor(android.graphics.Color.BLACK)
 
             for (l in layers.asReversed()) {
-                if (!l.visible || !l.activeAt(time) || l.type == LayerType.AUDIO) continue
+                if (!l.visible || !l.activeAt(time) || l.type == LayerType.AUDIO || l.id == directVideoLayerId) continue
                 val alpha = (l.p(PropId.OPACITY).valueAt(time) * 2.55f).toInt().coerceIn(0, 255)
                 nc.save()
                 val layerMatrix = layerMatrices.getOrPut(l.id) { Matrix() }
