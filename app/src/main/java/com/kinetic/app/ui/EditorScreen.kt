@@ -130,6 +130,9 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
             var transportTime = editor.time
             var publishedFrame = (transportTime * editor.fps).toInt()
             var audioAccumulator = 0f
+            // Start the audio transport immediately; subsequent clock updates are
+            // coalesced and applied on AudioEngine's dedicated playback thread.
+            audio.sync(editor.layers, transportTime, true)
             while (editor.playing) {
                 val now = withFrameNanos { it }
                 val dt = ((now - last) / 1_000_000_000f).coerceIn(0f, 0.1f)
