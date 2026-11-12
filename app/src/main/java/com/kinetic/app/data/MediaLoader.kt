@@ -21,7 +21,6 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import java.util.concurrent.ConcurrentHashMap
 import java.util.LinkedHashMap
-import java.util.concurrent.atomic.AtomicInteger
 import java.io.File
 import java.io.FileOutputStream
 import java.security.MessageDigest
@@ -443,7 +442,6 @@ object MediaLoader {
             )
             onProgress((index + 1).toFloat() / sampleCount)
         }
-        trimPreviewDiskCache(ctx)
     }
 
     /**
