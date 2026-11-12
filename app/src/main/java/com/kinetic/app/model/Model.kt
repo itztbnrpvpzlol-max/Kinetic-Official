@@ -189,6 +189,33 @@ fun newLayer(
     )
 }
 
+
+/**
+ * Reuses caller-owned Matrix instances for the CPU preview draw loop.
+ * This avoids allocating a Matrix for every layer and parent on every frame.
+ */
+fun layerMatrixInto(
+    layer: Layer,
+    t: Float,
+    byId: Map<String, Layer>,
+    out: Matrix,
+    scratch: MutableMap<String, Matrix>,
+    depth: Int = 0
+) {
+    out.reset()
+    out.postTranslate(-layer.p(PropId.ANCHOR_X).valueAt(t), -layer.p(PropId.ANCHOR_Y).valueAt(t))
+    out.postScale(layer.p(PropId.SCALE_X).valueAt(t) / 100f, layer.p(PropId.SCALE_Y).valueAt(t) / 100f)
+    out.postRotate(layer.p(PropId.ROTATION).valueAt(t))
+    out.postTranslate(layer.p(PropId.POS_X).valueAt(t), layer.p(PropId.POS_Y).valueAt(t))
+    val parent = layer.parentId?.let { byId[it] }
+    if (parent != null && parent.id != layer.id && depth < 16) {
+        val parentMatrix = scratch.getOrPut(parent.id) { Matrix() }
+        layerMatrixInto(parent, t, byId, parentMatrix, scratch, depth + 1)
+        out.postTranslate(parent.p(PropId.ANCHOR_X).valueAt(t), parent.p(PropId.ANCHOR_Y).valueAt(t))
+        out.postConcat(parentMatrix)
+    }
+}
+
 /** Layer-space -> composition-space matrix at time t, including the parent chain. */
 fun layerMatrix(layer: Layer, t: Float, byId: Map<String, Layer>, depth: Int = 0): Matrix {
     val m = Matrix()
