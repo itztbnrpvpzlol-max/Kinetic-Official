@@ -145,10 +145,6 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
         editor.projectId
     ) {
         if (editor.playing) return@LaunchedEffect
-        if (!editor.settings.autoPreviewCache) {
-            editor.clearCachedFrameMarks()
-            return@LaunchedEffect
-        }
         // Debounce rapid scrubbing so the worker starts from the final playhead
         // position instead of repeatedly restarting during a drag.
         delay(80)
@@ -167,6 +163,19 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
         val frameCount = kotlin.math.ceil(editor.duration * editor.fps)
             .toInt().coerceAtLeast(1)
         val startFrame = (editor.time * editor.fps).toInt().coerceIn(0, frameCount - 1)
+
+        // Disabling automatic caching stops new renders but still allows already
+        // rendered frames on disk to be reused by preview playback.
+        if (!editor.settings.autoPreviewCache) {
+            for (frameIndex in 0 until frameCount) {
+                val frameTime = frameIndex / editor.fps.toFloat()
+                val key = CompositionFrameCache.frameKey(
+                    editor.projectId, snapshot, frameTime, editor.fps, frameWidth, frameHeight
+                )
+                if (CompositionFrameCache.isCached(ctx, key)) editor.markFrameCached(frameIndex, key)
+            }
+            return@LaunchedEffect
+        }
 
         // Work outward from the playhead like an editor RAM preview: completed
         // frames are immediately available while the remaining frames render.
