@@ -104,11 +104,21 @@ fun PreviewCanvas(
         onVideoReady(true)
     }
 
-    // The native GLES composition path is not reliable on constrained
-    // four-core / low-heap devices even when the driver advertises GLES 3.
-    // Prefer the established Canvas renderer there so every visual layer stays
-    // visible; use the GPU path only when the device has enough headroom.
-    if (!supportsGles3(context) || MediaWorkers.isConstrainedDevice) {
+    // A single untransformed video layer can bypass Bitmap/YUV conversion
+    // entirely: MediaCodec/libmpv writes straight into a TextureView Surface.
+    // Keep the proven Canvas compositor for multi-layer timelines and all
+    // transformed clips, preserving the visual-layer reliability fix.
+    val activeVisualLayers = editor.layers.filter {
+        it.visible && it.activeAt(editor.time) &&
+            it.type != LayerType.AUDIO && it.type != LayerType.NULL &&
+            it.type != LayerType.ADJUSTMENT
+    }
+    val directVideo = activeVisualLayers.singleOrNull()
+        ?.takeIf { it.type == LayerType.VIDEO && canUseDirectSurfaceVideo(it) }
+
+    if (directVideo != null) {
+        DirectSurfaceVideoPreview(editor, directVideo, modifier, playback)
+    } else if (!supportsGles3(context) || MediaWorkers.isConstrainedDevice) {
         CpuPreviewCanvas(editor, modifier)
     } else {
         val visualLayers = editor.layers.filter {
