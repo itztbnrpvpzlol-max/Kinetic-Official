@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstddef>
+#include <limits>
 #include <list>
 #include <mutex>
 #include <string>
@@ -25,10 +26,14 @@ public:
         const int count = std::clamp(requested, 1, 20);
         const double safeFps = std::clamp(fps, 1.0, 120.0);
         const double safeSpeed = std::clamp(speed, 0.1, 4.0);
-        const int64_t step = static_cast<int64_t>(1000000.0 / safeFps * safeSpeed);
+        const double stepValue = 1000000.0 / safeFps * safeSpeed;
+        const int64_t step = std::max<int64_t>(1, static_cast<int64_t>(std::llround(stepValue)));
+        const int64_t base = std::max<int64_t>(0, playheadUs);
         result.reserve(static_cast<size_t>(count));
         for (int i = 0; i < count; ++i) {
-            int64_t pts = std::max<int64_t>(0, playheadUs) + step * i;
+            if (i > 0 && step >
+                (std::numeric_limits<int64_t>::max() - base) / static_cast<int64_t>(i)) break;
+            const int64_t pts = base + step * static_cast<int64_t>(i);
             if (durationUs > 0 && pts >= durationUs) break;
             result.push_back({pts, 0, i == 0 ? 100 : (i < 5 ? 80 : 50)});
         }
