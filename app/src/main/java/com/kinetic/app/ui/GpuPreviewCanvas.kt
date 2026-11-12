@@ -332,8 +332,6 @@ private fun GpuCompositionPreviewCanvas(
                         val uri = layer.uri
                         if (uri != null) {
                             val playbackUri = rememberPlaybackUri(uri, qualityScale, editor.playing)
-                            val maxW = (COMP_W * qualityScale).toInt().coerceAtLeast(240)
-                            val maxH = (COMP_H * qualityScale).toInt().coerceAtLeast(135)
                             val player = remember(playbackUri, qualityScale) {
                                 com.kinetic.app.engine.NativeVideoPlayer(
                                     context, playbackUri ?: Uri.parse(uri)
@@ -348,6 +346,52 @@ private fun GpuCompositionPreviewCanvas(
         DisposableEffect(view) {
             onDispose { view.releaseRenderer() }
         }
+    }
+}
+
+@Composable
+private fun GpuVideoPlayerLayer(
+    editor: EditorState,
+    layer: com.kinetic.app.model.Layer,
+    player: com.kinetic.app.engine.NativeVideoPlayer,
+    surfaceView: GpuPreviewSurfaceView
+) {
+    val sourceTime = ((editor.time - layer.start).coerceAtLeast(0f) * layer.speed + layer.srcOffset)
+        .coerceAtLeast(0f)
+    val sourcePositionMs = (sourceTime * 1000f).toLong()
+
+    DisposableEffect(player, surfaceView, layer.id) {
+        surfaceView.attachVideo(layer.id, player)
+        onDispose {
+            surfaceView.detachVideo(layer.id, player)
+            player.release()
+        }
+    }
+
+    LaunchedEffect(layer.id, editor.playing, layer.speed, player) {
+        player.setSpeed(layer.speed.coerceIn(0.1f, 4f))
+        if (editor.playing) {
+            player.seekTo(sourcePositionMs)
+            player.play()
+        } else {
+            player.pause()
+        }
+    }
+
+    val previousTimelineTime = remember(layer.id) {
+        androidx.compose.runtime.mutableFloatStateOf(editor.time)
+    }
+    LaunchedEffect(editor.time, editor.playing, layer.id, player) {
+        player.updatePositionHint(sourcePositionMs)
+        if (editor.playing) {
+            if (editor.time + 0.05f < previousTimelineTime.floatValue) {
+                player.seekTo(sourcePositionMs)
+            }
+        } else {
+            kotlinx.coroutines.delay(24)
+            player.seekTo(sourcePositionMs)
+        }
+        previousTimelineTime.floatValue = editor.time
     }
 }
 
