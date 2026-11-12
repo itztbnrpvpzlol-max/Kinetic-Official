@@ -59,6 +59,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import android.os.SystemClock
 import com.kinetic.app.engine.NativePlaybackEngine
+import com.kinetic.app.engine.KreEngine
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -215,13 +216,30 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                 val sourceTime = (
                     (playhead - layer.start).coerceAtLeast(0f) * sourceSpeed + layer.srcOffset
                 ).coerceAtLeast(0f)
-                val sourceStep = maxOf(1f / 12f, sourceSpeed / 12f)
+                // Native KRE plans a bounded 15-timestamp look-ahead window.
+                // The RAM cache admits only a tiny slice at once on low-memory
+                // devices; the window advances continuously with the playhead.
+                val planned = KreEngine.planFrames(
+                    (sourceTime * 1_000_000f).toLong(),
+                    12.0,
+                    sourceSpeed.toDouble(),
+                    0L,
+                    15
+                )
+                val firstUpcomingUs = planned.getOrNull(1) ?: continue
+                val nextUpcomingUs = planned.getOrNull(2)
+                val sourceStepSec = (
+                    ((nextUpcomingUs ?: (firstUpcomingUs + (1_000_000.0 / 12.0 * sourceSpeed).toLong()))
+                        - firstUpcomingUs).coerceAtLeast(1L)
+                    / 1_000_000f
+                )
                 MediaLoader.prefetchUpcomingVideoFrames(
                     ctx,
                     Uri.parse(layer.uri!!),
-                    sourceTime + sourceStep,
+                    firstUpcomingUs / 1_000_000f,
                     frameCount = if (MediaWorkers.isConstrainedDevice) 1 else 2,
-                    sourceStepSec = sourceStep
+                    sampleFps = 12,
+                    sourceStepSec = sourceStepSec
                 )
             }
             delay(180L)
