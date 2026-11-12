@@ -487,8 +487,12 @@ Java_com_kinetic_app_engine_NativeRenderEngine_nativeGlInit(JNIEnv*, jobject) {
     gExternalProgram = linkGlProgram(vertex, externalFragment);
     gSolidProgram = linkGlProgram(solidVertex, solidFragment);
     if (!gTextureProgram || !gExternalProgram || !gSolidProgram) {
+        if (gTextureProgram) glDeleteProgram(gTextureProgram);
+        if (gExternalProgram) glDeleteProgram(gExternalProgram);
+        if (gSolidProgram) glDeleteProgram(gSolidProgram);
         if (gVertexBuffer) glDeleteBuffers(1, &gVertexBuffer);
         if (gVertexArrayObject) glDeleteVertexArrays(1, &gVertexArrayObject);
+        gTextureProgram = gExternalProgram = gSolidProgram = 0;
         gVertexBuffer = 0;
         gVertexArrayObject = 0;
         return JNI_FALSE;
@@ -523,6 +527,9 @@ Java_com_kinetic_app_engine_NativeRenderEngine_nativeGlInit(JNIEnv*, jobject) {
         if (gVertexArrayObject) glDeleteVertexArrays(1, &gVertexArrayObject);
         gTextureProgram = gExternalProgram = gSolidProgram = 0;
         gVertexBuffer = gVertexArrayObject = 0;
+        gTexturePosition = gTextureUv = gTextureSampler = gTextureAlpha = gTextureGray = -1;
+        gExternalPosition = gExternalUv = gExternalSampler = gExternalAlpha = gExternalGray = gExternalMatrix = -1;
+        gSolidPosition = gSolidColor = -1;
         return JNI_FALSE;
     }
     __android_log_print(ANDROID_LOG_INFO, "KRE", "Native GLES3 renderer initialized");
