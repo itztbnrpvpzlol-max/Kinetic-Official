@@ -311,7 +311,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                 val transportTime = playback.positionSeconds()
                     .coerceIn(0f, editor.duration.coerceAtLeast(0f))
                 val timelineFps = editor.fps.coerceIn(1, 240)
-                val nextFrame = playback.positionFrame(timelineFps).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+                val nextFrame = playback.positionFrame(timelineFps.toFloat()).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
                 if (nextFrame != publishedFrame) {
                     // Publish frame-accurate timeline ticks to Compose while keeping
                     // the unquantized native clock for audio synchronization.
