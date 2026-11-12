@@ -89,35 +89,42 @@ object MediaLoader {
     }
 
     /** Image bitmap, or a video frame at [timeSec] (cached frame sampling, cached). */
-    suspend fun bitmapFor(ctx: Context, uri: Uri, type: LayerType, timeSec: Float, sampleFps: Int = 5, maxEdge: Int = 960): Bitmap? =
-        withContext(MediaWorkers.cpuDispatcher) {
-            val bucket = if (type == LayerType.VIDEO) (timeSec * sampleFps.toFloat()).toInt() else 0
-            val key = if (type == LayerType.IMAGE) "$uri@image" else "$uri@$sampleFps@$maxEdge@$bucket"
-            synchronized(key.intern()) {
-                val hit = cache.get(key)
-                if (hit != null) return@synchronized hit
-                val diskFile = previewFrameFile(ctx, key, type)
-                val diskBitmap = if (diskFile.isFile) BitmapFactory.decodeFile(diskFile.absolutePath) else null
-                val bmp = diskBitmap ?: try {
-                    if (type == LayerType.IMAGE) decodeImage(ctx, uri) else videoFrame(ctx, uri, bucket / sampleFps.toFloat(), maxEdge)
-                } catch (e: Exception) {
-                    null
-                }
-                if (bmp != null) {
-                    cache.put(key, bmp)
-                    if (diskBitmap == null) {
-                        runCatching {
-                            diskFile.parentFile?.mkdirs()
-                            FileOutputStream(diskFile).use { output ->
-                                val format = if (type == LayerType.IMAGE) Bitmap.CompressFormat.PNG else Bitmap.CompressFormat.JPEG
-                                bmp.compress(format, 86, output)
-                            }
+    suspend fun bitmapFor(
+        ctx: Context,
+        uri: Uri,
+        type: LayerType,
+        timeSec: Float,
+        sampleFps: Int = 5,
+        maxEdge: Int = 960,
+        persistToDisk: Boolean = true
+    ): Bitmap? = withContext(MediaWorkers.cpuDispatcher) {
+        val bucket = if (type == LayerType.VIDEO) (timeSec * sampleFps.toFloat()).toInt() else 0
+        val key = if (type == LayerType.IMAGE) "$uri@image" else "$uri@$sampleFps@$maxEdge@$bucket"
+        synchronized(key.intern()) {
+            val hit = cache.get(key)
+            if (hit != null) return@synchronized hit
+            val diskFile = if (persistToDisk) previewFrameFile(ctx, key, type) else null
+            val diskBitmap = diskFile?.takeIf { it.isFile }?.let { BitmapFactory.decodeFile(it.absolutePath) }
+            val bmp = diskBitmap ?: try {
+                if (type == LayerType.IMAGE) decodeImage(ctx, uri) else videoFrame(ctx, uri, bucket / sampleFps.toFloat(), maxEdge)
+            } catch (e: Exception) {
+                null
+            }
+            if (bmp != null) {
+                cache.put(key, bmp)
+                if (diskFile != null && diskBitmap == null) {
+                    runCatching {
+                        diskFile.parentFile?.mkdirs()
+                        FileOutputStream(diskFile).use { output ->
+                            val format = if (type == LayerType.IMAGE) Bitmap.CompressFormat.PNG else Bitmap.CompressFormat.JPEG
+                            bmp.compress(format, 86, output)
                         }
                     }
                 }
-                bmp
             }
+            bmp
         }
+    }
 
     private fun previewFrameFile(ctx: Context, key: String, type: LayerType): File {
         val digest = MessageDigest.getInstance("SHA-256")
