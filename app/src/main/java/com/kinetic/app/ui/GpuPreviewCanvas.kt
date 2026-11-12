@@ -107,7 +107,7 @@ fun PreviewCanvas(
         )
     }
     val readyKey = editor.cachedFrames[frameIndex]
-    val frameReady = editor.settings.autoPreviewCache && readyKey == frameKey
+    val frameReady = readyKey == frameKey
 
     // Keep a few upcoming rendered frames warm in RAM so disk-backed cache
     // playback does not need to decode every JPEG at the exact presentation time.
