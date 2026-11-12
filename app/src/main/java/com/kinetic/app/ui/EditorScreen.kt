@@ -125,13 +125,25 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                     it.type != LayerType.NULL && it.type != LayerType.ADJUSTMENT
             } + 1
         )
-        if (scale >= 0.99f) return
         val targetHeight = when {
             scale <= 0.40f -> 360
             scale <= 0.60f -> 540
             else -> 720
         }
-        runCatching { PreviewProxyStore.getOrCreate(ctx, source, targetHeight) }
+        val proxy = if (scale < 0.99f) {
+            runCatching { PreviewProxyStore.getOrCreate(ctx, source, targetHeight) }.getOrNull()
+        } else null
+        // Warm fifteen low-resolution source frames BEFORE inserting the clip.
+        // The bounded LRU admits the full window on a 2 GB / 4-core device.
+        MediaLoader.prefetchUpcomingVideoFrames(
+            ctx,
+            proxy ?: source,
+            firstFrameTimeSec = 0f,
+            frameCount = 15,
+            sampleFps = 12,
+            maxEdge = 240,
+            sourceStepSec = 1f / 12f
+        )
     }
 
     // Playback uses the live composition renderer without timeline frame pre-caching.
@@ -235,7 +247,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                     12.0,
                     sourceSpeed.toDouble(),
                     0L,
-                    15
+                    16
                 )
                 val firstUpcomingUs = planned.getOrNull(1) ?: continue
                 val nextUpcomingUs = planned.getOrNull(2)
@@ -248,8 +260,9 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                     ctx,
                     Uri.parse(layer.uri!!),
                     firstUpcomingUs / 1_000_000f,
-                    frameCount = if (MediaWorkers.isConstrainedDevice) 1 else 2,
+                    frameCount = MediaLoader.recommendedPrefetchFrameCount(activeVideos.size),
                     sampleFps = 12,
+                    maxEdge = 240,
                     sourceStepSec = sourceStepSec
                 )
             }
