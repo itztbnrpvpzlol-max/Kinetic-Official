@@ -312,10 +312,8 @@ class AndroidVideoPlayer(
                             render = waitForPresentationWindow(targetNs, outputSurface)
                         }
                         val presentNowNs = System.nanoTime()
-                        if (render && isPlayingNow() && targetNs < presentNowNs - frameDurationNs) {
-                            render = false
-                        }
-
+                        // Show the newest decoded frame even when its ideal deadline has passed.
+                        // Dropping every late frame can leave low-end devices frozen on frame one.
                         if (render) {
                             codec.releaseOutputBuffer(outputIndex, max(targetNs, presentNowNs))
                             synchronized(lock) {

@@ -22,13 +22,21 @@ object PreviewDiagnostics {
         val cpuRamHitPercent: Int,
         val cpuRequests: Long,
         val cpuRamHits: Long,
-        val cpuDiskHits: Long
+        val cpuDiskHits: Long,
+        val surfaceFps: Float,
+        val surfaceFrames: Long,
+        val surfaceActive: Boolean
     )
 
     private val droppedFrames = AtomicLong(0L)
     private val cpuRequests = AtomicLong(0L)
     private val cpuRamHits = AtomicLong(0L)
     private val cpuDiskHits = AtomicLong(0L)
+    private val surfaceFrames = AtomicLong(0L)
+    @Volatile private var surfaceActive = false
+    @Volatile private var surfaceFps = 0f
+    private var surfaceWindowStartNs = 0L
+    private var surfaceWindowFrames = 0
     private val cpuDecodeCount = AtomicLong(0L)
     private val cpuDecodeTotalNs = AtomicLong(0L)
     private val cpuQueueTotalNs = AtomicLong(0L)
@@ -43,6 +51,29 @@ object PreviewDiagnostics {
     private var cpuWindowStartNs = 0L
     private var cpuWindowFrames = 0
     private var cpuWindowDrawNs = 0L
+
+    fun setSurfacePreviewActive(active: Boolean) {
+        surfaceActive = active
+        if (!active) synchronized(this) {
+            surfaceFps = 0f
+            surfaceWindowStartNs = 0L
+            surfaceWindowFrames = 0
+        }
+    }
+
+    @Synchronized
+    fun recordSurfaceVideoFrame() {
+        surfaceFrames.incrementAndGet()
+        val now = System.nanoTime()
+        if (surfaceWindowStartNs == 0L) surfaceWindowStartNs = now
+        surfaceWindowFrames++
+        val elapsed = now - surfaceWindowStartNs
+        if (elapsed >= 1_000_000_000L) {
+            surfaceFps = surfaceWindowFrames * 1_000_000_000f / elapsed.toFloat()
+            surfaceWindowStartNs = now
+            surfaceWindowFrames = 0
+        }
+    }
 
     fun attach(player: ExoPlayer) {
         player.addAnalyticsListener(object : AnalyticsListener {
@@ -113,7 +144,10 @@ object PreviewDiagnostics {
             cpuRamHitPercent = if (requests == 0L) 0 else (cpuRamHits.get() * 100L / requests).toInt(),
             cpuRequests = requests,
             cpuRamHits = cpuRamHits.get(),
-            cpuDiskHits = cpuDiskHits.get()
+            cpuDiskHits = cpuDiskHits.get(),
+            surfaceFps = surfaceFps,
+            surfaceFrames = surfaceFrames.get(),
+            surfaceActive = surfaceActive
         )
     }
 
@@ -123,6 +157,10 @@ object PreviewDiagnostics {
         cpuRequests.set(0L)
         cpuRamHits.set(0L)
         cpuDiskHits.set(0L)
+        surfaceFrames.set(0L)
+        surfaceFps = 0f
+        surfaceWindowStartNs = 0L
+        surfaceWindowFrames = 0
         cpuDecodeCount.set(0L)
         cpuDecodeTotalNs.set(0L)
         cpuQueueTotalNs.set(0L)

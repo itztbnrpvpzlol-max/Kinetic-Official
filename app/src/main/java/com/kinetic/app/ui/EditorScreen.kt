@@ -706,6 +706,9 @@ private fun PreviewDiagnosticsBadge(playing: Boolean, modifier: Modifier = Modif
     }
     if (playing) {
         val previewLabel = when {
+            snapshot.surfaceActive -> {
+                "SURFACE ${snapshot.surfaceFps.toInt()}fps · frames ${snapshot.surfaceFrames}"
+            }
             snapshot.cpuDrawFps > 0f -> {
                 "CPU ${snapshot.cpuDrawFps.toInt()}fps · draw ${"%.1f".format(snapshot.cpuDrawMs)}ms · dec ${"%.1f".format(snapshot.cpuDecodeMs)}ms · q ${"%.1f".format(snapshot.cpuQueueMs)}ms · RAM hit ${snapshot.cpuRamHitPercent}%"
             }

@@ -19,7 +19,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
-import com.kinetic.app.engine.FfmpegVideoPlayer
+import com.kinetic.app.engine.AndroidVideoPlayer
+import com.kinetic.app.data.PreviewDiagnostics
 import com.kinetic.app.engine.NativePlaybackEngine
 import com.kinetic.app.model.COMP_H
 import com.kinetic.app.model.COMP_W
@@ -61,7 +62,7 @@ internal fun canUseDirectSurfaceVideo(layer: Layer): Boolean {
 
 private class DirectVideoTextureView(
     context: Context,
-    private val player: FfmpegVideoPlayer
+    private val player: AndroidVideoPlayer
 ) : TextureView(context), TextureView.SurfaceTextureListener {
     private var outputSurface: Surface? = null
 
@@ -78,7 +79,9 @@ private class DirectVideoTextureView(
 
     override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) = Unit
 
-    override fun onSurfaceTextureUpdated(surface: SurfaceTexture) = Unit
+    override fun onSurfaceTextureUpdated(surface: SurfaceTexture) {
+        PreviewDiagnostics.recordSurfaceVideoFrame()
+    }
 
     override fun onSurfaceTextureDestroyed(surfaceTexture: SurfaceTexture): Boolean {
         player.detachSurface()
@@ -103,7 +106,7 @@ internal fun DirectSurfaceVideoPreview(
 ) {
     val context = LocalContext.current
     val uri = Uri.parse(checkNotNull(layer.uri))
-    val player = remember(uri) { FfmpegVideoPlayer(context, uri) }
+    val player = remember(uri) { AndroidVideoPlayer(context, uri) }
     val textureView = remember(context, player) { DirectVideoTextureView(context, player) }
     val sourcePositionMs = (
         ((editor.time - layer.start).coerceAtLeast(0f) * layer.speed + layer.srcOffset)
@@ -125,7 +128,9 @@ internal fun DirectSurfaceVideoPreview(
     }
 
     DisposableEffect(player, textureView) {
+        PreviewDiagnostics.setSurfacePreviewActive(true)
         onDispose {
+            PreviewDiagnostics.setSurfacePreviewActive(false)
             textureView.releaseOutput()
             player.release()
         }
