@@ -102,6 +102,12 @@ object MediaLoader {
                 cache.trimToSize(reduced)
             }
         }
+        when {
+            level >= android.content.ComponentCallbacks2.TRIM_MEMORY_BACKGROUND ->
+                trimRetrieverCache(0)
+            level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW ->
+                trimRetrieverCache(if (MediaWorkers.isConstrainedDevice) 1 else 2)
+        }
         if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_BACKGROUND) {
             waveformCache.evictAll()
         }
@@ -121,6 +127,22 @@ object MediaLoader {
         }
         retrieverLocks.clear()
         waveformCache.evictAll()
+    }
+
+    private fun trimRetrieverCache(targetCount: Int) {
+        val evicted = synchronized(retrieverRegistryLock) {
+            val removed = ArrayList<Pair<String, MediaMetadataRetriever>>()
+            while (retrieverLru.size > targetCount.coerceAtLeast(0)) {
+                val oldestKey = retrieverLru.entries.iterator().next().key
+                retrieverLru.remove(oldestKey)
+                retrievers.remove(oldestKey)?.let { removed.add(oldestKey to it) }
+            }
+            removed
+        }
+        evicted.forEach { (key, retriever) ->
+            val lock = retrieverLocks.getOrPut(key) { Any() }
+            synchronized(lock) { runCatching { retriever.release() } }
+        }
     }
 
     /** Obtain a retriever from a tiny device-aware LRU; release evictions safely. */
