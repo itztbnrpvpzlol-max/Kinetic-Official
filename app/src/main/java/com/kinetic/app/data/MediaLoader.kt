@@ -32,7 +32,7 @@ object MediaLoader {
     class Info(val length: Float?, val width: Int, val height: Int)
 
     // A moderate temporal sampling rate for the constrained CPU Canvas preview.
-    const val CPU_PREVIEW_SAMPLE_FPS = 18
+    const val CPU_PREVIEW_SAMPLE_FPS = 30
 
     // Bitmap memory is expensive on mobile. Keep the preview cache proportional
     // to the app heap instead of allowing a user preference to consume hundreds
