@@ -400,6 +400,7 @@ object MediaLoader {
                     temp.copyTo(file, overwrite = true)
                     temp.delete()
                 }
+                Unit
             }
         }
     }
