@@ -255,11 +255,6 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
 
             while (editor.playing) {
                 delay(16L)
-                        continue
-                    }
-                }
-
-                delay(16L)
                 val transportTime = playback.positionSeconds()
                     .coerceIn(0f, editor.duration.coerceAtLeast(0f))
 
