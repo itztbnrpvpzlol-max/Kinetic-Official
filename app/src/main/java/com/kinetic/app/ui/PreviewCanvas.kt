@@ -108,7 +108,8 @@ fun CpuPreviewCanvas(editor: EditorState, modifier: Modifier = Modifier) {
                     sourceTime,
                     sampleFps = MediaLoader.CPU_PREVIEW_SAMPLE_FPS,
                     maxEdge = frameEdge,
-                    persistToDisk = !playing
+                    // Persist every foreground frame, including playback frames.
+                    persistToDisk = true
                 )
 
                 // The decode may finish after the playhead moved. Drop stale

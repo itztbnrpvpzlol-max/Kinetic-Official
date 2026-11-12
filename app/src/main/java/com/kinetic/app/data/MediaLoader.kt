@@ -49,7 +49,6 @@ object MediaLoader {
     private val waveformCache = object : LruCache<String, FloatArray>(if (MediaWorkers.isConstrainedDevice) 2 * 1024 * 1024 else 8 * 1024 * 1024) {
         override fun sizeOf(key: String, value: FloatArray): Int = value.size * 4
     }
-    private val sourceProxyWrites = AtomicInteger()
 
     /**
      * Calculate a safe look-ahead count from the actual source-frame edge
@@ -238,8 +237,12 @@ object MediaLoader {
             val sourceKey = mediaCacheIdentity(uri)
             val key = if (type == LayerType.IMAGE) "$sourceKey@image@$maxEdge" else "$sourceKey@$sampleFps@$maxEdge@$bucket"
             synchronized(key.intern()) {
+                val diskFile = if (persistToDisk) previewFrameFile(ctx, key, type) else null
                 val hit = cache.get(key)
                 if (hit != null) {
+                    // A frame first decoded by RAM-only prefetch must still become
+                    // durable once the foreground preview actually requests it.
+                    if (diskFile != null && !diskFile.isFile) writePreviewFrame(diskFile, hit, type)
                     if (!lowPriorityPrefetch) {
                         PreviewDiagnostics.recordCpuFrameRequest(
                             ramHit = true, diskHit = false, decodeNs = 0L,
@@ -249,7 +252,6 @@ object MediaLoader {
                     return@synchronized hit
                 }
 
-                val diskFile = if (persistToDisk) previewFrameFile(ctx, key, type) else null
                 val diskBitmap = diskFile?.takeIf { it.isFile }?.let { BitmapFactory.decodeFile(it.absolutePath) }
                 val decodeStartedNs = System.nanoTime()
                 val bmp = diskBitmap ?: try {
@@ -274,16 +276,7 @@ object MediaLoader {
                 if (bmp != null) {
                     cache.put(key, bmp)
                     if (diskFile != null && diskBitmap == null) {
-                        runCatching {
-                            diskFile.parentFile?.mkdirs()
-                            FileOutputStream(diskFile).use { output ->
-                                val format = if (type == LayerType.IMAGE) Bitmap.CompressFormat.PNG else Bitmap.CompressFormat.JPEG
-                                bmp.compress(format, 86, output)
-                            }
-                            if (sourceProxyWrites.incrementAndGet() % 32 == 0) {
-                                trimPreviewDiskCache(ctx)
-                            }
-                        }
+                        writePreviewFrame(diskFile, bmp, type)
                     }
                 }
                 bmp
@@ -368,19 +361,30 @@ object MediaLoader {
             .digest(key.toByteArray())
             .joinToString("") { "%02x".format(it) }
         val extension = if (type == LayerType.IMAGE) "png" else "jpg"
-        return File(File(ctx.cacheDir, "preview-frames"), "$digest.$extension")
+        // filesDir survives Android's automatic cache cleanup.
+        return File(File(ctx.filesDir, "preview-frames"), "$digest.$extension")
     }
 
-    private fun trimPreviewDiskCache(ctx: Context) {
-        val directory = File(ctx.cacheDir, "preview-frames")
-        val files = directory.listFiles()?.filter { it.isFile } ?: return
-        var total = files.fold(0L) { sum, file -> sum + file.length() }
-        if (total <= 256L * 1024L * 1024L) return
-        for (file in files.sortedBy { it.lastModified() }) {
-            if (total <= 192L * 1024L * 1024L) break
-            val length = file.length()
-            if (file.delete()) total -= length
+    private fun writePreviewFrame(file: File, bitmap: Bitmap, type: LayerType) {
+        runCatching {
+            if (file.isFile) return
+            file.parentFile?.mkdirs()
+            val temp = File(file.parentFile, "${file.name}.tmp")
+            val format = if (type == LayerType.IMAGE) Bitmap.CompressFormat.PNG else Bitmap.CompressFormat.JPEG
+            val written = FileOutputStream(temp).use { output ->
+                val success = bitmap.compress(format, 86, output)
+                output.flush()
+                success
+            }
+            if (!written || !temp.renameTo(file)) temp.delete()
         }
+    }
+
+    /** Remove the durable preview store only after an explicit user request. */
+    suspend fun clearPersistentPreviewCache(ctx: Context) = withContext(Dispatchers.IO) {
+        cache.evictAll()
+        File(ctx.filesDir, "preview-frames").deleteRecursively()
+        File(ctx.cacheDir, "preview-frames").deleteRecursively()
     }
 
     /**
@@ -430,7 +434,6 @@ object MediaLoader {
         // thumbnails, so these prebuilt samples are reusable by the timeline.
         val sampleFps = 2
         val speed = playbackSpeed.coerceIn(0.1f, 4f)
-        trimPreviewDiskCache(ctx)
         for (index in 0 until sampleCount) {
             currentCoroutineContext().ensureActive()
             bitmapFor(

@@ -18,20 +18,34 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Icon
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Switch
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kinetic.app.data.AppSettings
+import com.kinetic.app.data.MediaLoader
+import androidx.compose.ui.platform.LocalContext
+import kotlinx.coroutines.launch
 
 @Composable
 fun SettingsScreen(settings: AppSettings, onBack: () -> Unit) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var showClearCacheDialog by remember { mutableStateOf(false) }
+    var cacheCleared by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxSize().background(KColors.Bg).statusBarsPadding().navigationBarsPadding()) {
         Row(Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = KColors.Text) }
@@ -52,6 +66,16 @@ fun SettingsScreen(settings: AppSettings, onBack: () -> Unit) {
             Section("Preview & performance")
             ChoiceRow("Preview quality", AppSettings.PREVIEW_QUALITIES, settings.previewQualityIndex) { settings.updatePreviewQuality(it) }
             ChoiceRow("Media bitmap cache", AppSettings.PREVIEW_MEMORY_MB.map { "$it MB" }, settings.previewMemoryIndex) { settings.updatePreviewMemory(it) }
+            Row(
+                Modifier.fillMaxWidth().clickable { showClearCacheDialog = true }.padding(vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("Clear saved preview frames", color = KColors.Text, fontSize = 15.sp)
+                    Text("Removes frames stored on this device", color = KColors.Dim, fontSize = 12.sp)
+                }
+                Text("Clear", color = KColors.Accent, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            }
 
             Section("Properties")
             ChoiceRow("Interaction style", listOf("After Effects", "Alight Motion"), if (settings.afterEffectsScrubbing) 0 else 1) { settings.updateAfterEffectsScrubbing(it == 0) }
@@ -62,6 +86,33 @@ fun SettingsScreen(settings: AppSettings, onBack: () -> Unit) {
             Spacer(Modifier.height(24.dp))
             Text("Kinetic 0.2", color = KColors.Dim, fontSize = 12.sp)
         }
+    }
+    if (showClearCacheDialog) {
+        AlertDialog(
+            onDismissRequest = { showClearCacheDialog = false },
+            title = { Text("Clear saved preview frames?") },
+            text = { Text("Previously saved preview frames will be deleted. Kinetic will rebuild this cache as you preview media.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showClearCacheDialog = false
+                    scope.launch {
+                        MediaLoader.clearPersistentPreviewCache(context)
+                        cacheCleared = true
+                    }
+                }) { Text("Clear cache") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearCacheDialog = false }) { Text("Cancel") }
+            }
+        )
+    }
+    if (cacheCleared) {
+        AlertDialog(
+            onDismissRequest = { cacheCleared = false },
+            title = { Text("Preview cache cleared") },
+            text = { Text("Saved preview frames have been removed.") },
+            confirmButton = { TextButton(onClick = { cacheCleared = false }) { Text("OK") } }
+        )
     }
 }
 
