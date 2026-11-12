@@ -357,7 +357,12 @@ private fun Clip(editor: EditorState, layer: Layer, pps: Float, selected: Boolea
     val ctx = LocalContext.current
     val dens = LocalDensity.current.density
     val shape = RoundedCornerShape(8.dp)
-    val thumbnails by produceState<List<Bitmap>>(emptyList(), layer.uri, layer.type, layer.duration, layer.srcOffset, layer.speed) {
+    val thumbnails by produceState<List<Bitmap>>(
+        emptyList(), layer.uri, layer.type, layer.duration, layer.srcOffset, layer.speed, editor.playing
+    ) {
+        // Timeline artwork is non-urgent. Keep existing thumbnails during
+        // playback and resume generation after transport stops.
+        if (editor.playing) return@produceState
         val u = layer.uri
         value = if (u == null || (layer.type != LayerType.IMAGE && layer.type != LayerType.VIDEO)) {
             emptyList()
