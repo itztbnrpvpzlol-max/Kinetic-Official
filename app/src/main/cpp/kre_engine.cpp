@@ -57,7 +57,7 @@ public:
         output = it->second.values;
         return true;
     }
-    void put(uint64_t key, const float* values, size_t count) {
+    void put(uint64_t key, const float* values, std::size_t count) {
         if (!values || count == 0 || count > 4096) return;
         std::vector<float> copy(values, values + count);
         const size_t cost = copy.size() * sizeof(float);
@@ -101,7 +101,7 @@ static CalculationCache calculations;
 
 } // namespace kre
 
-extern "C" bool kreGetCalculation(uint64_t key, float* output, size_t count) {
+extern "C" bool kreGetCalculation(uint64_t key, float* output, std::size_t count) {
     if (!output || count == 0) return false;
     std::vector<float> values;
     if (!kre::calculations.get(key, values) || values.size() != count) return false;
