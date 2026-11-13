@@ -124,9 +124,10 @@ private fun MaskPointWorkspace(editor: EditorState, layer: Layer, tool: String) 
         }
         Canvas(Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(6.dp))
             .background(KColors.Bg)
-            .pointerInput(layer.id, tool, pending) {
+            .pointerInput(layer.id, tool) {
+                val latestPending by rememberUpdatedState(pending)
                 detectTapGestures { p ->
-                    val candidate = pending ?: VectorPoint((p.x / size.width).coerceIn(0f, 1f), (p.y / size.height).coerceIn(0f, 1f))
+                    val candidate = latestPending ?: VectorPoint((p.x / size.width).coerceIn(0f, 1f), (p.y / size.height).coerceIn(0f, 1f))
                     editor.addMaskPoint(layer.id, candidate)
                     pending = null
                 }
