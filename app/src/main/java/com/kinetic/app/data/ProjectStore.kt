@@ -96,7 +96,10 @@ class ProjectStore(context: Context) {
                 PropId.SCALE_X, PropId.SCALE_Y, PropId.OPACITY -> 100.0
                 PropId.SPEED -> j.optDouble("speed", 1.0)
                 PropId.VOLUME -> j.optDouble("volume", 1.0)
-                else -> 0.0
+                else -> if (id.isVectorPoint) {
+                    val point = j.optJSONArray("vectorPoints")?.optJSONObject(id.vectorPointIndex)
+                    point?.optDouble(if (id.vectorPointAxis == 'X') "x" else "y", 0.5) ?: 0.5
+                } else 0.0
             })
             val arr = p.optJSONArray("keys") ?: JSONArray()
             val keys = (0 until arr.length()).mapNotNull { i ->

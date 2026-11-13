@@ -131,12 +131,20 @@ private fun VectorPointLine(editor: EditorState, layer: Layer, index: Int, point
     Column(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
         Text("Point ${index + 1}", color = KColors.Text, fontSize = 9.sp, fontWeight = FontWeight.Medium)
         Row(verticalAlignment = Alignment.CenterVertically) {
-            ScrubValueBar("X", point.x, Modifier.weight(1f), step = 0.004f) {
+            val xId = com.kinetic.app.model.PropId.vectorPoint(index, 'X')
+            val yId = com.kinetic.app.model.PropId.vectorPoint(index, 'Y')
+            val xValue = xId?.let { layer.p(it).valueAt(editor.time) } ?: point.x
+            val yValue = yId?.let { layer.p(it).valueAt(editor.time) } ?: point.y
+            ScrubValueBar("X", xValue, Modifier.weight(1f), step = 0.004f,
+                selected = editor.selectedProp == xId,
+                onSelect = { xId?.let(editor::selectProp) }) {
                 if (!xEditing) { editor.beginEdit(); xEditing = true }
                 editor.updateShapePoint(layer.id, index, x = it)
             }
             Spacer(Modifier.width(5.dp))
-            ScrubValueBar("Y", point.y, Modifier.weight(1f), step = 0.004f) {
+            ScrubValueBar("Y", yValue, Modifier.weight(1f), step = 0.004f,
+                selected = editor.selectedProp == yId,
+                onSelect = { yId?.let(editor::selectProp) }) {
                 if (!yEditing) { editor.beginEdit(); yEditing = true }
                 editor.updateShapePoint(layer.id, index, y = it)
             }
@@ -146,14 +154,18 @@ private fun VectorPointLine(editor: EditorState, layer: Layer, index: Int, point
 
 
 @Composable
-fun ScrubValueBar(label: String, value: Float, modifier: Modifier = Modifier, step: Float = 0.5f, onValueChange: (Float) -> Unit) {
+fun ScrubValueBar(
+    label: String, value: Float, modifier: Modifier = Modifier, step: Float = 0.5f,
+    selected: Boolean = false, onSelect: () -> Unit = {}, onValueChange: (Float) -> Unit
+) {
     val density = LocalDensity.current.density
     val latestValue by rememberUpdatedState(value)
     val latestChange by rememberUpdatedState(onValueChange)
     Box(
         modifier.height(30.dp).clip(RoundedCornerShape(6.dp))
-            .background(KColors.Bg)
-            .border(1.dp, KColors.Line, RoundedCornerShape(6.dp))
+            .background(if (selected) KColors.Accent.copy(alpha = 0.14f) else KColors.Bg)
+            .border(1.dp, if (selected) KColors.Accent.copy(alpha = 0.75f) else KColors.Line, RoundedCornerShape(6.dp))
+            .clickable(onClick = onSelect)
             .pointerInput(step) {
                 var scrubValue = latestValue
                 detectHorizontalDragGestures(onDragStart = { scrubValue = latestValue }) { change, drag ->
@@ -164,6 +176,6 @@ fun ScrubValueBar(label: String, value: Float, modifier: Modifier = Modifier, st
             },
         contentAlignment = Alignment.Center
     ) {
-        Text("$label  ${(value * 100f).toInt()}%", color = KColors.Text, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+        Text("$label  ${(value * 100f).toInt()}%", color = if (selected) KColors.Accent else KColors.Text, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
     }
 }

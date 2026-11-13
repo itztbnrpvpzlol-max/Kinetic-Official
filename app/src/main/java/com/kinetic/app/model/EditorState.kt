@@ -155,21 +155,46 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
         shapeName: String = "Rectangle",
         points: List<VectorPoint> = listOf(VectorPoint(0f, 0f), VectorPoint(1f, 0f), VectorPoint(1f, 1f), VectorPoint(0f, 1f))
     ) {
-        val layer = newLayer(LayerType.SHAPE, nextName(shapeName), time, remaining(), 400f, 400f)
-            .copy(shapeKind = shapeName, vectorPoints = points)
+        val base = newLayer(LayerType.SHAPE, nextName(shapeName), time, remaining(), 400f, 400f)
+        val pointProps = mutableMapOf<PropId, Prop>()
+        points.forEachIndexed { index, point ->
+            PropId.vectorPoint(index, 'X')?.let { pointProps[it] = Prop(point.x) }
+            PropId.vectorPoint(index, 'Y')?.let { pointProps[it] = Prop(point.y) }
+        }
+        val layer = base.copy(shapeKind = shapeName, vectorPoints = points, props = base.props + pointProps)
         addLayer(layer)
     }
 
     fun updateShapePoint(layerId: String, index: Int, x: Float? = null, y: Float? = null) {
+        if (x != null) selectProp(PropId.vectorPoint(index, 'X'))
+        if (y != null) selectProp(PropId.vectorPoint(index, 'Y'))
+        val t = time
+        val eps = frame / 2f
         updateLayer(layerId, push = false) { layer ->
             val currentPoints = layer.vectorPoints.ifEmpty {
                 listOf(VectorPoint(0f, 0f), VectorPoint(1f, 0f), VectorPoint(1f, 1f), VectorPoint(0f, 1f))
             }
             if (layer.type != LayerType.SHAPE || index !in currentPoints.indices) layer
-            else layer.copy(vectorPoints = currentPoints.toMutableList().also { points ->
-                val old = points[index]
-                points[index] = VectorPoint((x ?: old.x).coerceIn(0f, 1f), (y ?: old.y).coerceIn(0f, 1f))
-            })
+            else {
+                val old = currentPoints[index]
+                var nextProps = layer.props
+                x?.let { value ->
+                    val id = PropId.vectorPoint(index, 'X')
+                    if (id != null) nextProps = nextProps + (id to (nextProps[id] ?: Prop(old.x)).withValueAt(t, value.coerceIn(0f, 1f), eps))
+                }
+                y?.let { value ->
+                    val id = PropId.vectorPoint(index, 'Y')
+                    if (id != null) nextProps = nextProps + (id to (nextProps[id] ?: Prop(old.y)).withValueAt(t, value.coerceIn(0f, 1f), eps))
+                }
+                val baseX = PropId.vectorPoint(index, 'X')?.let { nextProps[it]?.base } ?: old.x
+                val baseY = PropId.vectorPoint(index, 'Y')?.let { nextProps[it]?.base } ?: old.y
+                layer.copy(
+                    props = nextProps,
+                    vectorPoints = currentPoints.toMutableList().also { points ->
+                        points[index] = VectorPoint(baseX, baseY)
+                    }
+                )
+            }
         }
     }
 
@@ -393,7 +418,11 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
     /** Live change (no snapshot). Call beginEdit() once at the start of a scrub. */
     /** Live change (no snapshot). Call beginEdit() once at the start of a scrub. */
     fun setPropValue(layerId: String, id: PropId, value: Float) {
-        val v = if (id == PropId.OPACITY) value.coerceIn(0f, 100f) else value
+        val v = when {
+            id == PropId.OPACITY -> value.coerceIn(0f, 100f)
+            id.isVectorPoint -> value.coerceIn(0f, 1f)
+            else -> value
+        }
         val t = time
         val eps = frame / 2f
         updateLayer(layerId, push = false) { l ->

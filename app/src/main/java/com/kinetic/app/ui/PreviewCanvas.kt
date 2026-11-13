@@ -236,7 +236,7 @@ fun CpuPreviewCanvas(
                     }
                     LayerType.SHAPE -> {
                         paint.color = l.color; paint.alpha = alpha
-                        val points = l.vectorPoints.ifEmpty { listOf(VectorPoint(0f, 0f), VectorPoint(1f, 0f), VectorPoint(1f, 1f), VectorPoint(0f, 1f)) }
+                        val points = if (l.vectorPoints.isEmpty()) listOf(VectorPoint(0f, 0f), VectorPoint(1f, 0f), VectorPoint(1f, 1f), VectorPoint(0f, 1f)) else l.vectorPointsAt(time)
                         val path = shapePaths.getOrPut(l.id) { android.graphics.Path() }
                         path.reset()
                         points.forEachIndexed { index, point ->
