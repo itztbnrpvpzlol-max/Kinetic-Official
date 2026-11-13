@@ -193,7 +193,7 @@ fun MediaImportSheet(
                             isImporting = true
                             scope.launch {
                                 try {
-                                    onImport(item, trim.start, trim.end)
+                                    onImport(item, trim.start, trim.endInclusive)
                                     onDismiss()
                                 } finally { isImporting = false }
                             }
@@ -261,7 +261,7 @@ fun MediaImportSheet(
                             onValueChange = { previewAt = it; player.pause() },
                             valueRange = 0f..selected!!.duration.coerceAtLeast(0.1f)
                         )
-                        Text("IN  ${String.format("%.2f", trim.start)}s     OUT  ${String.format("%.2f", trim.end)}s",
+                        Text("IN  ${String.format("%.2f", trim.start)}s     OUT  ${String.format("%.2f", trim.endInclusive)}s",
                             color = KColors.Muted, fontSize = 11.sp)
                         RangeSlider(
                             value = trim,
