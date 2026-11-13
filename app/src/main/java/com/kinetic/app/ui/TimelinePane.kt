@@ -117,7 +117,6 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
     val vScroll = rememberScrollState()
     var paneW by remember { mutableIntStateOf(0) }
     var leftWidth by remember { mutableFloatStateOf(176f) }
-    var expandedKeyframeLayers by remember { mutableStateOf<Set<String>>(emptySet()) }
     val leftW = leftWidth.dp
     val leftPx = with(density) { leftW.toPx() }
     val contentSec = max(editor.duration, editor.layers.maxOfOrNull { it.end } ?: 0f)
@@ -190,17 +189,7 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
                     }
                 }
                 items(editor.layers, key = { it.id }) { layer ->
-                    LayerRow(
-                        editor, layer, pps, hScroll, contentW, leftW,
-                        keyframesExpanded = layer.id in expandedKeyframeLayers,
-                        onToggleKeyframes = {
-                            expandedKeyframeLayers = if (layer.id in expandedKeyframeLayers) {
-                                expandedKeyframeLayers - layer.id
-                            } else {
-                                expandedKeyframeLayers + layer.id
-                            }
-                        }
-                    )
+                    LayerRow(editor, layer, pps, hScroll, contentW, leftW)
                 }
             }
         }
@@ -278,8 +267,7 @@ private fun Ruler(editor: EditorState, pps: Float, contentW: Dp) {
 
 @Composable
 private fun LayerRow(
-    editor: EditorState, layer: Layer, pps: Float, hScroll: ScrollState, contentW: Dp, leftW: Dp,
-    keyframesExpanded: Boolean, onToggleKeyframes: () -> Unit
+    editor: EditorState, layer: Layer, pps: Float, hScroll: ScrollState, contentW: Dp, leftW: Dp
 ) {
     val selected = editor.selectedId == layer.id
     val hasLayerKeyframes = layer.props.values.any { it.keys.isNotEmpty() }
@@ -344,25 +332,12 @@ private fun LayerRow(
                         drawCircle(KColors.Accent, 4.dp.toPx(), Offset(x, size.height / 2f + parentDrag))
                     }
                 }
-                if (hasLayerKeyframes) {
-                    Box(
-                        Modifier.size(32.dp).clip(RoundedCornerShape(6.dp))
-                            .clickable(onClick = onToggleKeyframes),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            if (keyframesExpanded) "⌄" else "›",
-                            color = KColors.Accent,
-                            fontSize = 20.sp
-                        )
-                    }
-                }
             }
             Box(Modifier.weight(1f).fillMaxHeight().horizontalScroll(hScroll)) {
                 Box(Modifier.width(contentW).fillMaxHeight()) { Clip(editor, layer, pps, selected) }
             }
         }
-        if (keyframesExpanded) {
+        if (selected && hasLayerKeyframes) {
             layer.props.entries
                 .filter { it.value.keys.isNotEmpty() }
                 .sortedBy { it.key.ordinal }
