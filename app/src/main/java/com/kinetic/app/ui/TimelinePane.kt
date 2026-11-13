@@ -287,7 +287,10 @@ private fun LayerRow(
     editor: EditorState, layer: Layer, pps: Float, hScroll: ScrollState, contentW: Dp, leftW: Dp, leadingPad: Dp
 ) {
     val selected = editor.selectedId == layer.id
-    val hasLayerKeyframes = layer.props.values.any { it.keys.isNotEmpty() }
+    val visibleKeyframeProps = layer.props.entries.filter { (id, prop) ->
+        prop.keys.isNotEmpty() && !(layer.scaleLinked && id == PropId.SCALE_Y)
+    }
+    val hasLayerKeyframes = visibleKeyframeProps.isNotEmpty()
     val dens = LocalDensity.current.density
     var acc by remember { mutableFloatStateOf(0f) }
     var parentDrag by remember { mutableFloatStateOf(0f) }
