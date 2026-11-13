@@ -1,6 +1,7 @@
 package com.kinetic.app.ui
 
 import android.graphics.Bitmap
+import android.graphics.BlurMaskFilter
 import android.graphics.Matrix
 import android.graphics.DashPathEffect
 import android.graphics.ColorMatrix
@@ -219,7 +220,8 @@ fun CpuPreviewCanvas(
                 val layerMatrix = layerMatrices.getOrPut(l.id) { Matrix() }
                 layerMatrixInto(l, time, byId, layerMatrix, matrixScratch)
                 nc.concat(layerMatrix)
-                if (l.maskEnabled) nc.clipRect(0f, 0f, l.width * 0.8f, l.height * 0.8f)
+                val activeMask = l.maskPath.takeIf { l.maskEnabled }
+                if (activeMask != null) nc.saveLayer(RectF(0f, 0f, l.width, l.height), null)
                 paint.xfermode = blendModes[l.blendMode]
                 paint.colorFilter = if ("Grayscale" in l.effects) grayscaleFilter else null
                 when (l.type) {
@@ -252,6 +254,53 @@ fun CpuPreviewCanvas(
                         nc.drawText(l.text, l.width / 2f, l.height / 2f + 40f, textPaint)
                     }
                     else -> Unit
+                }
+                if (activeMask != null) {
+                    val maskPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                        color = android.graphics.Color.WHITE
+                        alpha = (activeMask.opacity * 2.55f).toInt().coerceIn(0, 255)
+                        xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_IN)
+                        if (activeMask.feather > 0f) {
+                            maskFilter = BlurMaskFilter(activeMask.feather.coerceIn(0f, 100f), BlurMaskFilter.Blur.NORMAL)
+                        }
+                    }
+                    val maskShape = buildMaskContour(activeMask.points, l.width, l.height, activeMask.closed)
+                    if (activeMask.inverted || activeMask.mode == "Subtract") {
+                        maskShape.fillType = AndroidPath.FillType.INVERSE_WINDING
+                    }
+                    if (activeMask.points.size >= 3 && activeMask.closed) {
+                        if (activeMask.expansion != 0f) {
+                            maskPaint.style = Paint.Style.FILL_AND_STROKE
+                            maskPaint.strokeWidth = activeMask.expansion.coerceIn(-100f, 100f) * 2f
+                            maskPaint.strokeJoin = Paint.Join.ROUND
+                        }
+                        nc.drawPath(maskShape, maskPaint)
+                    } else if (activeMask.strokes.isNotEmpty()) {
+                        val foreground = AndroidPath()
+                        val background = AndroidPath()
+                        activeMask.strokes.forEach { stroke ->
+                            if (stroke.points.size > 1) {
+                                val target = if (stroke.foreground) foreground else background
+                                stroke.points.forEachIndexed { index, point ->
+                                    val x = point.x * l.width
+                                    val y = point.y * l.height
+                                    if (index == 0) target.moveTo(x, y) else target.lineTo(x, y)
+                                }
+                            }
+                        }
+                        val brushPaint = Paint(maskPaint).apply {
+                            style = Paint.Style.STROKE
+                            strokeCap = Paint.Cap.ROUND
+                            strokeJoin = Paint.Join.ROUND
+                            strokeWidth = (activeMask.brushSize * minOf(l.width, l.height)).coerceAtLeast(2f)
+                        }
+                        if (!foreground.isEmpty) nc.drawPath(foreground, brushPaint)
+                        if (!background.isEmpty) {
+                            brushPaint.xfermode = PorterDuffXfermode(PorterDuff.Mode.CLEAR)
+                            nc.drawPath(background, brushPaint)
+                        }
+                    }
+                    nc.restore()
                 }
                 paint.xfermode = null
                 paint.colorFilter = null

@@ -198,6 +198,45 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
         }
     }
 
+    // ---------- masks ----------
+    fun createMask(layerId: String, kind: String) {
+        updateLayer(layerId) { layer ->
+            layer.copy(maskEnabled = true, maskPath = LayerMask(kind = kind))
+        }
+    }
+
+    fun updateMask(layerId: String, mask: LayerMask, push: Boolean = false) {
+        updateLayer(layerId, push = push) { layer ->
+            layer.copy(maskEnabled = true, maskPath = mask)
+        }
+    }
+
+    fun addMaskPoint(layerId: String, point: VectorPoint) {
+        updateLayer(layerId) { layer ->
+            val mask = layer.maskPath ?: LayerMask(kind = "Pen")
+            layer.copy(maskEnabled = true, maskPath = mask.copy(
+                kind = "Pen",
+                points = (mask.points + point).take(128),
+                closed = false
+            ))
+        }
+    }
+
+    fun addMaskStroke(layerId: String, stroke: MaskStroke) {
+        if (stroke.points.size < 2) return
+        updateLayer(layerId) { layer ->
+            val mask = layer.maskPath ?: LayerMask(kind = "Draw")
+            layer.copy(maskEnabled = true, maskPath = mask.copy(
+                kind = mask.kind,
+                strokes = (mask.strokes + stroke).takeLast(120)
+            ))
+        }
+    }
+
+    fun clearMask(layerId: String) {
+        updateLayer(layerId) { it.copy(maskEnabled = false, maskPath = null) }
+    }
+
     fun addMedia(type: LayerType, name: String, uri: String, w: Int, h: Int, length: Float?) {
         val lw: Float
         val lh: Float

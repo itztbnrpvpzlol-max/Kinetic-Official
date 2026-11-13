@@ -5,6 +5,8 @@ import com.kinetic.app.model.EditorState
 import com.kinetic.app.model.KeyType
 import com.kinetic.app.model.Keyframe
 import com.kinetic.app.model.Layer
+import com.kinetic.app.model.LayerMask
+import com.kinetic.app.model.MaskStroke
 import com.kinetic.app.model.LayerType
 import com.kinetic.app.model.Prop
 import com.kinetic.app.model.PropId
@@ -75,6 +77,24 @@ class ProjectStore(context: Context) {
             p.expression?.let { pj.put("expression", it) }
             props.put(id.name, pj)
         }
+        val maskJson: Any = l.maskPath?.let { mask ->
+            val points = JSONArray().also { array ->
+                mask.points.forEach { p -> array.put(JSONObject().put("x", p.x.toDouble()).put("y", p.y.toDouble())) }
+            }
+            val strokes = JSONArray().also { array ->
+                mask.strokes.forEach { stroke ->
+                    val strokePoints = JSONArray().also { ps ->
+                        stroke.points.forEach { p -> ps.put(JSONObject().put("x", p.x.toDouble()).put("y", p.y.toDouble())) }
+                    }
+                    array.put(JSONObject().put("points", strokePoints).put("width", stroke.width.toDouble())
+                        .put("foreground", stroke.foreground))
+                }
+            }
+            JSONObject().put("kind", mask.kind).put("points", points).put("closed", mask.closed)
+                .put("inverted", mask.inverted).put("mode", mask.mode).put("opacity", mask.opacity.toDouble())
+                .put("feather", mask.feather.toDouble()).put("expansion", mask.expansion.toDouble())
+                .put("brushSize", mask.brushSize.toDouble()).put("strokes", strokes).put("frozen", mask.frozen)
+        } ?: JSONObject.NULL
         return JSONObject().put("id", l.id).put("type", l.type.name).put("name", l.name)
             .put("uri", l.uri).put("start", l.start.toDouble()).put("duration", l.duration.toDouble())
             .put("srcOffset", l.srcOffset.toDouble()).put("srcLength", if (l.srcLength.isFinite()) l.srcLength.toDouble() else -1.0)
@@ -85,6 +105,7 @@ class ProjectStore(context: Context) {
             .put("maskEnabled", l.maskEnabled).put("blendMode", l.blendMode)
             .put("shapeKind", l.shapeKind)
             .put("vectorPoints", JSONArray().also { points -> l.vectorPoints.forEach { point -> points.put(JSONObject().put("x", point.x.toDouble()).put("y", point.y.toDouble())) } })
+            .put("maskPath", maskJson)
     }
 
     private fun layerFromJson(j: JSONObject): Layer {
@@ -111,6 +132,38 @@ class ProjectStore(context: Context) {
             }
             Prop(p.optDouble("base", 0.0).toFloat(), keys, p.optString("expression").takeIf { it.isNotBlank() })
         }
+        val maskPath = j.optJSONObject("maskPath")?.let { mask ->
+            val pointsJson = mask.optJSONArray("points") ?: JSONArray()
+            val points = (0 until pointsJson.length()).mapNotNull { index ->
+                pointsJson.optJSONObject(index)?.let { p ->
+                    VectorPoint(p.optDouble("x", 0.5).toFloat().coerceIn(0f, 1f),
+                        p.optDouble("y", 0.5).toFloat().coerceIn(0f, 1f))
+                }
+            }
+            val strokesJson = mask.optJSONArray("strokes") ?: JSONArray()
+            val strokes = (0 until strokesJson.length()).mapNotNull { index ->
+                strokesJson.optJSONObject(index)?.let { stroke ->
+                    val strokePointsJson = stroke.optJSONArray("points") ?: JSONArray()
+                    val strokePoints = (0 until strokePointsJson.length()).mapNotNull { pointIndex ->
+                        strokePointsJson.optJSONObject(pointIndex)?.let { p ->
+                            VectorPoint(p.optDouble("x", 0.5).toFloat().coerceIn(0f, 1f),
+                                p.optDouble("y", 0.5).toFloat().coerceIn(0f, 1f))
+                        }
+                    }
+                    MaskStroke(strokePoints, stroke.optDouble("width", 0.045).toFloat().coerceIn(0.002f, 0.5f),
+                        stroke.optBoolean("foreground", true))
+                }
+            }
+            LayerMask(
+                kind = mask.optString("kind", "Pen"), points = points,
+                closed = mask.optBoolean("closed", false), inverted = mask.optBoolean("inverted", false),
+                mode = mask.optString("mode", "Add"), opacity = mask.optDouble("opacity", 100.0).toFloat().coerceIn(0f, 100f),
+                feather = mask.optDouble("feather", 0.0).toFloat().coerceIn(0f, 200f),
+                expansion = mask.optDouble("expansion", 0.0).toFloat().coerceIn(-200f, 200f),
+                brushSize = mask.optDouble("brushSize", 0.045).toFloat().coerceIn(0.002f, 0.5f),
+                strokes = strokes, frozen = mask.optBoolean("frozen", false)
+            )
+        }
         val srcLength = j.optDouble("srcLength", -1.0).toFloat().let { if (it < 0f) Float.POSITIVE_INFINITY else it }
         return Layer(id = j.optString("id", UUID.randomUUID().toString()),
             type = runCatching { LayerType.valueOf(j.optString("type", "SHAPE")) }.getOrDefault(LayerType.SHAPE),
@@ -126,6 +179,7 @@ class ProjectStore(context: Context) {
             volume = j.optDouble("volume", 1.0).toFloat().coerceIn(0f, 2f),
             maskEnabled = j.optBoolean("maskEnabled", false), blendMode = j.optString("blendMode", "Normal"),
             shapeKind = j.optString("shapeKind", "Rectangle"),
-            vectorPoints = (j.optJSONArray("vectorPoints") ?: JSONArray()).let { points -> (0 until points.length()).mapNotNull { index -> points.optJSONObject(index)?.let { point -> VectorPoint(point.optDouble("x", 0.5).toFloat(), point.optDouble("y", 0.5).toFloat()) } } })
+            vectorPoints = (j.optJSONArray("vectorPoints") ?: JSONArray()).let { points -> (0 until points.length()).mapNotNull { index -> points.optJSONObject(index)?.let { point -> VectorPoint(point.optDouble("x", 0.5).toFloat(), point.optDouble("y", 0.5).toFloat()) } } },
+            maskPath = maskPath)
     }
 }

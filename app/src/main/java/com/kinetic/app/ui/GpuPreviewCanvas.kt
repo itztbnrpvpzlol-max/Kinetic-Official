@@ -119,7 +119,7 @@ fun PreviewCanvas(
     // above it without ever copying the decoded video frame into a Bitmap.
     val directVideo = videoLayers.singleOrNull()
         ?.takeIf {
-            activeVisualLayers.lastOrNull()?.id == it.id && canUseDirectSurfaceVideo(it)
+            activeVisualLayers.lastOrNull()?.id == it.id && !it.maskEnabled && canUseDirectSurfaceVideo(it)
         }
 
     if (directVideo != null) {
@@ -127,7 +127,8 @@ fun PreviewCanvas(
             DirectSurfaceVideoPreview(editor, directVideo, Modifier.fillMaxSize(), playback)
             CpuPreviewCanvas(editor, Modifier.fillMaxSize(), directVideoLayerId = directVideo.id)
         }
-    } else if (!supportsGles3(context) || MediaWorkers.isConstrainedDevice) {
+    } else if (editor.layers.any { it.visible && it.maskEnabled && it.maskPath != null } ||
+        !supportsGles3(context) || MediaWorkers.isConstrainedDevice) {
         CpuPreviewCanvas(editor, modifier)
     } else {
         val visualLayers = editor.layers.filter {

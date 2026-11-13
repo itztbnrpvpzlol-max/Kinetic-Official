@@ -109,6 +109,8 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
     var dockTool by remember { mutableStateOf("Select") }
     var showToolPanel by remember { mutableStateOf(false) }
     var showShapePanel by remember { mutableStateOf(false) }
+    var maskTool by remember { mutableStateOf("Pen") }
+    var rotoForeground by remember { mutableStateOf(true) }
     LaunchedEffect(editor.selectedId) {
         showToolPanel = false
         showShapePanel = false
@@ -290,6 +292,9 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
             val visiblePreviewHeight = if (showPropertiesPanel || showToolPanel || showShapePanel) minOf(adaptivePreviewHeight, 150f) else adaptivePreviewHeight
             Box(Modifier.fillMaxWidth().height(visiblePreviewHeight.dp)) {
                 PreviewCanvas(editor, Modifier.fillMaxSize(), editor.settings.previewQualityIndex, playback = playback)
+                if (showToolPanel && dockTool == "Masking") {
+                    MaskEditingOverlay(editor, maskTool, rotoForeground, Modifier.fillMaxSize())
+                }
                 PreviewQualityControl(editor, Modifier.align(Alignment.TopStart).padding(8.dp))
                 if (editor.settings.showPreviewDiagnostics) {
                     PreviewDiagnosticsBadge(editor.playing, Modifier.align(Alignment.BottomEnd).padding(8.dp))
@@ -324,6 +329,8 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                         ToolEditPanel(dockTool, editor, activeLayer,
                             onClose = { showToolPanel = false },
                             onExtractAudio = { editor.extractAudio(activeLayer.id); showToolPanel = false },
+                            maskTool = maskTool, onMaskToolChange = { maskTool = it },
+                            rotoForeground = rotoForeground, onRotoForegroundChange = { rotoForeground = it },
                             modifier = Modifier.fillMaxWidth().height(adaptivePanelHeight.dp))
                     }
                 }
@@ -576,6 +583,10 @@ private fun ToolEditPanel(
     layer: Layer,
     onClose: () -> Unit,
     onExtractAudio: () -> Unit,
+    maskTool: String,
+    onMaskToolChange: (String) -> Unit,
+    rotoForeground: Boolean,
+    onRotoForegroundChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val displayTime = rememberEditorDisplayTime(editor)
@@ -616,14 +627,14 @@ private fun ToolEditPanel(
                 }
             }
             Box(Modifier.weight(1f).fillMaxHeight()) {
-                if (showGraph) GraphPanel(editor, layer) else ToolPanelControls(tool, editor, layer, displayTime, onExtractAudio)
+                if (showGraph) GraphPanel(editor, layer) else ToolPanelControls(tool, editor, layer, displayTime, onExtractAudio, maskTool, onMaskToolChange, rotoForeground, onRotoForegroundChange)
             }
         }
     }
 }
 
 @Composable
-private fun ToolPanelControls(tool: String, editor: EditorState, layer: Layer, displayTime: Float, onExtractAudio: () -> Unit) {
+private fun ToolPanelControls(tool: String, editor: EditorState, layer: Layer, displayTime: Float, onExtractAudio: () -> Unit, maskTool: String, onMaskToolChange: (String) -> Unit, rotoForeground: Boolean, onRotoForegroundChange: (Boolean) -> Unit) {
     Column(Modifier.fillMaxSize().background(KColors.Surface).padding(horizontal = 12.dp, vertical = 7.dp),
         verticalArrangement = Arrangement.spacedBy(5.dp)) {
         when (tool) {
@@ -645,10 +656,7 @@ private fun ToolPanelControls(tool: String, editor: EditorState, layer: Layer, d
                     layer.p(PropId.OPACITY).valueAt(displayTime)) { editor.beginEdit(); editor.setPropValue(layer.id, PropId.OPACITY, it) }
             }
             "Masking" -> {
-                Text("MASKING", color = KColors.Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                UnitAction(if (layer.maskEnabled) "Mask enabled" else "Enable mask", selected = layer.maskEnabled) {
-                    editor.updateLayer(layer.id) { it.copy(maskEnabled = !it.maskEnabled) }
-                }
+                MaskingPanel(editor, layer, maskTool, onMaskToolChange, rotoForeground, onRotoForegroundChange)
             }
             "Effects" -> {
                 val grayscale = "Grayscale" in layer.effects

@@ -261,6 +261,26 @@ data class Prop(val base: Float, val keys: List<Keyframe> = emptyList(), val exp
 
 data class VectorPoint(val x: Float, val y: Float)
 
+data class MaskStroke(
+    val points: List<VectorPoint>,
+    val width: Float = 0.045f,
+    val foreground: Boolean = true
+)
+
+data class LayerMask(
+    val kind: String = "Pen",
+    val points: List<VectorPoint> = emptyList(),
+    val closed: Boolean = false,
+    val inverted: Boolean = false,
+    val mode: String = "Add",
+    val opacity: Float = 100f,
+    val feather: Float = 0f,
+    val expansion: Float = 0f,
+    val brushSize: Float = 0.045f,
+    val strokes: List<MaskStroke> = emptyList(),
+    val frozen: Boolean = false
+)
+
 data class Layer(
     val id: String = UUID.randomUUID().toString(),
     val type: LayerType,
@@ -286,7 +306,8 @@ data class Layer(
     val maskEnabled: Boolean = false,
     val blendMode: String = "Normal",
     val shapeKind: String = "Rectangle",
-    val vectorPoints: List<VectorPoint> = emptyList()
+    val vectorPoints: List<VectorPoint> = emptyList(),
+    val maskPath: LayerMask? = null
 ) {
     val end: Float get() = start + duration
     fun p(id: PropId): Prop = props[id] ?: Prop(if (id.isVectorPoint) 0.5f else 0f)
