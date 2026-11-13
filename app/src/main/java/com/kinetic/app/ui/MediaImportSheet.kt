@@ -145,6 +145,13 @@ fun MediaImportSheet(
         folderMode = false
     }
 
+    LaunchedEffect(selected?.uri, trim.start) {
+        if (selected?.type == LayerType.VIDEO) {
+            player.pause()
+            player.seekTo((trim.start * 1000f).toLong())
+        }
+    }
+
     LaunchedEffect(selected?.uri) {
         val item = selected
         if (item != null && item.type == LayerType.VIDEO) {
@@ -335,6 +342,7 @@ private fun ImportTrimFilmstrip(
     trim: ClosedFloatingPointRange<Float>,
     onTrimChange: (ClosedFloatingPointRange<Float>) -> Unit
 ) {
+    val latestTrim = rememberUpdatedState(trim)
     val duration = item.duration.coerceAtLeast(0.1f)
     val startFraction = (trim.start / duration).coerceIn(0f, 1f)
     val endFraction = (trim.endInclusive / duration).coerceIn(startFraction, 1f)
@@ -348,8 +356,8 @@ private fun ImportTrimFilmstrip(
                 var currentEnd = trim.endInclusive
                 detectDragGestures(
                     onDragStart = { point ->
-                        currentStart = trim.start
-                        currentEnd = trim.endInclusive
+                        currentStart = latestTrim.value.start
+                        currentEnd = latestTrim.value.endInclusive
                         val startX = (currentStart / duration) * size.width
                         val endX = (currentEnd / duration) * size.width
                         draggingEnd = kotlin.math.abs(point.x - endX) <= kotlin.math.abs(point.x - startX)
