@@ -63,7 +63,7 @@ fun GraphPanel(editor: EditorState, layer: Layer, modifier: Modifier = Modifier)
     // Keep spatial position channels out of the graph editor; use it for
     // animated visual properties such as scale, rotation, opacity and anchors.
     val animated = PropId.values().filter {
-        it !in setOf(PropId.POS_X, PropId.POS_Y, PropId.POS_Z) &&
+        it !in setOf(PropId.POS_X, PropId.POS_Y) &&
             currentLayer.p(it).keys.isNotEmpty()
     }
     val selected = editor.selectedProp?.takeIf { it in animated }
