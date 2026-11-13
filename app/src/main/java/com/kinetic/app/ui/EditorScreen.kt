@@ -286,7 +286,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                 }
             }
         } else {
-            val visiblePreviewHeight = when { editor.selected == null -> minOf(adaptivePreviewHeight, 132f); showPropertiesPanel -> minOf(adaptivePreviewHeight, 150f); else -> adaptivePreviewHeight }
+            val visiblePreviewHeight = if (showPropertiesPanel) minOf(adaptivePreviewHeight, 150f) else adaptivePreviewHeight
             Box(Modifier.fillMaxWidth().height(visiblePreviewHeight.dp)) {
                 PreviewCanvas(editor, Modifier.fillMaxSize(), editor.settings.previewQualityIndex, playback = playback)
                 PreviewQualityControl(editor, Modifier.align(Alignment.TopStart).padding(8.dp))

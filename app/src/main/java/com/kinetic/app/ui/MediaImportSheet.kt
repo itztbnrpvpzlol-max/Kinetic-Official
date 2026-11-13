@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
+import android.view.TextureView
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
@@ -35,7 +36,6 @@ import androidx.core.content.ContextCompat
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.ui.PlayerView
 import com.kinetic.app.data.MediaLoader
 import com.kinetic.app.model.LayerType
 import kotlinx.coroutines.Dispatchers
@@ -246,9 +246,11 @@ fun MediaImportSheet(
                         when (selected?.type) {
                             LayerType.IMAGE -> ImportPreviewImage(selected!!)
                             LayerType.VIDEO -> AndroidView(
-                                factory = { PlayerView(it).apply { this.player = player; useController = false } },
-                                update = { it.player = player },
-                                modifier = Modifier.fillMaxSize()
+                                factory = { viewContext ->
+                                    TextureView(viewContext).apply { player.setVideoTextureView(this) }
+                                },
+                                update = { textureView -> player.setVideoTextureView(textureView) },
+                                modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(12.dp))
                             )
                             else -> Text("Select a video or image", color = KColors.Muted, fontSize = 13.sp)
                         }
@@ -346,7 +348,7 @@ private fun ImportTrimFilmstrip(
     val startFraction = (trim.start / duration).coerceIn(0f, 1f)
     val endFraction = (trim.endInclusive / duration).coerceIn(startFraction, 1f)
     BoxWithConstraints(
-        Modifier.fillMaxWidth().height(66.dp)
+        Modifier.fillMaxWidth().height(42.dp)
             .clip(RoundedCornerShape(9.dp))
             .background(KColors.Surface2)
             .pointerInput(item.uri, duration) {
@@ -385,7 +387,7 @@ private fun ImportTrimFilmstrip(
         Box(Modifier.align(Alignment.CenterEnd).fillMaxHeight().fillMaxWidth(1f - endFraction)
             .background(KColors.Bg.copy(alpha = 0.58f)))
         Box(Modifier.align(Alignment.CenterStart).offset(x = maxWidth * startFraction - 3.dp)
-            .width(6.dp).fillMaxHeight().background(KColors.Accent))
+            .width(4.dp).fillMaxHeight().background(KColors.Accent))
         Box(Modifier.align(Alignment.CenterStart).offset(x = maxWidth * endFraction - 3.dp)
             .width(6.dp).fillMaxHeight().background(KColors.Accent))
     }
