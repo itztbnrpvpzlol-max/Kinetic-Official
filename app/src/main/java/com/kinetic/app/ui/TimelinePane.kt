@@ -161,13 +161,11 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
                     onDragStart = { origin ->
                         val trackX = origin.x - leftPx + hScroll.value
                         val timeAtPointer = (trackX - leadingPadPx) / (dens * pps)
-                        val overClip = origin.x > leftPx + 12f * dens &&
-                            editor.layers.any { timeAtPointer >= it.start && timeAtPointer <= it.end }
                         val overKeyframe = origin.x > leftPx + 12f * dens &&
                             editor.layers.any { layer -> layer.props.values.any { prop ->
                                 prop.keys.any { abs((leadingPadPx + it.t * pps * dens) - trackX) <= 18f * dens }
                             } }
-                        timelineDrag = origin.x > leftPx + 12f * dens && !overClip && !overKeyframe
+                        timelineDrag = origin.x > leftPx + 12f * dens && !overKeyframe
                     },
                     onDragEnd = { timelineDrag = false },
                     onDragCancel = { timelineDrag = false }
@@ -415,7 +413,7 @@ private fun KeyframeTrackRow(
                 Modifier.width(contentW).fillMaxHeight()
                     .pointerInput(layer.id, propId, pps, leadingPad) {
                         var draggingIndex = -1
-                        detectDragGestures(
+                        detectDragGesturesAfterLongPress(
                             onDragStart = { point ->
                                 val currentKeys = latestKeys
                                 val time = ((point.x / dens - leadingPad.value) / pps).coerceAtLeast(0f)
@@ -424,7 +422,7 @@ private fun KeyframeTrackRow(
                                 draggingIndex = if (nearest != null && abs(nearest.t - time) <= 18f / pps) nearestIndex else -1
                                 if (draggingIndex >= 0) {
                                     editor.select(layer.id)
-                                    editor.selectKey(propId, draggingIndex, currentKeys[draggingIndex].t)
+                                    editor.selectKey(propId, draggingIndex, null)
                                     editor.beginEdit()
                                 }
                             },
@@ -447,7 +445,7 @@ private fun KeyframeTrackRow(
                             val nearest = currentKeys.getOrNull(nearestIndex)
                             if (nearest != null && abs(nearest.t - time) <= 18f / pps) {
                                 editor.select(layer.id)
-                                editor.selectKey(propId, nearestIndex, nearest.t)
+                                editor.selectKey(propId, nearestIndex, null)
                             }
                         }
                     }

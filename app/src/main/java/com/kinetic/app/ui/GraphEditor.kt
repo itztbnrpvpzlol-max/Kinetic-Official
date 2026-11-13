@@ -119,8 +119,8 @@ fun GraphPanel(editor: EditorState, layer: Layer, modifier: Modifier = Modifier)
                 }
             }
         } else {
-            Row(Modifier.weight(1f).fillMaxWidth().padding(start = 8.dp, end = 7.dp, top = 4.dp, bottom = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+            Row(Modifier.weight(1f).fillMaxWidth().padding(start = 4.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                 GraphCanvas(
                     modifier = Modifier.weight(1f).fillMaxHeight()
                         .clip(RoundedCornerShape(10.dp))
@@ -156,7 +156,7 @@ fun GraphPanel(editor: EditorState, layer: Layer, modifier: Modifier = Modifier)
 
                 if (mode == GraphMode.EASE) {
                     Column(
-                        Modifier.width(102.dp).fillMaxHeight()
+                        Modifier.width(74.dp).fillMaxHeight()
                             .clip(RoundedCornerShape(9.dp)).background(KColors.Bg)
                             .border(1.dp, KColors.Line, RoundedCornerShape(9.dp))
                             .verticalScroll(rememberScrollState()).padding(5.dp),
@@ -215,11 +215,11 @@ private fun GraphPresetChip(preset: GraphPreset, selected: Boolean, onClick: () 
         Modifier.fillMaxWidth().clip(RoundedCornerShape(7.dp))
             .background(if (selected) KColors.Accent.copy(alpha = 0.16f) else KColors.Surface)
             .border(1.dp, if (selected) KColors.Accent else KColors.Line, RoundedCornerShape(7.dp))
-            .clickable(onClick = onClick).padding(vertical = 6.dp, horizontal = 3.dp),
+            .clickable(onClick = onClick).padding(vertical = 4.dp, horizontal = 2.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(3.dp)
     ) {
-        Canvas(Modifier.fillMaxWidth().height(22.dp).padding(horizontal = 8.dp)) {
+        Canvas(Modifier.fillMaxWidth().height(18.dp).padding(horizontal = 5.dp)) {
             val path = Path()
             val left = 1.dp.toPx()
             val right = size.width - left
@@ -235,7 +235,7 @@ private fun GraphPresetChip(preset: GraphPreset, selected: Boolean, onClick: () 
                 style = Stroke(1.7.dp.toPx(), cap = StrokeCap.Round))
         }
         Text(preset.label, color = if (selected) KColors.Accent else KColors.Text,
-            fontSize = 8.sp, maxLines = 1, textAlign = TextAlign.Center)
+            fontSize = 7.sp, maxLines = 1, textAlign = TextAlign.Center)
     }
 }
 
