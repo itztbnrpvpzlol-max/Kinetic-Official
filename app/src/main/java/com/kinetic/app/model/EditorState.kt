@@ -194,10 +194,21 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
         val source = layers.firstOrNull { it.id == id } ?: return
         if (source.type != LayerType.VIDEO || source.uri == null) return
         val audio = newLayer(LayerType.AUDIO, nextName("Extracted Audio"), source.start,
-            source.duration, 0f, 0f, source.uri, source.srcLength).copy(srcOffset = source.srcOffset)
+            source.duration, 0f, 0f, source.uri, source.srcLength).let { layer ->
+            layer.copy(
+                srcOffset = source.srcOffset,
+                props = layer.props + mapOf(
+                    PropId.SPEED to source.p(PropId.SPEED),
+                    PropId.VOLUME to source.p(PropId.VOLUME)
+                )
+            )
+        }
         commit { layers ->
             listOf(audio) + layers.map { layer ->
-                if (layer.id == source.id) layer.copy(volume = 0f) else layer
+                if (layer.id == source.id) layer.copy(
+                    volume = 0f,
+                    props = layer.props + (PropId.VOLUME to Prop(0f))
+                ) else layer
             }
         }
         select(audio.id)
