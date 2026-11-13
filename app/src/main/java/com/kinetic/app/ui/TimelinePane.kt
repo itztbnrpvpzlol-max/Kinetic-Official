@@ -255,12 +255,7 @@ private fun Ruler(editor: EditorState, pps: Float, contentW: Dp, leadingPad: Dp)
             .width(contentW)
             .fillMaxHeight()
             .pointerInput(pps, leadingPad) { detectTapGestures { o -> editor.seekSnap(((o.x / dens - leadingPad.value) / pps).coerceAtLeast(0f), 8f / pps) } }
-            .pointerInput(pps, leadingPad) {
-                detectDragGestures { change, _ ->
-                    change.consume()
-                    editor.seekSnap(((change.position.x / dens - leadingPad.value) / pps).coerceAtLeast(0f), 8f / pps)
-                }
-            }
+
     ) {
         textPaint.textSize = 11.sp.toPx()
         val step = if (pps >= 40f) 1 else if (pps >= 20f) 2 else 5

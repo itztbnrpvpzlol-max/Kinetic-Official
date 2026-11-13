@@ -78,7 +78,7 @@ fun GraphPanel(editor: EditorState, layer: Layer, modifier: Modifier = Modifier)
 
     Column(modifier.fillMaxSize().background(KColors.Surface)) {
         Row(
-            Modifier.fillMaxWidth().height(32.dp).padding(horizontal = 10.dp),
+            Modifier.fillMaxWidth().height(28.dp).padding(horizontal = 8.dp),
             horizontalArrangement = Arrangement.End,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -91,8 +91,8 @@ fun GraphPanel(editor: EditorState, layer: Layer, modifier: Modifier = Modifier)
 
         if (animated.size > 1) {
             Row(
-                Modifier.fillMaxWidth().height(32.dp).horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 8.dp, vertical = 2.dp),
+                Modifier.fillMaxWidth().height(28.dp).horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(5.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -123,7 +123,7 @@ fun GraphPanel(editor: EditorState, layer: Layer, modifier: Modifier = Modifier)
                 }
             }
         } else {
-            Row(Modifier.weight(1f).fillMaxWidth().padding(start = 4.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+            Row(Modifier.weight(1f).fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                 GraphCanvas(
                     modifier = Modifier.weight(1f).fillMaxHeight()
@@ -270,8 +270,8 @@ private fun GraphCanvas(
         modifier.clipToBounds().pointerInput(mode, segment) {
             var activeHandle = 0
             var activeKey = -1
-            val pad = 30.dp.toPx()
-            val inset = 8.dp.toPx()
+            val pad = 8.dp.toPx()
+            val inset = 4.dp.toPx()
             val left = pad + inset
             val right = size.width - pad - inset
             val top = pad + inset
@@ -321,8 +321,8 @@ private fun GraphCanvas(
             }
         }
     ) {
-        val pad = 30.dp.toPx()
-        val inset = 8.dp.toPx()
+        val pad = 8.dp.toPx()
+        val inset = 4.dp.toPx()
         val left = pad + inset
         val right = size.width - pad - inset
         val top = pad + inset
