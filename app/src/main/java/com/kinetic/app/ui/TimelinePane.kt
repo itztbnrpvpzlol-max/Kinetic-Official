@@ -120,22 +120,22 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
     val leftW = leftWidth.dp
     val leftPx = with(density) { leftW.toPx() }
     val contentSec = max(editor.duration, editor.layers.maxOfOrNull { it.end } ?: 0f)
-    // Place timeline time zero at the screen center, directly below the Preview play button.
-    // The timeline's scroll viewport begins after the fixed layer-name column.
-    val centerGutter = ((paneW / 2f - leftPx).coerceAtLeast(0f) / dens).dp
-    // Preserve enough trailing space for the end of the timeline to reach the fixed center playhead.
-    val contentW = centerGutter + (contentSec * pps).dp + centerGutter + leftW + 48.dp
+    // The track viewport starts immediately after the resizable layer-controls column.
+    // Time zero is anchored at that edge; the playhead follows the actual timeline time.
+    val viewportW = ((paneW - leftPx).coerceAtLeast(0f) / dens).dp
+    val contentW = viewportW + (contentSec * pps).dp + 48.dp
 
     // Center the playhead under the preview transport's play control.
     // During playback, sample auto-scroll at the composition frame cadence.
     // The native clock remains authoritative; the scroll is only a visual follow.
     val autoScrollIntervalMs = if (MediaWorkers.isConstrainedDevice) 100L else 50L
-    LaunchedEffect(editor.playing, pps, paneW) {
+    LaunchedEffect(editor.playing, pps, paneW, leftPx) {
         snapshotFlow { editor.time }
             .let { times -> if (editor.playing) times.sample(autoScrollIntervalMs) else times }
             .collect { time ->
                 if (paneW > leftPx) {
-                    val target = (time * pps * dens).coerceAtLeast(0f)
+                    val playheadX = leftPx + time * pps * dens
+                    val target = (playheadX - paneW / 2f).coerceAtLeast(0f)
                     val delta = target - hScroll.value.toFloat()
                     if (kotlin.math.abs(delta) > 0.5f) hScroll.dispatchRawDelta(delta)
                 }
@@ -157,7 +157,7 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
                     if (timelineDrag) {
                         change.consume()
                         hScroll.dispatchRawDelta(-drag.x)
-                        val centeredTime = (hScroll.value / dens) / pps
+                        val centeredTime = (hScroll.value + paneW / 2f - leftPx) / dens / pps
                         editor.seek(centeredTime.coerceAtLeast(0f))
                     }
                 }
@@ -167,7 +167,7 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
             Row(Modifier.fillMaxWidth().height(30.dp)) {
                 Spacer(Modifier.width(leftW))
                 Box(Modifier.weight(1f).fillMaxHeight().horizontalScroll(hScroll)) {
-                    Ruler(editor, pps, contentW, centerGutter)
+                    Ruler(editor, pps, contentW)
                 }
             }
             LazyColumn(
@@ -187,7 +187,7 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
                     }
                 }
                 items(editor.layers, key = { it.id }) { layer ->
-                    LayerRow(editor, layer, pps, hScroll, contentW, centerGutter, leftW)
+                    LayerRow(editor, layer, pps, hScroll, contentW, leftW)
                 }
             }
         }
@@ -209,7 +209,7 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
         Canvas(Modifier.fillMaxSize()) {
             // Keep the playhead aligned with the center Preview play/pause control,
             // not the center of the timeline viewport (which excludes the layer column).
-            val x = paneW / 2f
+            val x = leftPx + editor.time * pps * dens - hScroll.value
             if (x >= leftPx - 1f && x <= size.width) {
                 drawLine(Color.White, Offset(x, 14.dp.toPx()), Offset(x, size.height), 2.dp.toPx())
                 val tri = Path().apply {
@@ -225,7 +225,7 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun Ruler(editor: EditorState, pps: Float, contentW: Dp, centerGutter: Dp) {
+private fun Ruler(editor: EditorState, pps: Float, contentW: Dp) {
     val dens = LocalDensity.current.density
     val textPaint = remember {
         Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF8D8BA3.toInt() }
@@ -234,11 +234,11 @@ private fun Ruler(editor: EditorState, pps: Float, contentW: Dp, centerGutter: D
         Modifier
             .width(contentW)
             .fillMaxHeight()
-            .pointerInput(pps, centerGutter) { detectTapGestures { o -> editor.seekSnap(((o.x / dens - centerGutter.value) / pps).coerceAtLeast(0f), 8f / pps) } }
-            .pointerInput(pps, centerGutter) {
+            .pointerInput(pps) { detectTapGestures { o -> editor.seekSnap((o.x / dens / pps).coerceAtLeast(0f), 8f / pps) } }
+            .pointerInput(pps) {
                 detectDragGestures { change, _ ->
                     change.consume()
-                    editor.seekSnap(((change.position.x / dens - centerGutter.value) / pps).coerceAtLeast(0f), 8f / pps)
+                    editor.seekSnap((change.position.x / dens / pps).coerceAtLeast(0f), 8f / pps)
                 }
             }
     ) {
@@ -246,7 +246,7 @@ private fun Ruler(editor: EditorState, pps: Float, contentW: Dp, centerGutter: D
         val step = if (pps >= 40f) 1 else if (pps >= 20f) 2 else 5
         val secs = (size.width / dens / pps).toInt() + 1
         val tick = Color(0xFF34344A)
-        val originX = centerGutter.toPx()
+        val originX = 0f
         val endX = originX + editor.duration * pps * dens
         if (endX < size.width) drawRect(Color(0x55000000), Offset(endX, 0f), Size(size.width - endX, size.height))
         for (s in 0..secs) {
@@ -265,7 +265,7 @@ private fun Ruler(editor: EditorState, pps: Float, contentW: Dp, centerGutter: D
 
 @Composable
 private fun LayerRow(
-    editor: EditorState, layer: Layer, pps: Float, hScroll: ScrollState, contentW: Dp, centerGutter: Dp, leftW: Dp
+    editor: EditorState, layer: Layer, pps: Float, hScroll: ScrollState, contentW: Dp, leftW: Dp
 ) {
     val selected = editor.selectedId == layer.id
     val dens = LocalDensity.current.density
@@ -336,12 +336,13 @@ private fun LayerRow(
                 )
             }
             Box(Modifier.weight(1f).fillMaxHeight().horizontalScroll(hScroll)) {
-                Box(Modifier.width(contentW).fillMaxHeight()) { Clip(editor, layer, pps, selected, centerGutter) }
+                Box(Modifier.width(contentW).fillMaxHeight()) { Clip(editor, layer, pps, selected) }
             }
         }
         val parentName = layer.parentId?.let { id -> editor.layers.firstOrNull { it.id == id }?.name }
         if (parentName != null) {
             Row(Modifier.fillMaxWidth().height(20.dp).background(KColors.Row), verticalAlignment = Alignment.CenterVertically) {
+                Spacer(Modifier.width(leftW))
                 Text("╰── Parent: $parentName", color = KColors.Accent, fontSize = 10.sp, modifier = Modifier.padding(start = 14.dp))
             }
         }
@@ -349,7 +350,7 @@ private fun LayerRow(
 }
 
 @Composable
-private fun Clip(editor: EditorState, layer: Layer, pps: Float, selected: Boolean, centerGutter: Dp) {
+private fun Clip(editor: EditorState, layer: Layer, pps: Float, selected: Boolean) {
     val ctx = LocalContext.current
     val dens = LocalDensity.current.density
     val shape = RoundedCornerShape(8.dp)
@@ -383,7 +384,7 @@ private fun Clip(editor: EditorState, layer: Layer, pps: Float, selected: Boolea
     val dashed = layer.type == LayerType.ADJUSTMENT || layer.type == LayerType.NULL
     Box(
         Modifier
-            .offset(x = centerGutter + (layer.start * pps).dp)
+            .offset(x = (layer.start * pps).dp)
             .width(max(layer.duration * pps, 6f).dp)
             .fillMaxHeight()
             .padding(vertical = 3.dp)
