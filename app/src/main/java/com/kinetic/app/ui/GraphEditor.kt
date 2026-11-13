@@ -270,8 +270,8 @@ private fun GraphCanvas(
         modifier.clipToBounds().pointerInput(mode, segment) {
             var activeHandle = 0
             var activeKey = -1
-            val pad = 8.dp.toPx()
-            val inset = 4.dp.toPx()
+            val pad = 0f
+            val inset = 0f
             val left = pad + inset
             val right = size.width - pad - inset
             val top = pad + inset
@@ -321,8 +321,8 @@ private fun GraphCanvas(
             }
         }
     ) {
-        val pad = 8.dp.toPx()
-        val inset = 4.dp.toPx()
+        val pad = 0f
+        val inset = 0f
         val left = pad + inset
         val right = size.width - pad - inset
         val top = pad + inset
