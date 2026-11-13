@@ -71,7 +71,7 @@ class AudioEngine(context: Context) {
         ready
     }
 
-    fun sync(layers: List<Layer>, time: Float, playing: Boolean, fps: Float) {
+    fun sync(layers: List<Layer>, time: Float, playing: Boolean) {
         if (released.get()) return
         val now = SystemClock.elapsedRealtime()
         val activeIds = HashSet<String>()
@@ -101,10 +101,9 @@ class AudioEngine(context: Context) {
                 players[layer.id] = player
                 playerUris[layer.id] = uri
             }
-            // Keep the audio content one project frame behind the video frame.
-            // Clip activity still uses the true transport time above.
-            val audioTime = (time - 1f / fps.coerceIn(1f, 240f)).coerceAtLeast(0f)
-            val targetMs = sourcePositionMs(layer, audioTime)
+            // The video transport clock is authoritative: target the exact same
+            // timeline time, without a permanent frame offset.
+            val targetMs = sourcePositionMs(layer, time)
             player.sync(targetMs, layer.speed, layer.volume)
         }
         players.keys.filter { it !in activeIds }.toList().forEach(::releasePlayer)
@@ -189,10 +188,10 @@ class AudioEngine(context: Context) {
             } else if (currentTrack != null && trackStarted) {
                 val head = currentTrack.playbackHeadPosition.toLong() and 0xffffffffL
                 val elapsedFrames = (head - startHeadFrames).coerceAtLeast(0L)
-                // playbackHeadPosition is already measured in source PCM frames;
-                // applying playback speed again would double-scale the clock.
+                // playbackHeadPosition counts rendered output frames. Convert that
+                // duration back to source-timeline time using the active playback speed.
                 val actualMs = lastSeekMs +
-                    (elapsedFrames * 1000.0 / sampleRate).toLong()
+                    (elapsedFrames * requestedSpeed * 1000.0 / sampleRate).toLong()
                 if (abs(positionMs - actualMs) > DRIFT_CORRECTION_MS &&
                     now - lastSyncMs >= CORRECTION_COOLDOWN_MS) {
                     pendingSeekMs = positionMs
@@ -435,8 +434,8 @@ class AudioEngine(context: Context) {
     }
 
     companion object {
-        private const val DRIFT_CORRECTION_MS = 30L
-        private const val CORRECTION_COOLDOWN_MS = 120L
+        private const val DRIFT_CORRECTION_MS = 24L
+        private const val CORRECTION_COOLDOWN_MS = 64L
         private const val PREPARE_TIMEOUT_MS = 8_000L
         private const val IDLE_PLAYER_RELEASE_MS = 2_500L
     }
