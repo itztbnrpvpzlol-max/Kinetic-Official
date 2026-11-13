@@ -268,14 +268,14 @@ fun CpuPreviewCanvas(
                     if (activeMask.inverted || activeMask.mode == "Subtract") {
                         maskShape.fillType = AndroidPath.FillType.INVERSE_WINDING
                     }
-                    if (activeMask.points.size >= 3 && activeMask.closed) {
+                    if ((activeMask.kind == "Pen" || activeMask.kind == "Ellipse") && activeMask.points.size >= 3 && activeMask.closed) {
                         if (activeMask.expansion != 0f) {
                             maskPaint.style = Paint.Style.FILL_AND_STROKE
                             maskPaint.strokeWidth = activeMask.expansion.coerceIn(-100f, 100f) * 2f
                             maskPaint.strokeJoin = Paint.Join.ROUND
                         }
                         nc.drawPath(maskShape, maskPaint)
-                    } else if (activeMask.strokes.isNotEmpty()) {
+                    } else if ((activeMask.kind == "Draw" || activeMask.kind == "Roto Brush") && activeMask.strokes.isNotEmpty()) {
                         val foreground = AndroidPath()
                         val background = AndroidPath()
                         activeMask.strokes.forEach { stroke ->

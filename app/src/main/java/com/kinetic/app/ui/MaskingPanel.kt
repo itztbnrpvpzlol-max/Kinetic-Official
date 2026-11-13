@@ -83,9 +83,9 @@ fun MaskingPanel(
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp),
             verticalAlignment = Alignment.CenterVertically) {
-            listOf("Add", "Subtract", "Intersect", "Lighten", "Darken", "Difference").forEach { mode ->
+            listOf("Add", "Subtract").forEach { mode ->
                 val selected = mask.mode == mode
-                Box(Modifier.weight(1f).height(25.dp).clip(RoundedCornerShape(5.dp))
+                Box(Modifier.weight(1f).height(28.dp).clip(RoundedCornerShape(5.dp))
                     .background(if (selected) KColors.Accent.copy(alpha = .13f) else KColors.Bg)
                     .clickable { editor.updateMask(layer.id, mask.copy(mode = mode), push = true) },
                     contentAlignment = Alignment.Center) {
