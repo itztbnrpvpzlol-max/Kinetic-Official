@@ -281,14 +281,18 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
             Box(Modifier.weight(1f).fillMaxWidth()) {
             PreviewCanvas(editor, Modifier.fillMaxSize(), editor.settings.previewQualityIndex, playback = playback)
             PreviewQualityControl(editor, Modifier.align(Alignment.TopStart).padding(8.dp))
-                PreviewDiagnosticsBadge(editor.playing, Modifier.align(Alignment.BottomEnd).padding(8.dp))
+                if (editor.settings.showPreviewDiagnostics) {
+                    PreviewDiagnosticsBadge(editor.playing, Modifier.align(Alignment.BottomEnd).padding(8.dp))
+                }
             }
         } else {
             val visiblePreviewHeight = if (showPropertiesPanel) minOf(adaptivePreviewHeight, 150f) else adaptivePreviewHeight
             Box(Modifier.fillMaxWidth().height(visiblePreviewHeight.dp)) {
                 PreviewCanvas(editor, Modifier.fillMaxSize(), editor.settings.previewQualityIndex, playback = playback)
                 PreviewQualityControl(editor, Modifier.align(Alignment.TopStart).padding(8.dp))
-                PreviewDiagnosticsBadge(editor.playing, Modifier.align(Alignment.BottomEnd).padding(8.dp))
+                if (editor.settings.showPreviewDiagnostics) {
+                    PreviewDiagnosticsBadge(editor.playing, Modifier.align(Alignment.BottomEnd).padding(8.dp))
+                }
                 }
             Box(Modifier.fillMaxWidth().height(10.dp).background(KColors.Bg).pointerInput(Unit) {
                 detectVerticalDragGestures { change, drag -> change.consume(); previewHeight = (previewHeight + drag / density).coerceIn(100f, maxPreviewHeight) }

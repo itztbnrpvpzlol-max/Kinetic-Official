@@ -63,6 +63,7 @@ fun SettingsScreen(settings: AppSettings, onBack: () -> Unit, onOpenMpvTest: () 
 
             Section("Preview & performance")
             ChoiceRow("Preview quality", AppSettings.PREVIEW_QUALITIES, settings.previewQualityIndex) { settings.updatePreviewQuality(it) }
+            SwitchRow("Show preview stats / debug overlay", settings.showPreviewDiagnostics) { settings.updateShowPreviewDiagnostics(it) }
             Row(
                 Modifier.fillMaxWidth().clickable(onClick = onOpenMpvTest).padding(vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically

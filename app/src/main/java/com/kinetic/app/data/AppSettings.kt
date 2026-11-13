@@ -24,6 +24,7 @@ class AppSettings(context: Context) {
     var snap by mutableStateOf(prefs.getBoolean("snap", true)); private set
     var loop by mutableStateOf(prefs.getBoolean("loop", false)); private set
     var previewQualityIndex by mutableIntStateOf(prefs.getInt("previewQualityIndex", 0).coerceIn(0, 3)); private set
+    var showPreviewDiagnostics by mutableStateOf(prefs.getBoolean("showPreviewDiagnostics", false)); private set
     fun updateResolution(i: Int) { resolution = i; prefs.edit().putInt("resolution", i).apply() }
     fun updateFrameRate(i: Int) { frameRate = i; prefs.edit().putInt("frameRate", i).apply() }
     fun updateCompLength(i: Int) { compLength = i; prefs.edit().putInt("compLength", i).apply() }
@@ -31,6 +32,7 @@ class AppSettings(context: Context) {
     fun updateSnap(v: Boolean) { snap = v; prefs.edit().putBoolean("snap", v).apply() }
     fun updateLoop(v: Boolean) { loop = v; prefs.edit().putBoolean("loop", v).apply() }
     fun updatePreviewQuality(i: Int) { previewQualityIndex = i.coerceIn(0, 3); prefs.edit().putInt("previewQualityIndex", previewQualityIndex).apply() }
+    fun updateShowPreviewDiagnostics(v: Boolean) { showPreviewDiagnostics = v; prefs.edit().putBoolean("showPreviewDiagnostics", v).apply() }
     val fps: Int get() = FPS[frameRate]
     val compSeconds: Int get() = COMP_LENGTHS[compLength]
     fun formatTime(t: Float): String {
