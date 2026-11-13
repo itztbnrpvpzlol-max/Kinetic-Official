@@ -128,8 +128,7 @@ fun GraphPanel(editor: EditorState, layer: Layer, modifier: Modifier = Modifier)
                 GraphCanvas(
                     modifier = Modifier.weight(1f).fillMaxHeight()
                         .clip(RoundedCornerShape(10.dp))
-                        .background(KColors.Bg)
-                        .border(1.dp, KColors.Line, RoundedCornerShape(10.dp)),
+                        .background(KColors.Bg),
                     mode = mode,
                     keys = keys,
                     segment = segment,
@@ -293,7 +292,7 @@ private fun GraphCanvas(
                         val p2 = Offset(left + width * key.x2, bottom - height * key.y2.coerceIn(0f, 1f))
                         val d1 = (point - p1).getDistance()
                         val d2 = (point - p2).getDistance()
-                        val hit = 38.dp.toPx()
+                        val hit = 52.dp.toPx()
                         if (min(d1, d2) <= hit) activeHandle = if (d1 <= d2) 1 else 2
                     } else if (mode == GraphMode.VALUE) {
                         val low = latestValueLow
@@ -302,7 +301,7 @@ private fun GraphCanvas(
                         val p1 = Offset(right, bottom - height * ((currentKeys[segment + 1].v - low) / (high - low)))
                         val d0 = (point - p0).getDistance()
                         val d1 = (point - p1).getDistance()
-                        if (min(d0, d1) <= 38.dp.toPx()) activeKey = if (d0 <= d1) segment else segment + 1
+                        if (min(d0, d1) <= 52.dp.toPx()) activeKey = if (d0 <= d1) segment else segment + 1
                     }
                     if (activeHandle != 0 || activeKey >= 0) latestBeginEdit()
                 },
