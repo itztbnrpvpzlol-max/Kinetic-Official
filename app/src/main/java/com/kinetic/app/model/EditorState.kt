@@ -235,7 +235,7 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
         l.copy(duration = (l.duration + dt).coerceIn(0.1f, max(0.1f, l.srcLength - l.srcOffset)))
     }
 
-    fun trimLeft(id: String, dt: Float) = updateLayer(id) { l ->
+    fun trimLeft(id: String, dt: Float, push: Boolean = true) = updateLayer(id, push) { l ->
         val lo = max(-l.srcOffset, -l.start)
         val hi = l.duration - 0.1f
         val d = dt.coerceIn(lo, max(lo, hi))

@@ -392,6 +392,8 @@ private fun KeyframeTrackRow(
 ) {
     val dens = LocalDensity.current.density
     val latestKeys by rememberUpdatedState(keys)
+    var dragPreviewIndex by remember(layer.id, propId) { mutableIntStateOf(-1) }
+    var dragPreviewTime by remember(layer.id, propId) { mutableFloatStateOf(0f) }
     Row(
         Modifier.fillMaxWidth().height(28.dp).background(KColors.Bg),
         verticalAlignment = Alignment.CenterVertically
@@ -424,16 +426,29 @@ private fun KeyframeTrackRow(
                                     editor.select(layer.id)
                                     editor.selectKey(propId, draggingIndex, null)
                                     editor.beginEdit()
+                                    dragPreviewIndex = draggingIndex
+                                    dragPreviewTime = currentKeys[draggingIndex].t
                                 }
                             },
-                            onDragEnd = { draggingIndex = -1 },
-                            onDragCancel = { draggingIndex = -1 }
+                            onDragEnd = {
+                                if (draggingIndex >= 0) {
+                                    editor.moveKeyTime(layer.id, propId, draggingIndex, dragPreviewTime)
+                                }
+                                draggingIndex = -1
+                                dragPreviewIndex = -1
+                            },
+                            onDragCancel = {
+                                draggingIndex = -1
+                                dragPreviewIndex = -1
+                            }
                         ) { change, _ ->
                             if (draggingIndex >= 0) {
                                 change.consume()
-                                val time = ((change.position.x / dens - leadingPad.value) / pps).coerceAtLeast(0f)
-                                editor.moveKeyTime(layer.id, propId, editor.selectedKey, time)
-                                draggingIndex = editor.selectedKey
+                                val currentKeys = latestKeys
+                                val rawTime = ((change.position.x / dens - leadingPad.value) / pps).coerceAtLeast(0f)
+                                val minTime = if (draggingIndex > 0) currentKeys[draggingIndex - 1].t + editor.frame else 0f
+                                val maxTime = if (draggingIndex < currentKeys.lastIndex) currentKeys[draggingIndex + 1].t - editor.frame else editor.duration
+                                dragPreviewTime = rawTime.coerceIn(minTime, maxOf(minTime, maxTime))
                             }
                         }
                     }
@@ -451,8 +466,9 @@ private fun KeyframeTrackRow(
                     }
             ) {
                 val centerY = size.height / 2f
-                keys.forEach { key ->
-                    val x = leadingPad.value * dens + key.t * pps * dens
+                keys.forEachIndexed { index, key ->
+                    val keyTime = if (index == dragPreviewIndex) dragPreviewTime else key.t
+                    val x = leadingPad.value * dens + keyTime * pps * dens
                     val r = 5.dp.toPx()
                     val diamond = Path().apply {
                         moveTo(x, centerY - r)
@@ -473,6 +489,7 @@ private fun Clip(editor: EditorState, layer: Layer, pps: Float, selected: Boolea
     val ctx = LocalContext.current
     val dens = LocalDensity.current.density
     val shape = RoundedCornerShape(8.dp)
+    var previewStart by remember(layer.id, layer.start) { mutableFloatStateOf(layer.start) }
     var thumbnails by remember(
         layer.uri, layer.type, layer.duration, layer.srcOffset, layer.speed
     ) { mutableStateOf<List<Bitmap>>(emptyList()) }
@@ -503,7 +520,7 @@ private fun Clip(editor: EditorState, layer: Layer, pps: Float, selected: Boolea
     val dashed = layer.type == LayerType.ADJUSTMENT || layer.type == LayerType.NULL
     Box(
         Modifier
-             .offset(x = leadingPad + (layer.start * pps).dp)
+             .offset(x = leadingPad + (previewStart * pps).dp)
             .width(max(layer.duration * pps, 6f).dp)
             .fillMaxHeight()
             .padding(vertical = 3.dp)
@@ -526,9 +543,26 @@ private fun Clip(editor: EditorState, layer: Layer, pps: Float, selected: Boolea
                 }
             }
             .pointerInput(layer.id, pps) {
+                var dragStart = layer.start
+                var dragDelta = 0f
                 detectDragGesturesAfterLongPress(
-                    onDragStart = { editor.select(layer.id); editor.beginEdit() },
-                    onDrag = { change, drag -> change.consume(); editor.moveClip(layer.id, drag.x / dens / pps) }
+                    onDragStart = {
+                        dragStart = layer.start
+                        dragDelta = 0f
+                        previewStart = dragStart
+                        editor.select(layer.id)
+                        editor.beginEdit()
+                    },
+                    onDragEnd = {
+                        val totalDelta = previewStart - layer.start
+                        if (totalDelta != 0f) editor.moveClip(layer.id, totalDelta)
+                    },
+                    onDragCancel = { previewStart = layer.start },
+                    onDrag = { change, drag ->
+                        change.consume()
+                        dragDelta += drag.x / dens / pps
+                        previewStart = (dragStart + dragDelta).coerceAtLeast(0f)
+                    }
                 )
             }
     ) {
@@ -561,7 +595,7 @@ private fun Clip(editor: EditorState, layer: Layer, pps: Float, selected: Boolea
                     .background(KColors.Accent.copy(alpha = 0.35f))
                     .pointerInput(layer.id, pps) {
                         detectHorizontalDragGestures(onDragStart = { editor.beginEdit() }) { change, dx ->
-                            change.consume(); editor.trimLeft(layer.id, dx / dens / pps)
+                            change.consume(); editor.trimLeft(layer.id, dx / dens / pps, push = false)
                         }
                     }
             )
@@ -591,7 +625,8 @@ private fun Waveform(seed: String, uri: String?, playing: Boolean) {
         decodedPeaks = if (uri == null) null else MediaLoader.waveform(context, Uri.parse(uri), 240)
     }
     // Keep drawing bounded while showing actual decoded PCM peaks when available.
-    val peaks = decodedPeaks ?: FloatArray(240) { 0.06f }
+    val fallbackPeaks = remember { FloatArray(240) { 0.06f } }
+    val peaks = decodedPeaks ?: fallbackPeaks
     Canvas(Modifier.fillMaxSize().padding(horizontal = 4.dp)) {
         if (size.width <= 0f) return@Canvas
         val desiredGap = 5.dp.toPx()
