@@ -282,6 +282,7 @@ private fun LayerRow(
     keyframesExpanded: Boolean, onToggleKeyframes: () -> Unit
 ) {
     val selected = editor.selectedId == layer.id
+    val hasLayerKeyframes = layer.props.values.any { it.keys.isNotEmpty() }
     val dens = LocalDensity.current.density
     var acc by remember { mutableFloatStateOf(0f) }
     var parentDrag by remember { mutableFloatStateOf(0f) }
@@ -343,16 +344,18 @@ private fun LayerRow(
                         drawCircle(KColors.Accent, 4.dp.toPx(), Offset(x, size.height / 2f + parentDrag))
                     }
                 }
-                Box(
-                    Modifier.size(32.dp).clip(RoundedCornerShape(6.dp))
-                        .clickable(onClick = onToggleKeyframes),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        if (keyframesExpanded) "⌄" else "›",
-                        color = if (layer.props.values.any { it.keys.isNotEmpty() }) KColors.Accent else KColors.Dim,
-                        fontSize = 20.sp
-                    )
+                if (hasLayerKeyframes) {
+                    Box(
+                        Modifier.size(32.dp).clip(RoundedCornerShape(6.dp))
+                            .clickable(onClick = onToggleKeyframes),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            if (keyframesExpanded) "⌄" else "›",
+                            color = KColors.Accent,
+                            fontSize = 20.sp
+                        )
+                    }
                 }
             }
             Box(Modifier.weight(1f).fillMaxHeight().horizontalScroll(hScroll)) {
