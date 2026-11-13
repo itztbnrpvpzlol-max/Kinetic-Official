@@ -25,6 +25,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -66,6 +67,7 @@ fun MediaImportSheet(
     var selected by remember { mutableStateOf<ImportMediaEntry?>(null) }
     var trim by remember { mutableStateOf(0f..5f) }
     var playingAudio by remember { mutableStateOf<String?>(null) }
+    var videoIsPlaying by remember { mutableStateOf(false) }
     var folderMode by remember { mutableStateOf(false) }
     var folder by remember { mutableStateOf<String?>(null) }
     var hasPermission by remember { mutableStateOf(false) }
@@ -153,15 +155,26 @@ fun MediaImportSheet(
         }
     }
 
+    DisposableEffect(player) {
+        val listener = object : androidx.media3.common.Player.Listener {
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                videoIsPlaying = isPlaying
+            }
+        }
+        player.addListener(listener)
+        onDispose { player.removeListener(listener) }
+    }
+
     LaunchedEffect(selected?.uri) {
         val item = selected
+        videoIsPlaying = false
         if (item != null && item.type == LayerType.VIDEO) {
             player.setMediaItem(MediaItem.fromUri(item.uri))
             player.prepare()
             player.pause()
             trim = 0f..item.duration.coerceAtLeast(0.1f)
         } else if (item != null) {
-            if (item.type == LayerType.IMAGE) player.pause()
+            player.pause()
             trim = 0f..item.duration.coerceAtLeast(0.1f)
         } else {
             player.pause()
@@ -178,14 +191,25 @@ fun MediaImportSheet(
             Modifier.fillMaxSize().background(KColors.Bg)
         ) {
             Row(
-                Modifier.fillMaxWidth().background(KColors.Surface).padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
+                Modifier.fillMaxWidth().background(KColors.Surface).padding(horizontal = 8.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(3.dp)
             ) {
-                ImportIconButton(IconKind.CLOSE, "Cancel", onDismiss)
-                Column(Modifier.weight(1f).padding(start = 8.dp)) {
-                    Text(if (tab == 0) "Add media" else "Add audio", color = KColors.Text, fontSize = 17.sp)
-                    Text(if (tab == 0) "Videos and images" else "Audio files", color = KColors.Muted, fontSize = 11.sp)
-                }
+                ImportIconButton(IconKind.CLOSE, "Cancel", onDismiss, buttonSize = 38.dp)
+                Text(if (tab == 0) "Media" else "Audio", color = KColors.Text, fontSize = 15.sp,
+                    modifier = Modifier.weight(1f), maxLines = 1)
+                ImportIconButton(IconKind.VIDEO, "Videos and images", { tab = 0 },
+                    selected = tab == 0, buttonSize = 38.dp)
+                ImportIconButton(IconKind.MUSIC, "Audio", { tab = 1 },
+                    selected = tab == 1, buttonSize = 38.dp)
+                ImportIconButton(IconKind.GRID, "All media", {
+                    folderMode = false
+                    folder = null
+                }, selected = !folderMode && folder == null, buttonSize = 38.dp)
+                ImportIconButton(IconKind.FOLDER, "Folders", {
+                    folderMode = !folderMode
+                    folder = null
+                }, selected = folderMode, buttonSize = 38.dp)
                 ImportIconButton(
                     IconKind.PLUS, if (isImporting) "Adding" else "Add to timeline",
                     onClick = {
@@ -200,17 +224,9 @@ fun MediaImportSheet(
                             }
                         }
                     },
-                    enabled = selected != null && !isImporting
+                    enabled = selected != null && !isImporting,
+                    buttonSize = 38.dp
                 )
-            }
-
-            Row(Modifier.fillMaxWidth().background(KColors.Surface).padding(horizontal = 12.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                ImportTab("Video & images", tab == 0) { tab = 0 }
-                ImportTab("Audio", tab == 1) { tab = 1 }
-                Spacer(Modifier.weight(1f))
-                ImportTab("All", !folderMode && folder == null) { folderMode = false; folder = null }
-                ImportTab("Folders", folderMode) { folderMode = !folderMode; folder = null }
             }
 
             if (folderMode) {
@@ -240,8 +256,8 @@ fun MediaImportSheet(
             } else if (tab == 0) {
                 Column(Modifier.fillMaxWidth().wrapContentHeight().clipToBounds().padding(horizontal = 12.dp, vertical = 8.dp)) {
                     Box(
-                        Modifier.fillMaxWidth().height(if (selected == null) 104.dp else 180.dp)
-                            .clipToBounds().clip(RoundedCornerShape(12.dp)).background(KColors.Surface2),
+                        Modifier.fillMaxWidth().height(if (selected == null) 106.dp else 184.dp)
+                            .clip(RoundedCornerShape(12.dp)).background(KColors.Surface2),
                         contentAlignment = Alignment.Center
                     ) {
                         when (selected?.type) {
@@ -253,15 +269,32 @@ fun MediaImportSheet(
                             )
                             else -> Text("Select a video or image", color = KColors.Muted, fontSize = 13.sp)
                         }
+                        if (selected?.type == LayerType.VIDEO) {
+                            Box(
+                                Modifier.align(Alignment.Center).size(48.dp)
+                                    .clip(CircleShape).background(KColors.Bg.copy(alpha = 0.72f))
+                                    .clickable {
+                                        if (player.isPlaying) player.pause() else player.play()
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                KIcon(
+                                    if (videoIsPlaying) IconKind.PAUSE else IconKind.PLAY,
+                                    KColors.Text, Modifier.size(24.dp)
+                                )
+                            }
+                            Box(
+                                Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                                    .padding(horizontal = 8.dp, vertical = 8.dp)
+                            ) {
+                                ImportTrimFilmstrip(item = selected!!, trim = trim,
+                                    onTrimChange = { trim = it })
+                            }
+                        }
                     }
-                    if (selected?.type == LayerType.VIDEO) {
-                        Spacer(Modifier.height(8.dp))
-                        ImportTrimFilmstrip(item = selected!!, trim = trim, onTrimChange = { trim = it })
-                    } else if (selected?.type == LayerType.IMAGE) {
+                    if (selected?.type == LayerType.IMAGE) {
                         Text("Image selected", color = KColors.Muted, fontSize = 11.sp,
                             modifier = Modifier.padding(vertical = 8.dp))
-                    } else {
-                        Spacer(Modifier.height(8.dp))
                     }
                 }
                 LazyVerticalGrid(
@@ -409,11 +442,22 @@ private fun ImportTrimFrame(item: ImportMediaEntry, time: Float, modifier: Modif
 }
 
 @Composable
-private fun ImportIconButton(icon: IconKind, description: String, onClick: () -> Unit, enabled: Boolean = true) {
-    Box(Modifier.size(44.dp).clip(RoundedCornerShape(10.dp))
-        .background(if (enabled) KColors.Surface2 else KColors.Surface)
+private fun ImportIconButton(
+    icon: IconKind,
+    description: String,
+    onClick: () -> Unit,
+    enabled: Boolean = true,
+    selected: Boolean = false,
+    buttonSize: androidx.compose.ui.unit.Dp = 44.dp
+) {
+    Box(Modifier.size(buttonSize).clip(RoundedCornerShape(10.dp))
+        .background(when {
+            !enabled -> KColors.Surface
+            selected -> KColors.Clip
+            else -> KColors.Surface2
+        })
         .clickable(enabled = enabled, onClick = onClick), contentAlignment = Alignment.Center) {
-        KIcon(icon, if (enabled) KColors.Text else KColors.Muted, Modifier.size(21.dp))
+        KIcon(icon, if (enabled) KColors.Text else KColors.Muted, Modifier.size(20.dp))
     }
 }
 
