@@ -29,7 +29,7 @@ enum class IconKind {
     LOCK, UNLOCK, SETTINGS, EXPORT, IMPORT, DELETE, CUT, SPLIT, CROP, ROTATE, FLIP,
     COPY, MORE, ZOOM_IN, ZOOM_OUT, EFFECTS, FILTER, MASK, BLEND, WAVEFORM, SEARCH,
     BACK, CLOSE, CHECK, SHARE, FOLDER, HOME, MIC, MUTE, VOLUME, GRID, ALIGN, FIT,
-    FULLSCREEN, DOWNLOAD, UPLOAD, INFO
+    FULLSCREEN, DOWNLOAD, UPLOAD, INFO, GRAPH
 }
 
 @Composable
@@ -135,6 +135,19 @@ fun KIcon(kind: IconKind, tint: Color, modifier: Modifier = Modifier.size(22.dp)
             IconKind.ALIGN -> { line(pt(.2f,.2f),pt(.8f,.2f)); line(pt(.2f,.5f),pt(.65f,.5f)); line(pt(.2f,.8f),pt(.72f,.8f)); line(pt(.2f,.1f),pt(.2f,.9f)) }
             IconKind.FIT, IconKind.FULLSCREEN -> { line(pt(.12f,.34f),pt(.12f,.12f)); line(pt(.12f,.12f),pt(.34f,.12f)); line(pt(.66f,.12f),pt(.88f,.12f)); line(pt(.88f,.12f),pt(.88f,.34f)); line(pt(.12f,.66f),pt(.12f,.88f)); line(pt(.12f,.88f),pt(.34f,.88f)); line(pt(.66f,.88f),pt(.88f,.88f)); line(pt(.88f,.88f),pt(.88f,.66f)) }
             IconKind.INFO -> { outlinedCircle(.5f,.5f,.38f); filledCircle(.5f,.32f,.045f); line(pt(.5f,.46f),pt(.5f,.72f)) }
+            IconKind.GRAPH -> {
+                line(pt(.12f,.12f), pt(.12f,.88f))
+                line(pt(.12f,.88f), pt(.9f,.88f))
+                val curve = Path().apply {
+                    moveTo(w * .18f, h * .76f)
+                    cubicTo(w * .34f, h * .76f, w * .34f, h * .2f, w * .52f, h * .2f)
+                    cubicTo(w * .7f, h * .2f, w * .68f, h * .7f, w * .86f, h * .7f)
+                }
+                drawPath(curve, tint, style = st)
+                filledCircle(.18f,.76f,.055f)
+                filledCircle(.52f,.2f,.055f)
+                filledCircle(.86f,.7f,.055f)
+            }
         }
     }
 }

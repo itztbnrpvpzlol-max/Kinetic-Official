@@ -315,7 +315,11 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                         modifier = Modifier.fillMaxWidth().height(adaptivePanelHeight.dp))
                 }
             }
-            FloatingEditingDock(dockTool, activeLayer != null) { tool ->
+            FloatingEditingDock(
+                dockTool,
+                activeLayer != null,
+                activeLayer?.props?.values?.any { prop -> prop.keys.isNotEmpty() } == true
+            ) { tool ->
                 dockTool = tool
                 when (tool) {
                     "Select" -> editor.select(null)
@@ -467,7 +471,7 @@ private fun TopBar(editor: EditorState, onMenuHome: () -> Unit, onOpenSettings: 
 
 
 @Composable
-private fun FloatingEditingDock(active: String, hasSelection: Boolean, onSelect: (String) -> Unit) {
+private fun FloatingEditingDock(active: String, hasSelection: Boolean, hasGraphKeys: Boolean, onSelect: (String) -> Unit) {
     // Keep Import inside the capsule, but visually separate it from the tools.
     val tools = if (hasSelection) {
         listOf(
@@ -478,9 +482,8 @@ private fun FloatingEditingDock(active: String, hasSelection: Boolean, onSelect:
             "Masking" to IconKind.MASK,
             "Effects" to IconKind.EFFECTS,
             "Blending" to IconKind.BLEND,
-            "Blend modes" to IconKind.GRID,
-            "Graph" to IconKind.GRID
-        )
+            "Blend modes" to IconKind.GRID
+        ) + if (hasGraphKeys) listOf("Graph" to IconKind.GRAPH) else emptyList()
     } else {
         listOf(
             "Select" to IconKind.SELECT,
@@ -678,6 +681,16 @@ private fun PreviewToolsBar(
     onTogglePreview: () -> Unit,
     onPlay: () -> Unit
 ) {
+    // Transport skip controls step through the selected property's keyframes.
+    val selectedLayer = editor.selected
+    val selectedProp = editor.selectedProp
+    val selectedKeys = selectedLayer?.let { layer ->
+        selectedProp?.let { prop -> layer.p(prop).keys }
+    }.orEmpty()
+    val keyframeTolerance = editor.frame / 2f
+    val canSkipPrevious = selectedKeys.any { it.t < editor.time - keyframeTolerance }
+    val canSkipNext = selectedKeys.any { it.t > editor.time + keyframeTolerance }
+
     // Undo/redo stay on the left; Add Layer and fullscreen controls are grouped
     // on the right. Transport remains centered against the full preview width.
     Box(Modifier.fillMaxWidth().height(48.dp)) {
@@ -694,9 +707,23 @@ private fun PreviewToolsBar(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            PreviewTool(IconKind.BACK) { editor.playing = false; editor.seek(0f) }
+            PreviewTool(IconKind.BACK, canSkipPrevious) {
+                val layer = editor.selected
+                val prop = editor.selectedProp
+                if (layer != null && prop != null) {
+                    editor.playing = false
+                    editor.jumpKey(layer.id, prop, -1)
+                }
+            }
             PreviewTool(if (editor.playing) IconKind.PAUSE else IconKind.PLAY, onClick = onPlay)
-            PreviewTool(IconKind.NEXT) { editor.playing = false; editor.seek(editor.duration) }
+            PreviewTool(IconKind.NEXT, canSkipNext) {
+                val layer = editor.selected
+                val prop = editor.selectedProp
+                if (layer != null && prop != null) {
+                    editor.playing = false
+                    editor.jumpKey(layer.id, prop, 1)
+                }
+            }
         }
         Row(
             Modifier.align(Alignment.CenterEnd).padding(end = 4.dp),
@@ -790,6 +817,7 @@ private fun EditPanel(
     val displayTime = rememberEditorDisplayTime(editor)
     var menu by remember { mutableStateOf(false) }
     val activeProp = editor.selectedProp
+    val hasLayerKeys = layer.props.values.any { it.keys.isNotEmpty() }
     val hasKey = activeProp?.let { prop ->
         layer.p(prop).keys.any { kotlin.math.abs(it.t - editor.time) <= editor.frame / 2f }
     } == true
@@ -826,20 +854,14 @@ private fun EditPanel(
             Column(Modifier.width(44.dp).fillMaxHeight().background(KColors.Bg)
                 .padding(vertical = 5.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 RailAction(IconKind.SLIDERS, tab == 0) { onTab(0) }
-                RailAction(IconKind.GRID, tab == 1) { onTab(1) }
+                if (hasLayerKeys) RailAction(IconKind.GRAPH, tab == 1) { onTab(1) }
                 Box(Modifier.padding(vertical = 5.dp).width(24.dp).height(1.dp).background(KColors.Line))
-                RailAction(IconKind.PREV, false, enabled = activeProp != null) {
-                    activeProp?.let { editor.jumpKey(layer.id, it, -1) }
-                }
                 RailAction(if (hasKey) IconKind.DIAMOND_FILLED else IconKind.DIAMOND, hasKey, enabled = activeProp != null) {
                     activeProp?.let { editor.toggleKeyAtTime(layer.id, it) }
                 }
-                RailAction(IconKind.NEXT, false, enabled = activeProp != null) {
-                    activeProp?.let { editor.jumpKey(layer.id, it, 1) }
-                }
             }
             Box(Modifier.weight(1f).fillMaxHeight()) {
-                if (tab == 0) PropertiesList(editor, layer, onParent) else GraphPanel(editor, layer)
+                if (tab == 0 || !hasLayerKeys) PropertiesList(editor, layer, onParent) else GraphPanel(editor, layer)
             }
         }
     }
