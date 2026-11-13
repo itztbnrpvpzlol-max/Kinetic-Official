@@ -162,7 +162,6 @@ fun MediaImportSheet(
         } else if (item != null) {
             if (item.type == LayerType.IMAGE) player.pause()
             trim = 0f..item.duration.coerceAtLeast(0.1f)
-            previewAt = 0f
         } else {
             player.pause()
         }
