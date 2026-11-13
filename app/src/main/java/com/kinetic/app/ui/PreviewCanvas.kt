@@ -34,6 +34,8 @@ import com.kinetic.app.model.COMP_W
 import com.kinetic.app.model.EditorState
 import com.kinetic.app.model.LayerType
 import com.kinetic.app.model.PropId
+import com.kinetic.app.model.VectorPoint
+import com.kinetic.app.model.sourceElapsedAt
 import com.kinetic.app.model.layerMatrixInto
 import android.graphics.Path as AndroidPath
 
@@ -55,7 +57,7 @@ fun CpuPreviewCanvas(
         it.id != directVideoLayerId && it.uri != null && (it.type == LayerType.IMAGE || it.type == LayerType.VIDEO)
     }
     val mediaLayerSignature = mediaLayers.map {
-        "${it.id}|${it.uri}|${it.type}|${it.start}|${it.duration}|${it.srcOffset}|${it.speed}|${it.visible}"
+        "${it.id}|${it.uri}|${it.type}|${it.start}|${it.duration}|${it.srcOffset}|${it.p(PropId.SPEED)}|${it.visible}"
     }
 
     // Observe the master clock outside composition. Updating this volatile
@@ -91,8 +93,7 @@ fun CpuPreviewCanvas(
                 hadActiveMedia = true
 
                 val sourceTime = if (layer.type == LayerType.VIDEO) {
-                    ((timelineTime - layer.start).coerceAtLeast(0f) *
-                        layer.speed + layer.srcOffset).coerceAtLeast(0f)
+                    (layer.sourceElapsedAt(timelineTime) + layer.srcOffset).coerceAtLeast(0f)
                 } else 0f
                 val bucket = if (layer.type == LayerType.VIDEO) {
                     (sourceTime * MediaLoader.CPU_PREVIEW_SAMPLE_FPS.toFloat()).toInt()
@@ -127,8 +128,7 @@ fun CpuPreviewCanvas(
                 // output rather than publishing it over a newer frame.
                 val currentTime = previewClock.timeSec
                 val currentSourceTime = if (layer.type == LayerType.VIDEO) {
-                    ((currentTime - layer.start).coerceAtLeast(0f) *
-                        layer.speed + layer.srcOffset).coerceAtLeast(0f)
+                    (layer.sourceElapsedAt(currentTime) + layer.srcOffset).coerceAtLeast(0f)
                 } else 0f
                 val currentBucket = if (layer.type == LayerType.VIDEO) {
                     (currentSourceTime * MediaLoader.CPU_PREVIEW_SAMPLE_FPS.toFloat()).toInt()
@@ -161,6 +161,7 @@ fun CpuPreviewCanvas(
 
     // No runtime warmup: imported video frames are read from the persistent disk cache.
 
+    val shapePaths = remember { mutableMapOf<String, android.graphics.Path>() }
     val layerSnapshot = editor.layers
     val layerLookup = remember(layerSnapshot) { layerSnapshot.associateBy { it.id } }
     val destinationRects = remember(layerSnapshot) {
@@ -235,7 +236,14 @@ fun CpuPreviewCanvas(
                     }
                     LayerType.SHAPE -> {
                         paint.color = l.color; paint.alpha = alpha
-                        nc.drawRoundRect(0f, 0f, l.width, l.height, 24f, 24f, paint)
+                        val points = l.vectorPoints.ifEmpty { listOf(VectorPoint(0f, 0f), VectorPoint(1f, 0f), VectorPoint(1f, 1f), VectorPoint(0f, 1f)) }
+                        val path = shapePaths.getOrPut(l.id) { android.graphics.Path() }
+                        path.reset()
+                        points.forEachIndexed { index, point ->
+                            val px = point.x * l.width; val py = point.y * l.height
+                            if (index == 0) path.moveTo(px, py) else path.lineTo(px, py)
+                        }
+                        path.close(); nc.drawPath(path, paint)
                     }
                     LayerType.TEXT -> {
                         textPaint.color = l.color; textPaint.alpha = alpha

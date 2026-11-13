@@ -8,6 +8,7 @@ import com.kinetic.app.model.Layer
 import com.kinetic.app.model.LayerType
 import com.kinetic.app.model.Prop
 import com.kinetic.app.model.PropId
+import com.kinetic.app.model.VectorPoint
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -82,6 +83,8 @@ class ProjectStore(context: Context) {
             .put("color", l.color).put("props", props)
             .put("effects", JSONArray(l.effects)).put("speed", l.speed.toDouble()).put("volume", l.volume.toDouble())
             .put("maskEnabled", l.maskEnabled).put("blendMode", l.blendMode)
+            .put("shapeKind", l.shapeKind)
+            .put("vectorPoints", JSONArray().also { points -> l.vectorPoints.forEach { point -> points.put(JSONObject().put("x", point.x.toDouble()).put("y", point.y.toDouble())) } })
     }
 
     private fun layerFromJson(j: JSONObject): Layer {
@@ -91,6 +94,7 @@ class ProjectStore(context: Context) {
                 PropId.ANCHOR_X, PropId.ANCHOR_Y -> 0.0
                 PropId.POS_X -> 960.0; PropId.POS_Y -> 540.0
                 PropId.SCALE_X, PropId.SCALE_Y, PropId.OPACITY -> 100.0
+                PropId.SPEED -> j.optDouble("speed", 1.0)
                 else -> 0.0
             })
             val arr = p.optJSONArray("keys") ?: JSONArray()
@@ -116,6 +120,8 @@ class ProjectStore(context: Context) {
             effects = (j.optJSONArray("effects") ?: JSONArray()).let { a -> (0 until a.length()).map { a.optString(it) } },
             speed = j.optDouble("speed", 1.0).toFloat().coerceIn(0.1f, 4f),
             volume = j.optDouble("volume", 1.0).toFloat().coerceIn(0f, 2f),
-            maskEnabled = j.optBoolean("maskEnabled", false), blendMode = j.optString("blendMode", "Normal"))
+            maskEnabled = j.optBoolean("maskEnabled", false), blendMode = j.optString("blendMode", "Normal"),
+            shapeKind = j.optString("shapeKind", "Rectangle"),
+            vectorPoints = (j.optJSONArray("vectorPoints") ?: JSONArray()).let { points -> (0 until points.length()).mapNotNull { index -> points.optJSONObject(index)?.let { point -> VectorPoint(point.optDouble("x", 0.5).toFloat(), point.optDouble("y", 0.5).toFloat()) } } })
     }
 }

@@ -12,6 +12,8 @@ import android.os.SystemClock
 import android.os.Process
 import com.kinetic.app.model.Layer
 import com.kinetic.app.model.LayerType
+import com.kinetic.app.model.speedAt
+import com.kinetic.app.model.sourceElapsedAt
 import java.nio.ByteBuffer
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CountDownLatch
@@ -103,7 +105,7 @@ class AudioEngine(context: Context) {
             }
             // Keep audio on the exact same timeline time as the video transport clock.
             val targetMs = sourcePositionMs(layer, time)
-            player.sync(targetMs, layer.speed, layer.volume)
+            player.sync(targetMs, layer.speedAt(time), layer.volume)
         }
         players.keys.filter { it !in activeIds }.toList().forEach(::releasePlayer)
     }
@@ -128,8 +130,7 @@ class AudioEngine(context: Context) {
     }
 
     private fun sourcePositionMs(layer: Layer, time: Float): Long =
-        (((time - layer.start).coerceAtLeast(0f) * layer.speed + layer.srcOffset)
-            .coerceAtLeast(0f) * 1000f).toLong()
+        ((layer.sourceElapsedAt(time) + layer.srcOffset).coerceAtLeast(0f) * 1000f).toLong()
 
     private fun releasePlayer(id: String) {
         players.remove(id)?.release()

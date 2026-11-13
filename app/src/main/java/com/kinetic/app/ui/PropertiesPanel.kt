@@ -20,6 +20,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.material3.Text
+import androidx.compose.material3.Slider
 import com.kinetic.app.model.EditorState
 import com.kinetic.app.model.Layer
 import com.kinetic.app.model.LayerType
@@ -32,6 +33,16 @@ fun PropertiesList(editor: EditorState, layer: Layer, onParent: () -> Unit) {
         Modifier.fillMaxSize().background(KColors.Surface).verticalScroll(rememberScrollState())
             .padding(horizontal = 12.dp, vertical = 7.dp)
     ) {
+        if (layer.type == LayerType.SHAPE) {
+            Text("VECTOR PATH  ·  ${layer.shapeKind.uppercase()}", color = KColors.Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.1.sp,
+                modifier = Modifier.padding(start = 2.dp, top = 3.dp, bottom = 5.dp))
+            val points = layer.vectorPoints.ifEmpty {
+                listOf(com.kinetic.app.model.VectorPoint(0f, 0f), com.kinetic.app.model.VectorPoint(1f, 0f),
+                    com.kinetic.app.model.VectorPoint(1f, 1f), com.kinetic.app.model.VectorPoint(0f, 1f))
+            }
+            points.forEachIndexed { index, point -> VectorPointLine(editor, layer, index, point) }
+            Spacer(Modifier.height(8.dp))
+        }
         Text("TRANSFORM", color = KColors.Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.1.sp,
             modifier = Modifier.padding(start = 2.dp, top = 3.dp, bottom = 5.dp))
         PropertyLine("Position", editor, layer, listOf(PropId.POS_X, PropId.POS_Y))
@@ -104,4 +115,20 @@ private fun ValueController(editor: EditorState, layer: Layer, id: PropId, axis:
         input.trim().toFloatOrNull()?.let { editor.beginEdit(); editor.setPropValue(layer.id, id, it) }
         typing = false
     }, onDismiss = { typing = false })
+}
+
+
+@Composable
+private fun VectorPointLine(editor: EditorState, layer: Layer, index: Int, point: com.kinetic.app.model.VectorPoint) {
+    var xEditing by remember(layer.id, index) { mutableStateOf(false) }
+    var yEditing by remember(layer.id, index) { mutableStateOf(false) }
+    Column(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+        Text("Point ${index + 1}   X ${(point.x * 100).toInt()}%   Y ${(point.y * 100).toInt()}%", color = KColors.Text, fontSize = 9.sp, fontWeight = FontWeight.Medium)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("X", color = KColors.Muted, fontSize = 9.sp, modifier = Modifier.width(14.dp))
+            Slider(value = point.x.coerceIn(0f, 1f), onValueChange = { if (!xEditing) { editor.beginEdit(); xEditing = true }; editor.updateShapePoint(layer.id, index, x = it) }, onValueChangeFinished = { xEditing = false }, valueRange = 0f..1f, modifier = Modifier.weight(1f))
+            Text("Y", color = KColors.Muted, fontSize = 9.sp, modifier = Modifier.width(14.dp))
+            Slider(value = point.y.coerceIn(0f, 1f), onValueChange = { if (!yEditing) { editor.beginEdit(); yEditing = true }; editor.updateShapePoint(layer.id, index, y = it) }, onValueChangeFinished = { yEditing = false }, valueRange = 0f..1f, modifier = Modifier.weight(1f))
+        }
+    }
 }

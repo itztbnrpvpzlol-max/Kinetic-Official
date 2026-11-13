@@ -151,7 +151,27 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
     fun addText() = addLayer(
         newLayer(LayerType.TEXT, "Text", time, remaining(), 800f, 200f, text = "Text", color = 0xFFFFFFFF.toInt())
     )
-    fun addShape() = addLayer(newLayer(LayerType.SHAPE, nextName("Shape"), time, remaining(), 400f, 400f))
+    fun addShape(
+        shapeName: String = "Rectangle",
+        points: List<VectorPoint> = listOf(VectorPoint(0f, 0f), VectorPoint(1f, 0f), VectorPoint(1f, 1f), VectorPoint(0f, 1f))
+    ) {
+        val layer = newLayer(LayerType.SHAPE, nextName(shapeName), time, remaining(), 400f, 400f)
+            .copy(shapeKind = shapeName, vectorPoints = points)
+        addLayer(layer)
+    }
+
+    fun updateShapePoint(layerId: String, index: Int, x: Float? = null, y: Float? = null) {
+        updateLayer(layerId, push = false) { layer ->
+            val currentPoints = layer.vectorPoints.ifEmpty {
+                listOf(VectorPoint(0f, 0f), VectorPoint(1f, 0f), VectorPoint(1f, 1f), VectorPoint(0f, 1f))
+            }
+            if (layer.type != LayerType.SHAPE || index !in currentPoints.indices) layer
+            else layer.copy(vectorPoints = currentPoints.toMutableList().also { points ->
+                val old = points[index]
+                points[index] = VectorPoint((x ?: old.x).coerceIn(0f, 1f), (y ?: old.y).coerceIn(0f, 1f))
+            })
+        }
+    }
 
     fun addMedia(type: LayerType, name: String, uri: String, w: Int, h: Int, length: Float?) {
         val lw: Float

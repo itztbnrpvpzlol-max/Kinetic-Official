@@ -76,6 +76,9 @@ fun GraphPanel(editor: EditorState, layer: Layer, modifier: Modifier = Modifier)
             id !in setOf(PropId.POS_X, PropId.POS_Y, PropId.SCALE_X, PropId.SCALE_Y) &&
                 currentLayer.p(id).keys.isNotEmpty()
         }.forEach { add(it.label to it) }
+        if (editor.selectedProp == PropId.SPEED && none { it.second == PropId.SPEED }) {
+            add("Speed" to PropId.SPEED)
+        }
     }
     val selected = editor.selectedProp?.let { selectedProp ->
         graphItems.firstOrNull { item ->

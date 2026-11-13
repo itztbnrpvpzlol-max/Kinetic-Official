@@ -108,9 +108,11 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
     var previewExpanded by remember { mutableStateOf(false) }
     var previewHeight by remember { mutableFloatStateOf(210f) }
     var dockTool by remember { mutableStateOf("Select") }
-    var showToolSheet by remember { mutableStateOf(false) }
+    var showToolPanel by remember { mutableStateOf(false) }
+    var showShapePanel by remember { mutableStateOf(false) }
     LaunchedEffect(editor.selectedId) {
-        showToolSheet = false
+        showToolPanel = false
+        showShapePanel = false
         if (editor.selectedId == null) {
             showPropertiesPanel = false
             dockTool = "Select"
@@ -286,7 +288,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                 }
             }
         } else {
-            val visiblePreviewHeight = if (showPropertiesPanel) minOf(adaptivePreviewHeight, 150f) else adaptivePreviewHeight
+            val visiblePreviewHeight = if (showPropertiesPanel || showToolPanel || showShapePanel) minOf(adaptivePreviewHeight, 150f) else adaptivePreviewHeight
             Box(Modifier.fillMaxWidth().height(visiblePreviewHeight.dp)) {
                 PreviewCanvas(editor, Modifier.fillMaxSize(), editor.settings.previewQualityIndex, playback = playback)
                 PreviewQualityControl(editor, Modifier.align(Alignment.TopStart).padding(8.dp))
@@ -312,13 +314,34 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
             val activeLayer = editor.selected
             if (activeLayer != null) {
                 AlightCutBar(editor, activeLayer)
-                if (showPropertiesPanel && !compactHeight) {
-                    // A stable shared workspace height keeps Properties and Graph usable without manual resizing.
+                if (!compactHeight && (showPropertiesPanel || showToolPanel)) {
+                    // Every dock tool shares the Properties panel shell and workspace footprint.
                     val adaptivePanelHeight = (windowMaxHeight.value * 0.27f).coerceIn(180f, 228f)
-                    EditPanel(editor, activeLayer, panelTab, { panelTab = it }, { showPropertiesPanel = false },
-                        onRename = { renameTarget = activeLayer }, onParent = { parentPicker = true },
-                        modifier = Modifier.fillMaxWidth().height(adaptivePanelHeight.dp))
+                    if (showPropertiesPanel) {
+                        EditPanel(editor, activeLayer, panelTab, { panelTab = it }, { showPropertiesPanel = false },
+                            onRename = { renameTarget = activeLayer }, onParent = { parentPicker = true },
+                            modifier = Modifier.fillMaxWidth().height(adaptivePanelHeight.dp))
+                    } else {
+                        ToolEditPanel(dockTool, editor, activeLayer,
+                            onClose = { showToolPanel = false },
+                            onExtractAudio = { editor.extractAudio(activeLayer.id); showToolPanel = false },
+                            modifier = Modifier.fillMaxWidth().height(adaptivePanelHeight.dp))
+                    }
                 }
+            } else if (showShapePanel && !compactHeight) {
+                val adaptivePanelHeight = (windowMaxHeight.value * 0.27f).coerceIn(180f, 228f)
+                ShapeLibraryPanel(
+                    onClose = { showShapePanel = false },
+                    onSelect = { preset ->
+                        editor.addShape(preset.name, preset.points)
+                        showShapePanel = false
+                        showPropertiesPanel = true
+                        showToolPanel = false
+                        panelTab = 0
+                        dockTool = "Properties"
+                    },
+                    modifier = Modifier.fillMaxWidth().height(adaptivePanelHeight.dp)
+                )
             }
             FloatingEditingDock(
                 dockTool,
@@ -327,15 +350,23 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
             ) { tool ->
                 dockTool = tool
                 when (tool) {
-                    "Select" -> editor.select(null)
-                    "Properties" -> if (activeLayer != null) { panelTab = 0; showPropertiesPanel = true }
-                    "Graph" -> if (activeLayer != null) { panelTab = 1; showPropertiesPanel = true }
+                    "Select" -> { editor.select(null); showShapePanel = false; showToolPanel = false }
+                    "Properties" -> if (activeLayer != null) { showToolPanel = false; showShapePanel = false; panelTab = 0; showPropertiesPanel = true }
+                    "Graph" -> if (activeLayer != null) { showToolPanel = false; showShapePanel = false; panelTab = 1; showPropertiesPanel = true }
                     "Speed", "Volume", "Extract audio", "Masking", "Effects", "Blending", "Blend modes" -> {
-                        if (activeLayer != null) showToolSheet = true
-                        else Toast.makeText(ctx, "Select a layer first", Toast.LENGTH_SHORT).show()
+                        if (activeLayer != null) {
+                            showPropertiesPanel = false
+                            showShapePanel = false
+                            showToolPanel = true
+                            if (tool == "Speed") editor.selectProp(PropId.SPEED)
+                        } else Toast.makeText(ctx, "Select a layer first", Toast.LENGTH_SHORT).show()
                     }
                     "Text" -> editor.addText()
-                    "Shapes" -> editor.addShape()
+                    "Shapes" -> {
+                        showToolPanel = false
+                        showPropertiesPanel = false
+                        showShapePanel = activeLayer == null
+                    }
                     "Layers" -> showLayers = true
                     "Adjust" -> editor.addAdjustment()
                     "Import" -> showImport = true
@@ -345,20 +376,6 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
         }
     }
 
-    if (showToolSheet && editor.selected != null) {
-        val target = editor.selected!!
-        ModalBottomSheet(
-            onDismissRequest = { showToolSheet = false },
-            containerColor = KColors.Surface,
-            dragHandle = { Box(Modifier.padding(vertical = 8.dp).size(width = 42.dp, height = 4.dp).clip(CircleShape).background(KColors.Muted)) }
-        ) {
-            DockToolControls(
-                tool = dockTool, editor = editor, layer = target,
-                onClose = { showToolSheet = false },
-                onExtractAudio = { editor.extractAudio(target.id); showToolSheet = false }
-            )
-        }
-    }
     if (showImport) {
         MediaImportSheet(
                 onDismiss = { showImport = false },
@@ -542,19 +559,90 @@ private fun FloatingEditingDock(active: String, hasSelection: Boolean, hasGraphK
     }
 }
 @Composable
+private fun ToolEditPanel(
+    tool: String,
+    editor: EditorState,
+    layer: Layer,
+    onClose: () -> Unit,
+    onExtractAudio: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val displayTime = rememberEditorDisplayTime(editor)
+    val hasSpeedKey = layer.p(PropId.SPEED).keys.any { kotlin.math.abs(it.t - displayTime) <= editor.frame / 2f }
+    val panelShape = RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp)
+    Column(modifier.clip(panelShape).background(KColors.Surface).border(1.dp, KColors.Line, panelShape)) {
+        Row(Modifier.fillMaxWidth().height(38.dp).padding(start = 13.dp, end = 5.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("${layer.name}  ·  $tool", color = KColors.Text, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            Box(Modifier.size(32.dp).clickable(onClick = onClose), contentAlignment = Alignment.Center) {
+                KIcon(IconKind.CLOSE, KColors.Muted, Modifier.size(16.dp))
+            }
+        }
+        Row(Modifier.weight(1f).fillMaxWidth()) {
+            Column(Modifier.width(44.dp).fillMaxHeight().background(KColors.Bg).padding(vertical = 5.dp),
+                horizontalAlignment = Alignment.CenterHorizontally) {
+                RailAction(IconKind.SLIDERS, true, enabled = false) { }
+                if (tool == "Speed") {
+                    RailAction(IconKind.GRAPH, true) { editor.selectProp(PropId.SPEED) }
+                    Box(Modifier.padding(vertical = 5.dp).width(24.dp).height(1.dp).background(KColors.Line))
+                    RailAction(if (hasSpeedKey) IconKind.DIAMOND_FILLED else IconKind.DIAMOND, hasSpeedKey, enabled = true) {
+                        editor.selectProp(PropId.SPEED)
+                        editor.toggleKeyAtTime(layer.id, PropId.SPEED)
+                    }
+                }
+            }
+            Box(Modifier.weight(1f).fillMaxHeight()) {
+                if (tool == "Speed") SpeedRemapControls(editor, layer, displayTime)
+                else DockToolControls(tool, editor, layer, onExtractAudio)
+            }
+        }
+    }
+}
+
+@Composable
+private fun SpeedRemapControls(editor: EditorState, layer: Layer, displayTime: Float) {
+    var editing by remember(layer.id) { mutableStateOf(false) }
+    val speed = layer.p(PropId.SPEED).valueAt(displayTime).coerceIn(0.1f, 4f)
+    Column(Modifier.fillMaxSize().background(KColors.Surface).padding(horizontal = 9.dp, vertical = 4.dp)) {
+        Row(Modifier.fillMaxWidth().height(38.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.width(70.dp)) {
+                Text("SPEED", color = KColors.Muted, fontSize = 8.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                Text(String.format("%.2f×", speed), color = KColors.Accent, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            }
+            Slider(value = speed, onValueChange = {
+                if (!editing) { editor.beginEdit(); editing = true }
+                editor.setPropValue(layer.id, PropId.SPEED, it)
+            }, onValueChangeFinished = { editing = false }, valueRange = 0.1f..4f, modifier = Modifier.weight(1f))
+            Text("4×", color = KColors.Muted, fontSize = 9.sp, modifier = Modifier.padding(start = 4.dp))
+        }
+        Row(Modifier.fillMaxWidth().height(24.dp), horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
+            listOf(0.25f, 0.5f, 1f, 2f, 4f).forEach { preset ->
+                Box(Modifier.weight(1f).clip(RoundedCornerShape(6.dp))
+                    .background(if (kotlin.math.abs(speed - preset) < .01f) KColors.Accent.copy(alpha = .16f) else KColors.Bg)
+                    .border(1.dp, if (kotlin.math.abs(speed - preset) < .01f) KColors.Accent else KColors.Line, RoundedCornerShape(6.dp))
+                    .clickable { editor.beginEdit(); editor.setPropValue(layer.id, PropId.SPEED, preset) }.padding(vertical = 3.dp),
+                    contentAlignment = Alignment.Center) {
+                    Text("${preset}×", color = if (kotlin.math.abs(speed - preset) < .01f) KColors.Accent else KColors.Text, fontSize = 9.sp)
+                }
+            }
+            Text("TIME REMAP", color = KColors.Muted, fontSize = 8.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 4.dp))
+        }
+        GraphPanel(editor, layer, Modifier.weight(1f).fillMaxWidth())
+    }
+}
+
+@Composable
 private fun DockToolControls(
     tool: String, editor: EditorState, layer: Layer,
-    onClose: () -> Unit, onExtractAudio: () -> Unit
+    onExtractAudio: () -> Unit
 ) {
     val displayTime = rememberEditorDisplayTime(editor)
     var sliderEditing by remember(tool, layer.id) { mutableStateOf(false) }
-    Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 28.dp)) {
-        Text(tool, color = KColors.Text, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
-        Spacer(Modifier.height(12.dp))
+    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)) {
         when (tool) {
             "Speed" -> {
-                Text("Playback speed  ·  ${String.format("%.2f×", layer.speed)}", color = KColors.Text, fontSize = 14.sp)
-                Slider(value = layer.speed, onValueChange = { v -> if (!sliderEditing) { editor.beginEdit(); sliderEditing = true }; editor.updateLayer(layer.id, push = false) { it.copy(speed = v) } }, onValueChangeFinished = { sliderEditing = false }, valueRange = 0.1f..4f)
+                Text("Playback speed  ·  ${String.format("%.2f×", layer.p(PropId.SPEED).valueAt(displayTime))}", color = KColors.Text, fontSize = 14.sp)
+                Slider(value = layer.p(PropId.SPEED).valueAt(displayTime).coerceIn(0.1f, 4f), onValueChange = { v -> if (!sliderEditing) { editor.beginEdit(); sliderEditing = true }; editor.setPropValue(layer.id, PropId.SPEED, v) }, onValueChangeFinished = { sliderEditing = false }, valueRange = 0.1f..4f)
                 Text("Applies to video preview and linked audio playback.", color = KColors.Muted, fontSize = 12.sp)
             }
             "Volume" -> {
@@ -591,7 +679,6 @@ private fun DockToolControls(
             }
         }
         Spacer(Modifier.height(8.dp))
-        TextButton(onClick = onClose) { Text("Done", color = KColors.Accent) }
     }
 }
 

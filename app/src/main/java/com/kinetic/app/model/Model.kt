@@ -26,13 +26,15 @@ enum class PropId(val label: String, val scrubStep: Float) {
     SCALE_X("Scale X", 0.5f),
     SCALE_Y("Scale Y", 0.5f),
     ROTATION("Rotation", 1f),
-    OPACITY("Opacity", 0.5f);
+    OPACITY("Opacity", 0.5f),
+    SPEED("Speed", 0.02f);
 
     fun format(v: Float): String = when (this) {
         ANCHOR_X, ANCHOR_Y, POS_X, POS_Y -> fmt("%.1f px", v)
         SCALE_X, SCALE_Y -> fmt("%.1f%%", v)
         ROTATION -> fmt("%.1f\u00B0", v)
         OPACITY -> fmt("%.0f%%", v)
+        SPEED -> fmt("%.2f×", v)
     }
 }
 
@@ -139,6 +141,8 @@ data class Prop(val base: Float, val keys: List<Keyframe> = emptyList(), val exp
     }
 }
 
+data class VectorPoint(val x: Float, val y: Float)
+
 data class Layer(
     val id: String = UUID.randomUUID().toString(),
     val type: LayerType,
@@ -162,7 +166,9 @@ data class Layer(
     val speed: Float = 1f,
     val volume: Float = 1f,
     val maskEnabled: Boolean = false,
-    val blendMode: String = "Normal"
+    val blendMode: String = "Normal",
+    val shapeKind: String = "Rectangle",
+    val vectorPoints: List<VectorPoint> = emptyList()
 ) {
     val end: Float get() = start + duration
     fun p(id: PropId): Prop = props.getValue(id)
@@ -182,7 +188,8 @@ fun newLayer(
         PropId.SCALE_X to Prop(100f),
         PropId.SCALE_Y to Prop(100f),
         PropId.ROTATION to Prop(0f),
-        PropId.OPACITY to Prop(100f)
+        PropId.OPACITY to Prop(100f),
+        PropId.SPEED to Prop(1f)
     )
     return Layer(
         type = type, name = name, uri = uri, start = start, duration = duration,
@@ -243,4 +250,28 @@ fun isDescendantOf(candidate: Layer, ancestorId: String, byId: Map<String, Layer
         n++
     }
     return false
+}
+
+
+fun Layer.speedAt(t: Float): Float = p(PropId.SPEED).valueAt(t).coerceIn(0.1f, 4f)
+
+/** Integrates animated playback rate over clip-local time using bounded segment sampling. */
+fun Layer.sourceElapsedAt(t: Float): Float {
+    val end = (t - start).coerceIn(0f, duration)
+    if (end <= 0f) return 0f
+    val speedProp = p(PropId.SPEED)
+    if (speedProp.keys.isEmpty()) return end * speedProp.base.coerceIn(0.1f, 4f)
+    val boundaries = (listOf(0f, end) + speedProp.keys.map { it.t - start }.filter { it > 0f && it < end }).distinct().sorted()
+    var elapsed = 0f
+    for (index in 0 until boundaries.lastIndex) {
+        val a = boundaries[index]; val b = boundaries[index + 1]
+        val steps = 8; val dt = (b - a) / steps
+        var previous = speedAt(start + a)
+        for (step in 1..steps) {
+            val current = speedAt(start + a + dt * step)
+            elapsed += (previous + current) * 0.5f * dt
+            previous = current
+        }
+    }
+    return elapsed.coerceAtLeast(0f)
 }
