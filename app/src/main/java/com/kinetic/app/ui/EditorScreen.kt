@@ -360,12 +360,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
         }
     }
     if (showImport) {
-        ModalBottomSheet(
-            onDismissRequest = { showImport = false },
-            containerColor = KColors.Surface,
-            dragHandle = { Box(Modifier.padding(vertical = 8.dp).size(width = 42.dp, height = 4.dp).clip(CircleShape).background(KColors.Muted)) }
-        ) {
-            MediaImportSheet(
+        MediaImportSheet(
                 onDismiss = { showImport = false },
                 onImport = { item, trimIn, trimOut ->
                     // Finish media inspection and audio decoder preparation before
@@ -388,8 +383,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                         if (item.type == LayerType.IMAGE) null else item.duration,
                         trimIn, trimOut)
                 }
-            )
-        }
+        )
     }
     if (showLayers) {
         ModalBottomSheet(

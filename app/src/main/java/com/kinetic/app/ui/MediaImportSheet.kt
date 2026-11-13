@@ -11,47 +11,31 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Slider
+import androidx.compose.material3.RangeSlider
 import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.viewinterop.AndroidView
-import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.common.MediaItem
-import androidx.media3.ui.PlayerView
-import androidx.compose.runtime.DisposableEffect
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.media3.common.MediaItem
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.PlayerView
 import com.kinetic.app.data.MediaLoader
 import com.kinetic.app.model.LayerType
 import kotlinx.coroutines.Dispatchers
@@ -64,7 +48,8 @@ data class ImportMediaEntry(
     val type: LayerType,
     val duration: Float,
     val width: Int,
-    val height: Int
+    val height: Int,
+    val folder: String
 )
 
 @Composable
@@ -73,48 +58,33 @@ fun MediaImportSheet(
     onImport: suspend (ImportMediaEntry, Float, Float) -> Unit
 ) {
     val context = LocalContext.current
-    val previewPlayer = remember { ExoPlayer.Builder(context).build() }
-    DisposableEffect(previewPlayer) { onDispose { previewPlayer.release() } }
-    var tab by remember { mutableStateOf(0) }
+    val player = remember { ExoPlayer.Builder(context).build() }
+    DisposableEffect(player) { onDispose { player.release() } }
+    var tab by remember { mutableIntStateOf(0) }
     var entries by remember { mutableStateOf<List<ImportMediaEntry>>(emptyList()) }
     var selected by remember { mutableStateOf<ImportMediaEntry?>(null) }
-    var trimStart by remember { mutableFloatStateOf(0f) }
+    var trim by remember { mutableStateOf(0f..5f) }
     var previewAt by remember { mutableFloatStateOf(0f) }
-    var trimEnd by remember { mutableFloatStateOf(5f) }
+    var playingAudio by remember { mutableStateOf<String?>(null) }
+    var folderMode by remember { mutableStateOf(false) }
+    var folder by remember { mutableStateOf<String?>(null) }
     var hasPermission by remember { mutableStateOf(false) }
     var isImporting by remember { mutableStateOf(false) }
-    val importScope = rememberCoroutineScope()
+    val scope = rememberCoroutineScope()
 
-    LaunchedEffect(selected?.uri) {
-        previewPlayer.stop()
-        val item = selected
-        if (item != null && item.type != LayerType.IMAGE) {
-            previewPlayer.setMediaItem(MediaItem.fromUri(item.uri))
-            previewPlayer.prepare()
-        }
-    }
-    LaunchedEffect(selected?.uri, previewAt) {
-        if (selected?.type == LayerType.VIDEO) previewPlayer.seekTo((previewAt * 1000f).toLong())
-    }
-    val permissions = remember {
-        if (Build.VERSION.SDK_INT >= 34) arrayOf(
-            Manifest.permission.READ_MEDIA_IMAGES,
-            Manifest.permission.READ_MEDIA_VIDEO,
-            Manifest.permission.READ_MEDIA_AUDIO,
-            Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED
-        ) else if (Build.VERSION.SDK_INT >= 33) arrayOf(
-            Manifest.permission.READ_MEDIA_IMAGES,
-            Manifest.permission.READ_MEDIA_VIDEO,
-            Manifest.permission.READ_MEDIA_AUDIO
-        ) else arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
-    }
-    val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
-        hasPermission = result.values.any { it }
-    }
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { result -> hasPermission = result.values.any { it } }
+
     LaunchedEffect(tab) {
-        val required = if (Build.VERSION.SDK_INT >= 33) {
-            if (tab == 0 && Build.VERSION.SDK_INT >= 34) arrayOf(Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO, Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)
-            else if (tab == 0) arrayOf(Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO)
+        val required = if (Build.VERSION.SDK_INT >= 34) {
+            if (tab == 0) arrayOf(
+                Manifest.permission.READ_MEDIA_IMAGES,
+                Manifest.permission.READ_MEDIA_VIDEO,
+                Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED
+            ) else arrayOf(Manifest.permission.READ_MEDIA_AUDIO)
+        } else if (Build.VERSION.SDK_INT >= 33) {
+            if (tab == 0) arrayOf(Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO)
             else arrayOf(Manifest.permission.READ_MEDIA_AUDIO)
         } else arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
         hasPermission = required.any { ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED }
@@ -131,143 +101,296 @@ fun MediaImportSheet(
                     resolver.query(uri, projection, null, null, "${MediaStore.MediaColumns.DATE_ADDED} DESC")?.use { cursor ->
                         val idCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
                         val nameCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
-                        val durationCol = if (hasDuration) cursor.getColumnIndex(MediaStore.Video.VideoColumns.DURATION) else -1
+                        val durationCol = if (hasDuration) cursor.getColumnIndex(MediaStore.MediaColumns.DURATION) else -1
                         val widthCol = cursor.getColumnIndex(MediaStore.MediaColumns.WIDTH)
                         val heightCol = cursor.getColumnIndex(MediaStore.MediaColumns.HEIGHT)
+                        val bucketCol = cursor.getColumnIndex(MediaStore.MediaColumns.BUCKET_DISPLAY_NAME)
+                        val pathCol = cursor.getColumnIndex(MediaStore.MediaColumns.RELATIVE_PATH)
                         while (cursor.moveToNext()) {
                             val id = cursor.getLong(idCol)
                             val itemUri = ContentUris.withAppendedId(uri, id)
                             val seconds = if (durationCol >= 0) (cursor.getLong(durationCol) / 1000f).coerceAtLeast(0.1f) else 5f
+                            val path = if (pathCol >= 0) cursor.getString(pathCol) else null
+                            val bucket = if (bucketCol >= 0) cursor.getString(bucketCol) else null
+                            val folderName = (path?.trimEnd('/')?.substringAfterLast('/')?.takeIf { it.isNotBlank() }
+                                ?: bucket?.takeIf { it.isNotBlank() } ?: "Other")
                             found.add(ImportMediaEntry(
                                 itemUri, cursor.getString(nameCol) ?: "Media", type, seconds,
                                 if (widthCol >= 0) cursor.getInt(widthCol) else 0,
-                                if (heightCol >= 0) cursor.getInt(heightCol) else 0
+                                if (heightCol >= 0) cursor.getInt(heightCol) else 0,
+                                folderName
                             ))
                         }
                     }
                 }
             }
             if (tab == 0) {
+                val common = arrayOf(MediaStore.MediaColumns._ID, MediaStore.MediaColumns.DISPLAY_NAME,
+                    MediaStore.MediaColumns.DATE_ADDED, MediaStore.MediaColumns.WIDTH,
+                    MediaStore.MediaColumns.HEIGHT, MediaStore.MediaColumns.BUCKET_DISPLAY_NAME,
+                    MediaStore.MediaColumns.RELATIVE_PATH)
                 read(MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
-                    arrayOf(MediaStore.Video.Media._ID, MediaStore.MediaColumns.DISPLAY_NAME, MediaStore.Video.VideoColumns.DURATION, MediaStore.MediaColumns.DATE_ADDED, MediaStore.MediaColumns.WIDTH, MediaStore.MediaColumns.HEIGHT),
-                    LayerType.VIDEO, true)
-                read(MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                    arrayOf(MediaStore.Images.Media._ID, MediaStore.MediaColumns.DISPLAY_NAME, MediaStore.MediaColumns.DATE_ADDED, MediaStore.MediaColumns.WIDTH, MediaStore.MediaColumns.HEIGHT),
-                    LayerType.IMAGE, false)
+                    common + MediaStore.Video.VideoColumns.DURATION, LayerType.VIDEO, true)
+                read(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, common, LayerType.IMAGE, false)
             } else {
                 read(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
-                    arrayOf(MediaStore.Audio.Media._ID, MediaStore.MediaColumns.DISPLAY_NAME, MediaStore.Audio.AudioColumns.DURATION, MediaStore.MediaColumns.DATE_ADDED),
+                    arrayOf(MediaStore.Audio.Media._ID, MediaStore.MediaColumns.DISPLAY_NAME,
+                        MediaStore.MediaColumns.DATE_ADDED, MediaStore.Audio.AudioColumns.DURATION,
+                        MediaStore.MediaColumns.RELATIVE_PATH, MediaStore.MediaColumns.BUCKET_DISPLAY_NAME),
                     LayerType.AUDIO, true)
             }
-            found.sortedByDescending { it.uri.lastPathSegment ?: "" }
+            found
         }
         selected = null
+        folder = null
+        folderMode = false
     }
 
-    val previewTime = 0f
-    val preview by produceState<android.graphics.Bitmap?>(null, selected?.uri, previewTime) {
+    LaunchedEffect(selected?.uri) {
+        player.stop()
         val item = selected
-        value = if (item?.type == LayerType.IMAGE) {
-            MediaLoader.bitmapFor(
-                context, item.uri, item.type, previewTime,
-                sampleFps = 8,
-                maxEdge = 720,
-                persistToDisk = false,
-            )
-        } else null
+        if (item != null && item.type == LayerType.VIDEO) {
+            player.setMediaItem(MediaItem.fromUri(item.uri))
+            player.prepare()
+            player.pause()
+            previewAt = 0f
+            trim = 0f..item.duration.coerceAtLeast(0.1f)
+        } else if (item != null) {
+            trim = 0f..item.duration.coerceAtLeast(0.1f)
+            previewAt = 0f
+        }
+    }
+    LaunchedEffect(selected?.uri, previewAt) {
+        if (selected?.type == LayerType.VIDEO) player.seekTo((previewAt * 1000f).toLong())
     }
 
-    BoxWithConstraints(Modifier.fillMaxWidth()) {
-        val availableHeight = if (maxHeight.value.isFinite()) maxHeight.value else 640f
-        val sheetHeight = (availableHeight * 0.9f).coerceIn(240f, 720f).dp
-        val previewHeight = (sheetHeight.value * 0.28f).coerceIn(108f, 180f).dp
-        Column(Modifier.widthIn(max = 900.dp).fillMaxWidth().height(sheetHeight)
-            .align(Alignment.Center).padding(horizontal = 16.dp).padding(bottom = 12.dp)) {
-        Text("Import media", color = KColors.Text, fontSize = 19.sp)
-        Spacer(Modifier.height(10.dp))
-        Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(KColors.Surface2)) {
-            listOf("Video & Images", "Audio").forEachIndexed { index, label ->
-                Box(Modifier.weight(1f).clickable { tab = index }.background(if (tab == index) KColors.Clip else KColors.Surface2).padding(vertical = 11.dp), contentAlignment = Alignment.Center) {
-                    Text(label, color = if (tab == index) KColors.Text else KColors.Muted, fontSize = 12.sp)
+    val visibleEntries = entries.filter { folder == null || it.folder == folder }
+    val folders = entries.map { it.folder }.distinct().sorted()
+
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(
+        usePlatformDefaultWidth = false,
+        decorFitsSystemWindows = false
+    )) {
+        Column(
+            Modifier.fillMaxSize().background(KColors.Bg)
+        ) {
+            Row(
+                Modifier.fillMaxWidth().background(KColors.Surface).padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                ImportIconButton(IconKind.CLOSE, "Cancel", onDismiss)
+                Column(Modifier.weight(1f).padding(start = 8.dp)) {
+                    Text(if (tab == 0) "Add media" else "Add audio", color = KColors.Text, fontSize = 17.sp)
+                    Text(if (tab == 0) "Videos and images" else "Audio files", color = KColors.Muted, fontSize = 11.sp)
                 }
-            }
-        }
-        Spacer(Modifier.height(10.dp))
-        if (!hasPermission) {
-            Text("Allow media access to browse files on this device.", color = KColors.Muted, fontSize = 13.sp)
-            Text("Grant access", color = KColors.Accent, modifier = Modifier.clickable { permissionLauncher.launch(permissions) }.padding(top = 10.dp))
-        } else {
-            Row(Modifier.fillMaxWidth().height(previewHeight), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Box(Modifier.weight(1f).fillMaxSize().clip(RoundedCornerShape(10.dp)).background(KColors.Bg), contentAlignment = Alignment.Center) {
-                    when (selected?.type) {
-                        LayerType.IMAGE -> if (preview != null) Image(preview!!.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
-                        LayerType.VIDEO, LayerType.AUDIO -> AndroidView(
-                            factory = { viewContext -> PlayerView(viewContext).apply { player = previewPlayer; useController = true } },
-                            update = { it.player = previewPlayer },
-                            modifier = Modifier.fillMaxSize()
-                        )
-                        else -> Text("Select media", color = KColors.Muted, fontSize = 12.sp)
-                    }
-                }
-                Column(Modifier.weight(1f).fillMaxSize()) {
-                    Text(selected?.name ?: "No selection", color = KColors.Text, fontSize = 12.sp, maxLines = 2)
-                    if (selected != null) {
-                        if (selected!!.type == LayerType.VIDEO) {
-                            Text("Preview  ${String.format("%.2f", previewAt)}s", color = KColors.Muted, fontSize = 11.sp)
-                            Slider(value = previewAt, onValueChange = { previewAt = it }, valueRange = 0f..selected!!.duration.coerceAtLeast(0.1f))
-                        }
-                        Text("In  ${String.format("%.2f", trimStart)}s", color = KColors.Muted, fontSize = 11.sp)
-                        Slider(value = trimStart, onValueChange = { trimStart = it.coerceAtMost(trimEnd - 0.1f) }, valueRange = 0f..selected!!.duration.coerceAtLeast(0.1f))
-                        Text("Out  ${String.format("%.2f", trimEnd)}s", color = KColors.Muted, fontSize = 11.sp)
-                        Slider(value = trimEnd, onValueChange = { trimEnd = it.coerceAtLeast(trimStart + 0.1f) }, valueRange = (trimStart + 0.1f)..selected!!.duration.coerceAtLeast(trimStart + 0.1f))
-                    }
-                }
-            }
-            Spacer(Modifier.height(8.dp))
-            LazyColumn(Modifier.fillMaxWidth().weight(1f).heightIn(min = 96.dp)) {
-                items(entries, key = { it.uri.toString() }) { item ->
-                    Row(Modifier.fillMaxWidth().clickable {
-                        selected = item
-                        trimStart = 0f
-                        previewAt = 0f
-                        trimEnd = item.duration.coerceAtLeast(0.1f)
-                    }.padding(vertical = 9.dp, horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.size(34.dp).clip(RoundedCornerShape(7.dp)).background(KColors.Surface2), contentAlignment = Alignment.Center) {
-                            KIcon(if (item.type == LayerType.AUDIO) IconKind.MUSIC else if (item.type == LayerType.VIDEO) IconKind.VIDEO else IconKind.IMAGE, KColors.Muted, Modifier.size(19.dp))
-                        }
-                        Column(Modifier.weight(1f).padding(start = 10.dp)) {
-                            Text(item.name, color = if (selected?.uri == item.uri) KColors.Accent else KColors.Text, fontSize = 12.sp, maxLines = 1)
-                            Text(if (item.type == LayerType.IMAGE) "Image" else "${String.format("%.1f", item.duration)} sec", color = KColors.Muted, fontSize = 10.sp)
-                        }
-                    }
-                }
-            }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(
-                    if (isImporting) "Preparing clip + audio…" else "Cancel",
-                    color = KColors.Muted,
-                    modifier = Modifier.weight(1f)
-                        .clickable(enabled = !isImporting, onClick = onDismiss)
-                        .padding(12.dp)
-                )
-                Text(
-                    if (isImporting) "Preparing…" else "Add to timeline",
-                    color = KColors.Accent,
-                    modifier = Modifier.weight(1f).clickable(enabled = selected != null && !isImporting) {
-                        val item = selected ?: return@clickable
-                        isImporting = true
-                        importScope.launch {
-                            try {
-                                onImport(item, trimStart, trimEnd)
-                                onDismiss()
-                            } finally {
-                                isImporting = false
+                ImportIconButton(
+                    IconKind.PLUS, if (isImporting) "Adding" else "Add to timeline",
+                    onClick = {
+                        val item = selected ?: return@ImportIconButton
+                        if (!isImporting) {
+                            isImporting = true
+                            scope.launch {
+                                try {
+                                    onImport(item, trim.start, trim.end)
+                                    onDismiss()
+                                } finally { isImporting = false }
                             }
                         }
-                    }.padding(12.dp)
+                    },
+                    enabled = selected != null && !isImporting
                 )
             }
+
+            Row(Modifier.fillMaxWidth().background(KColors.Surface).padding(horizontal = 12.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ImportTab("Video & images", tab == 0) { tab = 0 }
+                ImportTab("Audio", tab == 1) { tab = 1 }
+                Spacer(Modifier.weight(1f))
+                ImportTab("All", !folderMode && folder == null) { folderMode = false; folder = null }
+                ImportTab("Folders", folderMode) { folderMode = !folderMode; folder = null }
+            }
+
+            if (folderMode) {
+                androidx.compose.foundation.lazy.LazyRow(
+                    Modifier.fillMaxWidth().background(KColors.Surface2).padding(vertical = 8.dp),
+                    contentPadding = PaddingValues(horizontal = 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    item { ImportTab("All", folder == null) { folder = null; folderMode = false } }
+                    items(folders.size) { index ->
+                        val name = folders[index]
+                        ImportTab(name, folder == name) { folder = name; folderMode = false; selected = null }
+                    }
+                }
+            }
+
+            if (!hasPermission) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("Allow media access to browse files", color = KColors.Muted,
+                        modifier = Modifier.clickable {
+                            val permissions = if (Build.VERSION.SDK_INT >= 33)
+                                arrayOf(Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO, Manifest.permission.READ_MEDIA_AUDIO)
+                            else arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+                            permissionLauncher.launch(permissions)
+                        }.padding(20.dp))
+                }
+            } else if (tab == 0) {
+                Column(Modifier.fillMaxWidth().weight(1f).padding(horizontal = 12.dp, vertical = 8.dp)) {
+                    Box(Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(12.dp)).background(KColors.Surface2),
+                        contentAlignment = Alignment.Center) {
+                        when (selected?.type) {
+                            LayerType.IMAGE -> ImportPreviewImage(selected!!)
+                            LayerType.VIDEO -> AndroidView(
+                                factory = { PlayerView(it).apply { this.player = player; useController = true } },
+                                update = { it.player = player },
+                                modifier = Modifier.fillMaxSize()
+                            )
+                            else -> Text("Select a video or image", color = KColors.Muted, fontSize = 13.sp)
+                        }
+                    }
+                    if (selected?.type == LayerType.VIDEO) {
+                        Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text("Preview", color = KColors.Muted, fontSize = 11.sp)
+                            Spacer(Modifier.weight(1f))
+                            Text(String.format("%.1fs", previewAt), color = KColors.Text, fontSize = 11.sp)
+                        }
+                        androidx.compose.material3.Slider(
+                            value = previewAt.coerceIn(0f, selected!!.duration.coerceAtLeast(0.1f)),
+                            onValueChange = { previewAt = it; player.pause() },
+                            valueRange = 0f..selected!!.duration.coerceAtLeast(0.1f)
+                        )
+                        Text("IN  ${String.format("%.2f", trim.start)}s     OUT  ${String.format("%.2f", trim.end)}s",
+                            color = KColors.Muted, fontSize = 11.sp)
+                        RangeSlider(
+                            value = trim,
+                            onValueChange = { next ->
+                                val minGap = 0.1f
+                                trim = if (next.endInclusive - next.start < minGap)
+                                    next.start..(next.start + minGap).coerceAtMost(selected!!.duration)
+                                else next
+                            },
+                            valueRange = 0f..selected!!.duration.coerceAtLeast(0.1f)
+                        )
+                    } else if (selected?.type == LayerType.IMAGE) {
+                        Text("Image selected", color = KColors.Muted, fontSize = 11.sp,
+                            modifier = Modifier.padding(vertical = 8.dp))
+                    } else {
+                        Spacer(Modifier.height(8.dp))
+                    }
+                }
+                LazyVerticalGrid(
+                    columns = GridCells.Adaptive(104.dp),
+                    modifier = Modifier.fillMaxWidth().weight(0.9f),
+                    contentPadding = PaddingValues(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    items(visibleEntries, key = { it.uri.toString() }) { item ->
+                        Box(Modifier.aspectRatio(1f).clip(RoundedCornerShape(8.dp))
+                            .background(if (selected?.uri == item.uri) KColors.Accent.copy(alpha = .28f) else KColors.Surface2)
+                            .clickable {
+                                selected = item
+                                trim = 0f..item.duration.coerceAtLeast(0.1f)
+                            }) {
+                            ImportGridThumb(item)
+                            if (item.type == LayerType.VIDEO) {
+                                Box(Modifier.align(Alignment.BottomEnd).padding(6.dp)
+                                    .clip(RoundedCornerShape(5.dp)).background(KColors.Bg.copy(alpha = .8f)).padding(4.dp)) {
+                                    KIcon(IconKind.VIDEO, KColors.Text, Modifier.size(14.dp))
+                                }
+                            }
+                            if (selected?.uri == item.uri) {
+                                Box(Modifier.align(Alignment.TopEnd).padding(6.dp)
+                                    .size(22.dp).clip(RoundedCornerShape(50)).background(KColors.Accent),
+                                    contentAlignment = Alignment.Center) {
+                                    KIcon(IconKind.CHECK, KColors.Text, Modifier.size(14.dp))
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
+                LazyVerticalGrid(
+                    columns = GridCells.Adaptive(150.dp),
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(visibleEntries, key = { it.uri.toString() }) { item ->
+                        val isPlaying = playingAudio == item.uri.toString()
+                        Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
+                            .background(if (selected?.uri == item.uri) KColors.Clip else KColors.Surface2)
+                            .clickable {
+                                selected = item
+                                if (isPlaying) {
+                                    player.pause()
+                                    playingAudio = null
+                                } else {
+                                    player.setMediaItem(MediaItem.fromUri(item.uri))
+                                    player.prepare()
+                                    player.play()
+                                    playingAudio = item.uri.toString()
+                                }
+                            }.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Box(Modifier.size(38.dp).clip(RoundedCornerShape(8.dp)).background(KColors.Bg),
+                                contentAlignment = Alignment.Center) {
+                                KIcon(IconKind.MUSIC, KColors.Text, Modifier.size(20.dp))
+                            }
+                            Column(Modifier.weight(1f).padding(start = 9.dp)) {
+                                Text(item.name, color = KColors.Text, fontSize = 11.sp, maxLines = 1)
+                                Text(item.folder + " · " + String.format("%.1fs", item.duration), color = KColors.Text, fontSize = 11.sp)
+                            }
+                            KIcon(if (isPlaying) IconKind.PAUSE else IconKind.PLAY, KColors.Accent, Modifier.size(22.dp))
+                        }
+                    }
+                }
+            }
         }
+    }
+}
+
+@Composable
+private fun ImportIconButton(icon: IconKind, description: String, onClick: () -> Unit, enabled: Boolean = true) {
+    Box(Modifier.size(44.dp).clip(RoundedCornerShape(10.dp))
+        .background(if (enabled) KColors.Surface2 else KColors.Surface)
+        .clickable(enabled = enabled, onClick = onClick), contentAlignment = Alignment.Center) {
+        KIcon(icon, if (enabled) KColors.Text else KColors.Muted, Modifier.size(21.dp))
+    }
+}
+
+@Composable
+private fun ImportTab(label: String, selected: Boolean, onClick: () -> Unit) {
+    Box(Modifier.clip(RoundedCornerShape(18.dp))
+        .background(if (selected) KColors.Clip else KColors.Surface2)
+        .clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 8.dp)) {
+        Text(label, color = if (selected) KColors.Text else KColors.Muted, fontSize = 11.sp, maxLines = 1)
+    }
+}
+
+@Composable
+private fun ImportPreviewImage(item: ImportMediaEntry) {
+    val context = LocalContext.current
+    val bitmap by produceState<android.graphics.Bitmap?>(null, item.uri) {
+        value = MediaLoader.bitmapFor(context, item.uri, LayerType.IMAGE, 0f,
+            sampleFps = 5, maxEdge = 960, persistToDisk = false)
+    }
+    if (bitmap != null) Image(bitmap!!.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+}
+
+@Composable
+private fun ImportGridThumb(item: ImportMediaEntry) {
+    val context = LocalContext.current
+    val bitmap by produceState<android.graphics.Bitmap?>(null, item.uri) {
+        value = MediaLoader.bitmapFor(context, item.uri, item.type, 0f,
+            sampleFps = 3, maxEdge = 360, persistToDisk = false, lowPriorityRequest = true)
+    }
+    if (bitmap != null) {
+        Image(bitmap!!.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+    } else {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            KIcon(if (item.type == LayerType.VIDEO) IconKind.VIDEO else IconKind.IMAGE,
+                KColors.Muted, Modifier.size(26.dp))
         }
     }
 }
