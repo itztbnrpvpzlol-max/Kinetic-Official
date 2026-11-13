@@ -27,6 +27,8 @@ import com.kinetic.app.model.COMP_W
 import com.kinetic.app.model.EditorState
 import com.kinetic.app.model.Layer
 import com.kinetic.app.model.PropId
+import com.kinetic.app.model.speedAt
+import com.kinetic.app.model.sourceElapsedAt
 import kotlinx.coroutines.delay
 
 /**
@@ -42,6 +44,9 @@ internal fun canUseDirectSurfaceVideo(layer: Layer): Boolean {
         layer.parentId != null || layer.maskEnabled || layer.blendMode != "Normal" ||
         layer.effects.isNotEmpty()
     ) return false
+
+    val speedProp = layer.p(PropId.SPEED)
+    if (speedProp.keys.isNotEmpty() || speedProp.expression != null) return false
 
     val defaults = mapOf(
         PropId.ANCHOR_X to layer.width / 2f,
@@ -109,8 +114,7 @@ internal fun DirectSurfaceVideoPreview(
     val player = remember(uri) { AndroidVideoPlayer(context, uri) }
     val textureView = remember(context, player) { DirectVideoTextureView(context, player) }
     val sourcePositionMs = (
-        ((editor.time - layer.start).coerceAtLeast(0f) * layer.speed + layer.srcOffset)
-            .coerceAtLeast(0f) * 1000f
+        (layer.sourceElapsedAt(editor.time) + layer.srcOffset).coerceAtLeast(0f) * 1000f
     ).toLong()
 
     BoxWithConstraints(
@@ -136,8 +140,8 @@ internal fun DirectSurfaceVideoPreview(
         }
     }
 
-    LaunchedEffect(player, editor.playing, layer.speed) {
-        player.setSpeed(layer.speed.coerceIn(0.1f, 4f))
+    LaunchedEffect(player, editor.playing, layer.p(PropId.SPEED).base) {
+        player.setSpeed(layer.speedAt(editor.time))
         if (editor.playing) player.play() else player.pause()
     }
 
@@ -159,11 +163,11 @@ internal fun DirectSurfaceVideoPreview(
         previousTimelineTime.floatValue = editor.time
     }
 
-    LaunchedEffect(player, playback, layer.start, layer.srcOffset, layer.speed) {
+    LaunchedEffect(player, playback, layer.start, layer.srcOffset, layer.p(PropId.SPEED).base) {
         if (playback != null) {
             val clipStartUs = (layer.start * 1_000_000.0).toLong()
             val sourceOffsetUs = (layer.srcOffset * 1_000_000.0).toLong()
-            val clipSpeed = layer.speed.coerceIn(0.1f, 4f)
+            val clipSpeed = layer.speedAt(editor.time)
             while (true) {
                 val clock = playback.clockSnapshot()
                 player.syncMasterClock(

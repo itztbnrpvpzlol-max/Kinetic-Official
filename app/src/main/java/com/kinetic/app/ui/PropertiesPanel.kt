@@ -34,13 +34,20 @@ fun PropertiesList(editor: EditorState, layer: Layer, onParent: () -> Unit) {
             .padding(horizontal = 12.dp, vertical = 7.dp)
     ) {
         if (layer.type == LayerType.SHAPE) {
-            Text("VECTOR PATH  ·  ${layer.shapeKind.uppercase()}", color = KColors.Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.1.sp,
-                modifier = Modifier.padding(start = 2.dp, top = 3.dp, bottom = 5.dp))
+            var showVectorPoints by remember(layer.id) { mutableStateOf(false) }
             val points = layer.vectorPoints.ifEmpty {
                 listOf(com.kinetic.app.model.VectorPoint(0f, 0f), com.kinetic.app.model.VectorPoint(1f, 0f),
                     com.kinetic.app.model.VectorPoint(1f, 1f), com.kinetic.app.model.VectorPoint(0f, 1f))
             }
-            points.forEachIndexed { index, point -> VectorPointLine(editor, layer, index, point) }
+            Row(Modifier.fillMaxWidth().height(30.dp).clip(RoundedCornerShape(6.dp))
+                .background(KColors.Bg).clickable { showVectorPoints = !showVectorPoints }
+                .padding(horizontal = 7.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("VECTOR PATH  ·  ${layer.shapeKind.uppercase()}", color = KColors.Text, fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                Text(if (showVectorPoints) "Hide points" else "Edit ${points.size} points",
+                    color = KColors.Accent, fontSize = 9.sp)
+            }
+            if (showVectorPoints) points.forEachIndexed { index, point -> VectorPointLine(editor, layer, index, point) }
             Spacer(Modifier.height(8.dp))
         }
         Text("TRANSFORM", color = KColors.Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.1.sp,

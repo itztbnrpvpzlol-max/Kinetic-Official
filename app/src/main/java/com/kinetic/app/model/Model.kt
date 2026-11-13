@@ -27,7 +27,8 @@ enum class PropId(val label: String, val scrubStep: Float) {
     SCALE_Y("Scale Y", 0.5f),
     ROTATION("Rotation", 1f),
     OPACITY("Opacity", 0.5f),
-    SPEED("Speed", 0.02f);
+    SPEED("Speed", 0.02f),
+    VOLUME("Volume", 0.02f);
 
     fun format(v: Float): String = when (this) {
         ANCHOR_X, ANCHOR_Y, POS_X, POS_Y -> fmt("%.1f px", v)
@@ -35,6 +36,7 @@ enum class PropId(val label: String, val scrubStep: Float) {
         ROTATION -> fmt("%.1f\u00B0", v)
         OPACITY -> fmt("%.0f%%", v)
         SPEED -> fmt("%.2f×", v)
+        VOLUME -> fmt("%.0f%%", v * 100f)
     }
 }
 
@@ -189,7 +191,8 @@ fun newLayer(
         PropId.SCALE_Y to Prop(100f),
         PropId.ROTATION to Prop(0f),
         PropId.OPACITY to Prop(100f),
-        PropId.SPEED to Prop(1f)
+        PropId.SPEED to Prop(1f),
+        PropId.VOLUME to Prop(1f)
     )
     return Layer(
         type = type, name = name, uri = uri, start = start, duration = duration,
@@ -275,3 +278,5 @@ fun Layer.sourceElapsedAt(t: Float): Float {
     }
     return elapsed.coerceAtLeast(0f)
 }
+
+fun Layer.volumeAt(t: Float): Float = p(PropId.VOLUME).valueAt(t).coerceIn(0f, 2f)

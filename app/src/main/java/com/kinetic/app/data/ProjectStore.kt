@@ -81,7 +81,7 @@ class ProjectStore(context: Context) {
             .put("width", l.width.toDouble()).put("height", l.height.toDouble()).put("visible", l.visible)
             .put("parentId", l.parentId).put("scaleLinked", l.scaleLinked).put("text", l.text)
             .put("color", l.color).put("props", props)
-            .put("effects", JSONArray(l.effects)).put("speed", l.speed.toDouble()).put("volume", l.volume.toDouble())
+            .put("effects", JSONArray(l.effects)).put("speed", l.p(PropId.SPEED).base.toDouble()).put("volume", l.p(PropId.VOLUME).base.toDouble())
             .put("maskEnabled", l.maskEnabled).put("blendMode", l.blendMode)
             .put("shapeKind", l.shapeKind)
             .put("vectorPoints", JSONArray().also { points -> l.vectorPoints.forEach { point -> points.put(JSONObject().put("x", point.x.toDouble()).put("y", point.y.toDouble())) } })
@@ -95,6 +95,7 @@ class ProjectStore(context: Context) {
                 PropId.POS_X -> 960.0; PropId.POS_Y -> 540.0
                 PropId.SCALE_X, PropId.SCALE_Y, PropId.OPACITY -> 100.0
                 PropId.SPEED -> j.optDouble("speed", 1.0)
+                PropId.VOLUME -> j.optDouble("volume", 1.0)
                 else -> 0.0
             })
             val arr = p.optJSONArray("keys") ?: JSONArray()

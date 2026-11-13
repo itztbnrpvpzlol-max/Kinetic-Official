@@ -358,7 +358,11 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                             showPropertiesPanel = false
                             showShapePanel = false
                             showToolPanel = true
-                            if (tool == "Speed") editor.selectProp(PropId.SPEED)
+                            when (tool) {
+                                "Speed" -> editor.selectProp(PropId.SPEED)
+                                "Volume" -> editor.selectProp(PropId.VOLUME)
+                                "Blending" -> editor.selectProp(PropId.OPACITY)
+                            }
                         } else Toast.makeText(ctx, "Select a layer first", Toast.LENGTH_SHORT).show()
                     }
                     "Text" -> editor.addText()
@@ -568,7 +572,13 @@ private fun ToolEditPanel(
     modifier: Modifier = Modifier
 ) {
     val displayTime = rememberEditorDisplayTime(editor)
-    val hasSpeedKey = layer.p(PropId.SPEED).keys.any { kotlin.math.abs(it.t - displayTime) <= editor.frame / 2f }
+    val animatedProp = when (tool) {
+        "Speed" -> PropId.SPEED
+        "Volume" -> PropId.VOLUME
+        "Blending" -> PropId.OPACITY
+        else -> null
+    }
+    val hasAnimatedKey = animatedProp?.let { id -> layer.p(id).keys.any { kotlin.math.abs(it.t - displayTime) <= editor.frame / 2f } } == true
     val panelShape = RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp)
     Column(modifier.clip(panelShape).background(KColors.Surface).border(1.dp, KColors.Line, panelShape)) {
         Row(Modifier.fillMaxWidth().height(38.dp).padding(start = 13.dp, end = 5.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -582,18 +592,22 @@ private fun ToolEditPanel(
             Column(Modifier.width(44.dp).fillMaxHeight().background(KColors.Bg).padding(vertical = 5.dp),
                 horizontalAlignment = Alignment.CenterHorizontally) {
                 RailAction(IconKind.SLIDERS, true, enabled = false) { }
-                if (tool == "Speed") {
-                    RailAction(IconKind.GRAPH, true) { editor.selectProp(PropId.SPEED) }
+                if (animatedProp != null) {
+                    RailAction(IconKind.GRAPH, true) { editor.selectProp(animatedProp) }
                     Box(Modifier.padding(vertical = 5.dp).width(24.dp).height(1.dp).background(KColors.Line))
-                    RailAction(if (hasSpeedKey) IconKind.DIAMOND_FILLED else IconKind.DIAMOND, hasSpeedKey, enabled = true) {
-                        editor.selectProp(PropId.SPEED)
-                        editor.toggleKeyAtTime(layer.id, PropId.SPEED)
+                    RailAction(if (hasAnimatedKey) IconKind.DIAMOND_FILLED else IconKind.DIAMOND, hasAnimatedKey, enabled = true) {
+                        editor.selectProp(animatedProp)
+                        editor.toggleKeyAtTime(layer.id, animatedProp)
                     }
                 }
             }
             Box(Modifier.weight(1f).fillMaxHeight()) {
-                if (tool == "Speed") SpeedRemapControls(editor, layer, displayTime)
-                else DockToolControls(tool, editor, layer, onExtractAudio)
+                when (tool) {
+                    "Speed" -> SpeedRemapControls(editor, layer, displayTime)
+                    "Volume" -> AnimatedPropertyControls(editor, layer, displayTime, PropId.VOLUME, 0f..2f, listOf(0f, .5f, 1f, 1.5f, 2f), "VOLUME")
+                    "Blending" -> AnimatedPropertyControls(editor, layer, displayTime, PropId.OPACITY, 0f..100f, listOf(0f, 25f, 50f, 75f, 100f), "OPACITY")
+                    else -> DockToolControls(tool, editor, layer, onExtractAudio)
+                }
             }
         }
     }
@@ -632,6 +646,39 @@ private fun SpeedRemapControls(editor: EditorState, layer: Layer, displayTime: F
 }
 
 @Composable
+private fun AnimatedPropertyControls(
+    editor: EditorState, layer: Layer, displayTime: Float, property: PropId,
+    range: ClosedFloatingPointRange<Float>, presets: List<Float>, heading: String
+) {
+    var editing by remember(layer.id, property) { mutableStateOf(false) }
+    val value = layer.p(property).valueAt(displayTime).coerceIn(range.start, range.endInclusive)
+    Column(Modifier.fillMaxSize().background(KColors.Surface).padding(horizontal = 9.dp, vertical = 4.dp)) {
+        Row(Modifier.fillMaxWidth().height(38.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.width(70.dp)) {
+                Text(heading, color = KColors.Muted, fontSize = 8.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                Text(property.format(value), color = KColors.Accent, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            }
+            Slider(value = value, onValueChange = {
+                if (!editing) { editor.beginEdit(); editing = true }
+                editor.setPropValue(layer.id, property, it)
+            }, onValueChangeFinished = { editing = false }, valueRange = range, modifier = Modifier.weight(1f))
+        }
+        Row(Modifier.fillMaxWidth().height(24.dp), horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
+            presets.forEach { preset ->
+                Box(Modifier.weight(1f).clip(RoundedCornerShape(6.dp))
+                    .background(if (kotlin.math.abs(value - preset) < .01f) KColors.Accent.copy(alpha = .16f) else KColors.Bg)
+                    .border(1.dp, if (kotlin.math.abs(value - preset) < .01f) KColors.Accent else KColors.Line, RoundedCornerShape(6.dp))
+                    .clickable { editor.beginEdit(); editor.setPropValue(layer.id, property, preset) }.padding(vertical = 3.dp),
+                    contentAlignment = Alignment.Center) {
+                    Text(property.format(preset), color = if (kotlin.math.abs(value - preset) < .01f) KColors.Accent else KColors.Text, fontSize = 8.sp)
+                }
+            }
+            Text("ANIMATION", color = KColors.Muted, fontSize = 8.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 3.dp))
+        }
+        GraphPanel(editor, layer, Modifier.weight(1f).fillMaxWidth())
+    }
+}
+@Composable
 private fun DockToolControls(
     tool: String, editor: EditorState, layer: Layer,
     onExtractAudio: () -> Unit
@@ -646,8 +693,9 @@ private fun DockToolControls(
                 Text("Applies to video preview and linked audio playback.", color = KColors.Muted, fontSize = 12.sp)
             }
             "Volume" -> {
-                Text("Clip volume  ·  ${(layer.volume * 100).toInt()}%", color = KColors.Text, fontSize = 14.sp)
-                Slider(value = layer.volume, onValueChange = { v -> if (!sliderEditing) { editor.beginEdit(); sliderEditing = true }; editor.updateLayer(layer.id, push = false) { it.copy(volume = v) } }, onValueChangeFinished = { sliderEditing = false }, valueRange = 0f..2f)
+                val volume = layer.p(PropId.VOLUME).valueAt(displayTime).coerceIn(0f, 2f)
+                Text("Clip volume  ·  ${(volume * 100).toInt()}%", color = KColors.Text, fontSize = 14.sp)
+                Slider(value = volume, onValueChange = { v -> if (!sliderEditing) { editor.beginEdit(); sliderEditing = true }; editor.setPropValue(layer.id, PropId.VOLUME, v) }, onValueChangeFinished = { sliderEditing = false }, valueRange = 0f..2f)
                 Text("Audio layers use this level during playback.", color = KColors.Muted, fontSize = 12.sp)
             }
             "Extract audio" -> {

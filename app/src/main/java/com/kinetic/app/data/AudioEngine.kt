@@ -14,6 +14,7 @@ import com.kinetic.app.model.Layer
 import com.kinetic.app.model.LayerType
 import com.kinetic.app.model.speedAt
 import com.kinetic.app.model.sourceElapsedAt
+import com.kinetic.app.model.volumeAt
 import java.nio.ByteBuffer
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CountDownLatch
@@ -81,7 +82,8 @@ class AudioEngine(context: Context) {
             val uri = layer.uri ?: continue
             if (layer.type != LayerType.AUDIO && layer.type != LayerType.VIDEO) continue
             activeIds += layer.id
-            val shouldPlay = playing && layer.visible && layer.volume > 0f && layer.activeAt(time)
+            val clipVolume = layer.volumeAt(time)
+            val shouldPlay = playing && layer.visible && clipVolume > 0f && layer.activeAt(time)
             var player = players[layer.id]
             if (player != null && playerUris[layer.id] != uri) {
                 releasePlayer(layer.id)
@@ -105,7 +107,7 @@ class AudioEngine(context: Context) {
             }
             // Keep audio on the exact same timeline time as the video transport clock.
             val targetMs = sourcePositionMs(layer, time)
-            player.sync(targetMs, layer.speedAt(time), layer.volume)
+            player.sync(targetMs, layer.speedAt(time), clipVolume)
         }
         players.keys.filter { it !in activeIds }.toList().forEach(::releasePlayer)
     }
