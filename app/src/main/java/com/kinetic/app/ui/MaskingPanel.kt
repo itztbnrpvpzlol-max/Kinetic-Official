@@ -18,6 +18,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
@@ -159,10 +160,10 @@ private fun MaskValueRow(editor: EditorState, layer: Layer, label: String, id: P
     val value = layer.props[id]?.valueAt(editor.time) ?: fallback
     Row(Modifier.fillMaxWidth().height(29.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(label, color = if (editor.selectedProp == id) KColors.Accent else KColors.Text, fontSize = 10.sp,
-            modifier = Modifier.width(65.dp).clickable { editor.selectProp(id) })
+            modifier = Modifier.width(65.dp).clickable {\n                editor.updateLayer(layer.id, push = false) { current -> if (id in current.props) current else current.copy(props = current.props + (id to com.kinetic.app.model.Prop(fallback))) }\n                editor.selectProp(id)\n            })
         ScrubValueBar(label = "", value = value, modifier = Modifier.weight(1f), step = step,
             selected = editor.selectedProp == id, minValue = min, maxValue = max, valueFormat = format,
-            onSelect = { editor.selectProp(id) }) { next ->
+            onSelect = {\n                editor.updateLayer(layer.id, push = false) { current -> if (id in current.props) current else current.copy(props = current.props + (id to com.kinetic.app.model.Prop(fallback))) }\n                editor.selectProp(id)\n            }) { next ->
             editor.selectProp(id)
             editor.updateLayer(layer.id, push = false) { current ->
                 val old = current.maskPath ?: LayerMask()
