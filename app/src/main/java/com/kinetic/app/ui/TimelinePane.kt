@@ -15,9 +15,7 @@ import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.awaitHorizontalTouchSlopOrCancellation
 import androidx.compose.ui.input.pointer.PointerEventPass
-import androidx.compose.ui.input.pointer.awaitPointerEvent
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.lazy.LazyColumn
@@ -169,30 +167,41 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
                     // owned by the clip recognizer.
                     val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
                     if (down.position.x <= leftPx + 12f * dens) return@awaitEachGesture
-                    var lastX = 0f
-                    val dragStart = awaitHorizontalTouchSlopOrCancellation(
-                        down.id,
-                        pass = PointerEventPass.Initial
-                    ) { change, over ->
-                        change.consume()
-                        lastX = change.position.x
-                        if (editor.playing) editor.playing = false
-                        hScroll.dispatchRawDelta(-over)
-                        editor.seek(hScroll.value.toFloat() / (pps * dens).coerceAtLeast(0.001f))
-                    } ?: return@awaitEachGesture
-
-                    var pointer = dragStart
-                    while (pointer.pressed) {
+                    var lastX = down.position.x
+                    var accumulatedX = 0f
+                    var dragStarted = false
+                    val touchSlop = viewConfiguration.touchSlop
+                    while (!dragStarted) {
                         val event = awaitPointerEvent(PointerEventPass.Initial)
-                        pointer = event.changes.firstOrNull { it.id == down.id } ?: break
-                        if (!pointer.pressed) break
-                        val dx = pointer.position.x - lastX
-                        lastX = pointer.position.x
-                        if (dx != 0f) {
-                            pointer.consume()
-                            hScroll.dispatchRawDelta(-dx)
+                        val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                        if (!change.pressed) break
+                        val dx = change.position.x - lastX
+                        lastX = change.position.x
+                        accumulatedX += dx
+                        if (abs(accumulatedX) > touchSlop) {
+                            val overSlop = accumulatedX - (if (accumulatedX > 0f) touchSlop else -touchSlop)
+                            change.consume()
+                            if (editor.playing) editor.playing = false
+                            hScroll.dispatchRawDelta(-overSlop)
                             editor.seek(hScroll.value.toFloat() / (pps * dens).coerceAtLeast(0.001f))
+                            dragStarted = true
                         }
+                    }
+
+                    if (dragStarted) {
+                        while (true) {
+                            val event = awaitPointerEvent(PointerEventPass.Initial)
+                            val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                            if (!change.pressed) break
+                            val dx = change.position.x - lastX
+                            lastX = change.position.x
+                            if (dx != 0f) {
+                                change.consume()
+                                hScroll.dispatchRawDelta(-dx)
+                                editor.seek(hScroll.value.toFloat() / (pps * dens).coerceAtLeast(0.001f))
+                            }
+                        }
+                    }
                     }
                 }
             }
