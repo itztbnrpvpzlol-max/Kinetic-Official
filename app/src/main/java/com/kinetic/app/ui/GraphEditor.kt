@@ -138,13 +138,12 @@ fun GraphPanel(editor: EditorState, layer: Layer, modifier: Modifier = Modifier)
                     onHandleChange = { handle, x, y ->
                         if (segment in 0 until keys.lastIndex) {
                             val key = keys[segment]
-                            val gap = 0.015f
                             val updated = when (handle) {
                                 1 -> key.copy(type = KeyType.BEZIER,
-                                    x1 = x.coerceIn(0f, (key.x2 - gap).coerceAtLeast(0f)),
+                                    x1 = x.coerceIn(0f, 1f),
                                     y1 = y.coerceIn(0f, 1f))
                                 else -> key.copy(type = KeyType.BEZIER,
-                                    x2 = x.coerceIn((key.x1 + gap).coerceAtMost(1f), 1f),
+                                    x2 = x.coerceIn(0f, 1f),
                                     y2 = y.coerceIn(0f, 1f))
                             }
                             editor.replaceKey(layer.id, selected, segment, updated, push = false)
