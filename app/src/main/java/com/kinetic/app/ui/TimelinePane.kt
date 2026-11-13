@@ -221,18 +221,20 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
         }.toFloat()
         val handleTop = (30f + layerStackHeight / 2f - 17f)
             .coerceIn(30f, (paneH / dens - 34f).coerceAtLeast(30f))
-        Box(
-            Modifier.offset(x = leftW - 4.dp, y = handleTop.dp).width(8.dp).height(34.dp)
-                .pointerInput(maxLeftWidth, dens) {
-                    detectHorizontalDragGestures { change, drag ->
-                        change.consume()
-                        leftWidth = (leftWidth + drag / dens).coerceIn(124f, maxLeftWidth)
-                    }
-                },
-            contentAlignment = Alignment.Center
-        ) {
-            Box(Modifier.fillMaxHeight().width(2.dp).background(KColors.Line))
-            Box(Modifier.width(4.dp).height(34.dp).clip(RoundedCornerShape(4.dp)).background(KColors.Muted))
+        if (editor.layers.isNotEmpty()) {
+            Box(
+                Modifier.offset(x = leftW - 4.dp, y = handleTop.dp).width(8.dp).height(34.dp)
+                    .pointerInput(maxLeftWidth, dens) {
+                        detectHorizontalDragGestures { change, drag ->
+                            change.consume()
+                            leftWidth = (leftWidth + drag / dens).coerceIn(124f, maxLeftWidth)
+                        }
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Box(Modifier.fillMaxHeight().width(2.dp).background(KColors.Line))
+                Box(Modifier.width(4.dp).height(34.dp).clip(RoundedCornerShape(4.dp)).background(KColors.Muted))
+            }
         }
         // playhead
         Canvas(Modifier.fillMaxSize()) {
