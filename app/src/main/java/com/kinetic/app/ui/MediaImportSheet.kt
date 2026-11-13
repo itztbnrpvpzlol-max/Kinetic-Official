@@ -147,7 +147,6 @@ fun MediaImportSheet(
     }
 
     LaunchedEffect(selected?.uri) {
-        player.stop()
         val item = selected
         if (item != null && item.type == LayerType.VIDEO) {
             player.setMediaItem(MediaItem.fromUri(item.uri))
@@ -156,8 +155,11 @@ fun MediaImportSheet(
             previewAt = 0f
             trim = 0f..item.duration.coerceAtLeast(0.1f)
         } else if (item != null) {
+            if (item.type == LayerType.IMAGE) player.pause()
             trim = 0f..item.duration.coerceAtLeast(0.1f)
             previewAt = 0f
+        } else {
+            player.pause()
         }
     }
     LaunchedEffect(selected?.uri, previewAt) {
