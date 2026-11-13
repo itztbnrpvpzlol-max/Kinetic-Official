@@ -159,10 +159,10 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
                 var timelineDrag = false
                 detectDragGestures(
                     onDragStart = { origin ->
-                        // A drag in the track area is a timeline pan, never a seek.
-                        // Keep editor.time unchanged so the playhead stays attached
-                        // to its actual frame while the timeline content scrolls.
+                        // Pan beneath the fixed playhead and update the transport
+                        // time represented by the centered playhead.
                         timelineDrag = origin.x > leftPx + 12f * dens
+                        if (timelineDrag && editor.playing) editor.playing = false
                     },
                     onDragEnd = { timelineDrag = false },
                     onDragCancel = { timelineDrag = false }
@@ -170,6 +170,7 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
                     if (timelineDrag && !change.isConsumed) {
                         change.consume()
                         hScroll.dispatchRawDelta(-drag.x)
+                        editor.seek(hScroll.value.toFloat() / (pps * dens).coerceAtLeast(0.001f))
                     }
                 }
             }
@@ -207,7 +208,9 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
         // Center the grabber on the actual layer stack instead of stretching it down the pane.
         val layerStackHeight = editor.layers.sumOf { layer ->
             40.0 +
-                (if (layer.id == editor.selectedId) layer.props.values.count { it.keys.isNotEmpty() } * 28.0 else 0.0) +
+                (if (layer.id == editor.selectedId) layer.props.entries.count { (id, prop) ->
+                    prop.keys.isNotEmpty() && !(layer.scaleLinked && id == PropId.SCALE_Y)
+                } * 28.0 else 0.0) +
                 (if (layer.parentId != null) 20.0 else 0.0)
         }.toFloat()
         val handleTop = (30f + layerStackHeight / 2f - 17f)
@@ -352,9 +355,7 @@ private fun LayerRow(
             }
         }
         if (selected && hasLayerKeyframes) {
-            layer.props.entries
-                .filter { it.value.keys.isNotEmpty() }
-                .sortedBy { it.key.ordinal }
+            visibleKeyframeProps.sortedBy { it.key.ordinal }
                 .forEach { (propId, prop) ->
                     KeyframeTrackRow(editor, layer, propId, prop.keys, pps, hScroll, contentW, leftW, leadingPad)
                 }
