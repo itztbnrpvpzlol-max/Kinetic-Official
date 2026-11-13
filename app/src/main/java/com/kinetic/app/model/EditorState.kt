@@ -263,6 +263,12 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
         l.copy(start = l.start + d, duration = l.duration - d, srcOffset = l.srcOffset + d)
     }
 
+    /** Move the entire selected clip so its start aligns with the playhead. */
+    fun bringLayerToPlayhead(id: String) {
+        val target = time.coerceIn(0f, duration)
+        updateLayer(id) { it.copy(start = target) }
+    }
+
     fun moveLayerStartToPlayhead(id: String) {
         val l = layers.firstOrNull { it.id == id } ?: return
         val target = time.coerceIn(0f, duration)

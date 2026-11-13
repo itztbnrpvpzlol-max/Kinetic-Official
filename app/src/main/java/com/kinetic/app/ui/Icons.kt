@@ -27,7 +27,7 @@ enum class IconKind {
     SELECT, SHAPES, STAR, LAYERS, SLIDERS, PREV, NEXT, CHEVRON_DOWN, CHEVRON_UP, MENU, PLUS,
     IMAGE, MUSIC, VIDEO, NULL, ADJ, TEXT, PARENT,
     LOCK, UNLOCK, SETTINGS, EXPORT, IMPORT, DELETE, CUT, SPLIT, CROP, ROTATE, FLIP,
-    COPY, MORE, ZOOM_IN, ZOOM_OUT, EFFECTS, FILTER, MASK, BLEND, WAVEFORM, SEARCH,
+    COPY, DUPLICATE, TRIM_START, TRIM_END, BRING_TO_PLAYHEAD, MORE, ZOOM_IN, ZOOM_OUT, EFFECTS, FILTER, MASK, BLEND, WAVEFORM, SEARCH,
     BACK, CLOSE, CHECK, SHARE, FOLDER, HOME, MIC, MUTE, VOLUME, GRID, ALIGN, FIT,
     FULLSCREEN, DOWNLOAD, UPLOAD, INFO, GRAPH
 }
@@ -117,6 +117,30 @@ fun KIcon(kind: IconKind, tint: Color, modifier: Modifier = Modifier.size(22.dp)
             IconKind.ROTATE -> { drawArc(tint,-35f,285f,true,pt(.12f,.12f),Size(w*.76f,h*.76f),style=st); drawPath(poly(true,pt(.72f,.08f),pt(.9f,.28f),pt(.66f,.3f)),tint) }
             IconKind.FLIP -> { line(pt(.5f,.12f),pt(.5f,.88f)); drawPath(poly(true,pt(.12f,.3f),pt(.42f,.5f),pt(.12f,.7f)),tint,style=st); drawPath(poly(true,pt(.88f,.3f),pt(.58f,.5f),pt(.88f,.7f)),tint,style=st) }
             IconKind.COPY -> { rect(.3f,.12f,.56f,.62f); rect(.14f,.28f,.56f,.62f) }
+            IconKind.DUPLICATE -> {
+                rect(.34f,.1f,.52f,.58f)
+                rect(.14f,.3f,.52f,.58f)
+                line(pt(.4f,.58f),pt(.4f,.82f))
+                line(pt(.28f,.7f),pt(.52f,.7f))
+            }
+            IconKind.TRIM_START -> {
+                rect(.3f,.3f,.62f,.4f)
+                line(pt(.3f,.12f),pt(.3f,.88f))
+                line(pt(.08f,.5f),pt(.24f,.5f))
+                drawPath(poly(false,pt(.17f,.4f),pt(.27f,.5f),pt(.17f,.6f)),tint,style=st)
+            }
+            IconKind.TRIM_END -> {
+                rect(.08f,.3f,.62f,.4f)
+                line(pt(.7f,.12f),pt(.7f,.88f))
+                line(pt(.76f,.5f),pt(.92f,.5f))
+                drawPath(poly(false,pt(.83f,.4f),pt(.73f,.5f),pt(.83f,.6f)),tint,style=st)
+            }
+            IconKind.BRING_TO_PLAYHEAD -> {
+                line(pt(.72f,.12f),pt(.72f,.88f))
+                line(pt(.12f,.5f),pt(.64f,.5f))
+                drawPath(poly(false,pt(.5f,.34f),pt(.68f,.5f),pt(.5f,.66f)),tint,style=st)
+                line(pt(.18f,.3f),pt(.18f,.7f))
+            }
             IconKind.MORE -> { filledCircle(.2f,.5f,.07f); filledCircle(.5f,.5f,.07f); filledCircle(.8f,.5f,.07f) }
             IconKind.ZOOM_OUT -> { outlinedCircle(.42f,.42f,.27f); line(pt(.62f,.62f),pt(.88f,.88f)); line(pt(.29f,.42f),pt(.55f,.42f)) }
             IconKind.FILTER -> { drawPath(poly(true,pt(.12f,.18f),pt(.88f,.18f),pt(.58f,.52f),pt(.58f,.84f),pt(.42f,.92f),pt(.42f,.52f)),tint,style=st) }

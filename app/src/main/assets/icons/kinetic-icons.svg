@@ -19,6 +19,10 @@
   <symbol id="lock" viewBox="0 0 24 24"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></symbol>
   <symbol id="unlock" viewBox="0 0 24 24"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 7.5-2"/></symbol>
   <symbol id="delete" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2m3 0-1 15H6L5 6m4 4v7m6-7v7"/></symbol>
+  <symbol id="duplicate" viewBox="0 0 24 24"><rect x="8" y="3" width="13" height="14" rx="2"/><rect x="3" y="8" width="13" height="13" rx="2"/><path d="M9.5 14.5h4M11.5 12.5v4"/></symbol>
+  <symbol id="trim-start" viewBox="0 0 24 24"><rect x="7" y="7" width="14" height="10" rx="1.5"/><path d="M7 3v18M2 12h4m-2-2 2 2-2 2"/></symbol>
+  <symbol id="trim-end" viewBox="0 0 24 24"><rect x="3" y="7" width="14" height="10" rx="1.5"/><path d="M17 3v18m5-9h-4m2-2-2 2 2 2"/></symbol>
+  <symbol id="bring-to-playhead" viewBox="0 0 24 24"><path d="M18 3v18M3 12h13m-4-4 4 4-4 4M5 7v10"/></symbol>
   <symbol id="share" viewBox="0 0 24 24"><circle cx="18" cy="5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="19" r="2.5"/><path d="m8.2 10.8 7.6-4.5m-7.6 7.9 7.6 4.5"/></symbol>
   <symbol id="more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></symbol>
 </svg>

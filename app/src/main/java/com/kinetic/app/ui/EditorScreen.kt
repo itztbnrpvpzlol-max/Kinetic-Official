@@ -631,27 +631,43 @@ private fun rememberEditorDisplayTime(editor: EditorState): Float {
 private fun AlightCutBar(editor: EditorState, layer: Layer) {
     val displayTime = rememberEditorDisplayTime(editor)
     val inside = displayTime > layer.start + editor.frame && displayTime < layer.end - editor.frame
-    Row(Modifier.fillMaxWidth().height(42.dp).padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(
+        Modifier.fillMaxWidth().height(42.dp).padding(horizontal = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // Keep the three timing actions grouped in the center, with duplicate
+        // and delete anchored at the outside edges.
+        CutAction("Duplicate", IconKind.DUPLICATE, Modifier.weight(1f)) { editor.duplicate(layer.id) }
         if (inside) {
+            CutAction("Trim start", IconKind.TRIM_START, Modifier.weight(1f)) {
+                editor.trimLeft(layer.id, editor.time - layer.start)
+            }
             CutAction("Split", IconKind.SPLIT, Modifier.weight(1f)) { editor.splitSelected() }
-            CutAction("Trim start", IconKind.CUT, Modifier.weight(1f)) { editor.trimLeft(layer.id, editor.time - layer.start) }
-            CutAction("Trim end", IconKind.CUT, Modifier.weight(1f)) { editor.moveLayerEndToPlayhead(layer.id) }
-        } else if (displayTime < layer.start) {
-            CutAction("Move to playhead", IconKind.PREV, Modifier.weight(1f)) { editor.moveLayerStartToPlayhead(layer.id) }
+            CutAction("Trim end", IconKind.TRIM_END, Modifier.weight(1f)) {
+                editor.moveLayerEndToPlayhead(layer.id)
+            }
         } else {
-            CutAction("Extend to playhead", IconKind.NEXT, Modifier.weight(1f)) { editor.extendLayerToPlayhead(layer.id) }
+            CutAction("Bring to playhead", IconKind.BRING_TO_PLAYHEAD, Modifier.weight(1f)) {
+                editor.bringLayerToPlayhead(layer.id)
+            }
         }
-        CutAction("Duplicate", IconKind.COPY, Modifier.weight(1f)) { editor.duplicate(layer.id) }
         CutAction("Delete", IconKind.DELETE, Modifier.weight(1f)) { editor.deleteLayer(layer.id) }
     }
 }
 
 @Composable
 private fun CutAction(label: String, icon: IconKind, modifier: Modifier = Modifier, onClick: () -> Unit) {
-    Row(modifier.height(34.dp).clip(RoundedCornerShape(8.dp)).background(KColors.Surface2).clickable(onClick = onClick).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
-        KIcon(icon, KColors.Text, Modifier.size(15.dp))
+    Row(
+        modifier.height(34.dp).clip(RoundedCornerShape(8.dp))
+            .background(KColors.Surface2).clickable(onClick = onClick)
+            .padding(horizontal = 3.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center
+    ) {
+        KIcon(icon, KColors.Text, Modifier.size(17.dp))
         Spacer(Modifier.width(3.dp))
-        Text(label, color = KColors.Text, fontSize = 9.sp, maxLines = 1)
+        Text(label, color = KColors.Text, fontSize = 8.sp, maxLines = 1, softWrap = false)
     }
 }
 
