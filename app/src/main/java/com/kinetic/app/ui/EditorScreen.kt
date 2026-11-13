@@ -789,8 +789,10 @@ private fun EditPanel(
 ) {
     val displayTime = rememberEditorDisplayTime(editor)
     var menu by remember { mutableStateOf(false) }
-    val activeProp = editor.selectedProp ?: com.kinetic.app.model.PropId.POS_X
-    val hasKey = layer.p(activeProp).keys.any { kotlin.math.abs(it.t - editor.time) <= editor.frame / 2f }
+    val activeProp = editor.selectedProp
+    val hasKey = activeProp?.let { prop ->
+        layer.p(prop).keys.any { kotlin.math.abs(it.t - editor.time) <= editor.frame / 2f }
+    } == true
     val shape = RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp)
     Column(modifier.clip(shape).background(KColors.Surface).border(1.dp, KColors.Line, shape)) {
         Row(Modifier.fillMaxWidth().height(38.dp).padding(start = 13.dp, end = 5.dp),
@@ -826,12 +828,15 @@ private fun EditPanel(
                 RailAction(IconKind.SLIDERS, tab == 0) { onTab(0) }
                 RailAction(IconKind.GRID, tab == 1) { onTab(1) }
                 Box(Modifier.padding(vertical = 5.dp).width(24.dp).height(1.dp).background(KColors.Line))
-                RailAction(IconKind.PREV, false) { editor.jumpKey(layer.id, activeProp, -1) }
-                RailAction(if (hasKey) IconKind.DIAMOND_FILLED else IconKind.DIAMOND, hasKey) {
-                    editor.selectProp(activeProp)
-                    editor.toggleKeyAtTime(layer.id, activeProp)
+                RailAction(IconKind.PREV, false, enabled = activeProp != null) {
+                    activeProp?.let { editor.jumpKey(layer.id, it, -1) }
                 }
-                RailAction(IconKind.NEXT, false) { editor.jumpKey(layer.id, activeProp, 1) }
+                RailAction(if (hasKey) IconKind.DIAMOND_FILLED else IconKind.DIAMOND, hasKey, enabled = activeProp != null) {
+                    activeProp?.let { editor.toggleKeyAtTime(layer.id, it) }
+                }
+                RailAction(IconKind.NEXT, false, enabled = activeProp != null) {
+                    activeProp?.let { editor.jumpKey(layer.id, it, 1) }
+                }
             }
             Box(Modifier.weight(1f).fillMaxHeight()) {
                 if (tab == 0) PropertiesList(editor, layer, onParent) else GraphPanel(editor, layer)
@@ -841,11 +846,12 @@ private fun EditPanel(
 }
 
 @Composable
-private fun RailAction(icon: IconKind, selected: Boolean, onClick: () -> Unit) {
-    Box(Modifier.padding(vertical = 2.dp).size(34.dp).clip(RoundedCornerShape(7.dp))
+private fun RailAction(icon: IconKind, selected: Boolean, enabled: Boolean = true, onClick: () -> Unit) {
+    Box(Modifier.padding(vertical = 2.dp).size(34.dp).alpha(if (enabled) 1f else 0.32f)
+        .clip(RoundedCornerShape(7.dp))
         .background(if (selected) KColors.Accent.copy(alpha = 0.14f) else Color.Transparent)
-        .clickable(onClick = onClick), contentAlignment = Alignment.Center) {
-        KIcon(icon, if (selected) KColors.Accent else KColors.Muted, Modifier.size(18.dp))
+        .clickable(enabled = enabled, onClick = onClick), contentAlignment = Alignment.Center) {
+        KIcon(icon, if (selected && enabled) KColors.Accent else KColors.Muted, Modifier.size(18.dp))
     }
 }
 

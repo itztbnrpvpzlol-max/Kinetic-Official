@@ -28,9 +28,6 @@ import com.kinetic.app.model.fmt
 
 @Composable
 fun PropertiesList(editor: EditorState, layer: Layer, onParent: () -> Unit) {
-    LaunchedEffect(layer.id) {
-        if (editor.selectedProp == null) editor.selectProp(PropId.POS_X)
-    }
     Column(
         Modifier.fillMaxSize().background(KColors.Surface).verticalScroll(rememberScrollState())
             .padding(horizontal = 12.dp, vertical = 7.dp)
@@ -67,9 +64,12 @@ private fun PropertyLine(label: String, editor: EditorState, layer: Layer, ids: 
     Row(Modifier.fillMaxWidth().height(43.dp).padding(horizontal = 2.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(label, color = if (ids.any { editor.selectedProp == it }) KColors.Accent else KColors.Text,
             fontSize = 12.sp, fontWeight = FontWeight.Medium,
-            modifier = Modifier.weight(1f).then(if (onLongPress != null) Modifier.pointerInput(layer.id, layer.scaleLinked) {
-                detectTapGestures(onLongPress = { onLongPress() })
-            } else Modifier))
+            modifier = Modifier.weight(1f).pointerInput(layer.id, layer.scaleLinked, ids) {
+                detectTapGestures(
+                    onTap = { ids.firstOrNull()?.let { editor.selectProp(it) } },
+                    onLongPress = { onLongPress?.invoke() }
+                )
+            })
         ids.forEachIndexed { index, id ->
             if (ids.size > 1 && index > 0) Spacer(Modifier.width(5.dp))
             ValueController(editor, layer, id, if (ids.size > 1) if (index == 0) "X" else "Y" else "", Modifier.weight(1f))
