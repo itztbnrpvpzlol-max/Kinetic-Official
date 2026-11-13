@@ -116,8 +116,10 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
     val hScroll = rememberScrollState()
     val vScroll = rememberScrollState()
     var paneW by remember { mutableIntStateOf(0) }
-    var leftWidth by remember { mutableFloatStateOf(176f) }
-    val leftW = leftWidth.dp
+    var leftWidth by remember { mutableFloatStateOf(160f) }
+    // Never let the layer column cover the transport center; the playhead must remain visible there.
+    val maxLeftWidth = (paneW / dens / 2f - 16f).coerceAtLeast(124f).coerceAtMost(320f)
+    val leftW = leftWidth.coerceIn(124f, maxLeftWidth).dp
     val leftPx = with(density) { leftW.toPx() }
     val contentSec = max(editor.duration, editor.layers.maxOfOrNull { it.end } ?: 0f)
     // The track viewport starts immediately after the resizable layer-controls column.
@@ -204,7 +206,7 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
                 .pointerInput(Unit) {
                     detectHorizontalDragGestures { change, drag ->
                         change.consume()
-                        leftWidth = (leftWidth + drag / dens).coerceIn(124f, 320f)
+                        leftWidth = (leftWidth + drag / dens).coerceIn(124f, maxLeftWidth)
                     }
                 },
             contentAlignment = Alignment.Center
