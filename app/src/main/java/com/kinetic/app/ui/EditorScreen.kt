@@ -320,7 +320,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                 AlightCutBar(editor, activeLayer)
                 if (!compactHeight && (showPropertiesPanel || showToolPanel)) {
                     // Every dock tool shares the Properties panel shell and workspace footprint.
-                    val adaptivePanelHeight = (windowMaxHeight.value * 0.27f).coerceIn(180f, 228f)
+                    val adaptivePanelHeight = if (dockTool == "Masking") (windowMaxHeight.value * 0.43f).coerceIn(280f, 390f) else (windowMaxHeight.value * 0.27f).coerceIn(180f, 228f)
                     if (showPropertiesPanel) {
                         EditPanel(editor, activeLayer, panelTab, { panelTab = it }, { showPropertiesPanel = false },
                             onRename = { renameTarget = activeLayer }, onParent = { parentPicker = true },

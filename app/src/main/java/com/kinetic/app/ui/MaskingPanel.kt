@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -31,6 +30,7 @@ import com.kinetic.app.model.COMP_W
 import com.kinetic.app.model.EditorState
 import com.kinetic.app.model.Layer
 import com.kinetic.app.model.LayerMask
+import com.kinetic.app.model.PropId
 import com.kinetic.app.model.MaskStroke
 import com.kinetic.app.model.VectorPoint
 import com.kinetic.app.model.layerMatrix
@@ -42,56 +42,54 @@ private val maskTools = listOf("Pen", "Draw", "Ellipse", "Roto Brush")
 
 @Composable
 fun MaskingPanel(
-    editor: EditorState,
-    layer: Layer,
-    activeTool: String,
-    onToolChange: (String) -> Unit,
-    rotoForeground: Boolean,
-    onRotoForegroundChange: (Boolean) -> Unit,
-    modifier: Modifier = Modifier
+    editor: EditorState, layer: Layer, activeTool: String, onToolChange: (String) -> Unit,
+    rotoForeground: Boolean, onRotoForegroundChange: (Boolean) -> Unit, modifier: Modifier = Modifier
 ) {
-    val mask = layer.maskPath ?: LayerMask(kind = activeTool)
-    Column(modifier.fillMaxSize().background(KColors.Surface).verticalScroll(rememberScrollState()).padding(horizontal = 10.dp, vertical = 5.dp),
-        verticalArrangement = Arrangement.spacedBy(5.dp)) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text("MASK TOOLS", color = KColors.Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold,
-                modifier = Modifier.weight(1f))
+    val mask = layer.maskAt(editor.time) ?: LayerMask(kind = activeTool)
+    val activeProp = editor.selectedProp
+    val keyExists = activeProp?.let { id -> layer.p(id).keys.any { kotlin.math.abs(it.t - editor.time) <= editor.frame / 2f } } == true
+    Column(modifier.fillMaxSize().background(KColors.Surface).padding(horizontal = 9.dp, vertical = 5.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(Modifier.fillMaxWidth().height(27.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("MASK PATH", color = KColors.Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
             Text(if (layer.maskEnabled) "ON" else "OFF", color = if (layer.maskEnabled) KColors.Accent else KColors.Muted,
-                fontSize = 9.sp, fontWeight = FontWeight.Bold)
-            Text(if (layer.maskEnabled) "  Disable" else "  Enable", color = KColors.Text, fontSize = 9.sp,
-                modifier = Modifier.clip(RoundedCornerShape(5.dp)).clickable {
-                    editor.updateLayer(layer.id) { it.copy(maskEnabled = !it.maskEnabled) }
-                }.padding(horizontal = 5.dp, vertical = 3.dp))
+                fontSize = 9.sp, modifier = Modifier.clickable { editor.updateLayer(layer.id) { it.copy(maskEnabled = !it.maskEnabled) } }.padding(horizontal = 7.dp))
+            Box(Modifier.size(29.dp).clip(RoundedCornerShape(6.dp))
+                .background(if (keyExists) KColors.Accent.copy(alpha = .16f) else KColors.Bg)
+                .clickable(enabled = activeProp != null) { activeProp?.let { editor.toggleKeyAtTime(layer.id, it) } },
+                contentAlignment = Alignment.Center) {
+                KIcon(if (keyExists) IconKind.DIAMOND_FILLED else IconKind.DIAMOND,
+                    if (activeProp != null) KColors.Accent else KColors.Dim, Modifier.size(17.dp))
+            }
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             maskTools.forEach { tool ->
                 val selected = activeTool == tool
-                Box(Modifier.weight(1f).height(30.dp).clip(RoundedCornerShape(6.dp))
+                Box(Modifier.weight(1f).height(28.dp).clip(RoundedCornerShape(6.dp))
                     .background(if (selected) KColors.Accent.copy(alpha = .16f) else KColors.Bg)
                     .border(1.dp, if (selected) KColors.Accent else KColors.Line, RoundedCornerShape(6.dp))
-                    .clickable {
-                        onToolChange(tool)
-                        editor.updateLayer(layer.id) { current ->
-                            current.copy(maskEnabled = true,
-                                maskPath = (current.maskPath ?: LayerMask(kind = tool)).copy(kind = tool))
-                        }
-                    }, contentAlignment = Alignment.Center) {
-                    Text(tool, color = if (selected) KColors.Accent else KColors.Text,
-                        fontSize = 8.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                    .clickable { onToolChange(tool); editor.updateLayer(layer.id) { c ->
+                        c.copy(maskEnabled = true, maskPath = (c.maskPath ?: LayerMask(kind = tool)).copy(kind = tool))
+                    } }, contentAlignment = Alignment.Center) {
+                    Text(tool, color = if (selected) KColors.Accent else KColors.Text, fontSize = 8.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
                 }
             }
         }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp),
-            verticalAlignment = Alignment.CenterVertically) {
+        MaskPointWorkspace(editor, layer, activeTool)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             listOf("Add", "Subtract").forEach { mode ->
                 val selected = mask.mode == mode
-                Box(Modifier.weight(1f).height(28.dp).clip(RoundedCornerShape(5.dp))
+                Box(Modifier.weight(1f).height(24.dp).clip(RoundedCornerShape(5.dp))
                     .background(if (selected) KColors.Accent.copy(alpha = .13f) else KColors.Bg)
-                    .clickable { editor.updateMask(layer.id, mask.copy(mode = mode), push = true) },
-                    contentAlignment = Alignment.Center) {
-                    Text(mode, color = if (selected) KColors.Accent else KColors.Muted, fontSize = 7.sp,
-                        maxLines = 1)
+                    .clickable { editor.updateMask(layer.id, mask.copy(mode = mode), push = true) }, contentAlignment = Alignment.Center) {
+                    Text(mode, color = if (selected) KColors.Accent else KColors.Muted, fontSize = 8.sp)
                 }
+            }
+            MaskChip(if (mask.closed) "Open" else "Close", mask.closed, Modifier.weight(1f)) {
+                editor.updateMask(layer.id, mask.copy(closed = !mask.closed), push = true)
+            }
+            MaskChip(if (mask.inverted) "Invert ✓" else "Invert", mask.inverted, Modifier.weight(1f)) {
+                editor.updateMask(layer.id, mask.copy(inverted = !mask.inverted), push = true)
             }
         }
         if (activeTool == "Roto Brush") {
@@ -102,72 +100,92 @@ fun MaskingPanel(
                     editor.updateMask(layer.id, mask.copy(frozen = !mask.frozen), push = true)
                 }
             }
-        } else {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                MaskChip(if (mask.closed) "Open path" else "Close path", mask.closed, Modifier.weight(1f)) {
-                    editor.updateMask(layer.id, mask.copy(closed = !mask.closed), push = true)
+        }
+        Text("MASK PROPERTIES", color = KColors.Muted, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+        MaskValueRow(editor, layer, "Opacity", PropId.MASK_OPACITY, mask.opacity, 0f, 100f, 0.5f, "%.0f%%")
+        MaskValueRow(editor, layer, "Feather", PropId.MASK_FEATHER, mask.feather, 0f, 100f, 0.5f, "%.0f px")
+        MaskValueRow(editor, layer, "Expansion", PropId.MASK_EXPANSION, mask.expansion, -50f, 50f, 0.5f, "%+.0f px")
+        if (activeTool == "Draw" || activeTool == "Roto Brush")
+            MaskValueRow(editor, layer, "Brush", PropId.MASK_BRUSH_SIZE, mask.brushSize * 100f, 1f, 18f, 0.08f, "%.1f%%")
+    }
+}
+
+@Composable
+private fun MaskPointWorkspace(editor: EditorState, layer: Layer, tool: String) {
+    var pending by remember(layer.id, tool) { mutableStateOf<VectorPoint?>(null) }
+    Row(Modifier.fillMaxWidth().height(86.dp), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+        Column(Modifier.width(34.dp).fillMaxHeight().background(KColors.Bg, RoundedCornerShape(6.dp)),
+            horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.SpaceEvenly) {
+            Text("↖", color = KColors.Muted, fontSize = 17.sp)
+            Text("◎", color = if (tool == "Ellipse") KColors.Accent else KColors.Muted, fontSize = 17.sp)
+            Text("⌁", color = if (tool == "Pen") KColors.Accent else KColors.Muted, fontSize = 17.sp)
+            Text("+", color = KColors.Accent, fontSize = 19.sp)
+        }
+        Canvas(Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(6.dp))
+            .background(KColors.Bg)
+            .pointerInput(layer.id, tool, pending) {
+                detectTapGestures { p ->
+                    val candidate = pending ?: VectorPoint((p.x / size.width).coerceIn(0f, 1f), (p.y / size.height).coerceIn(0f, 1f))
+                    editor.addMaskPoint(layer.id, candidate)
+                    pending = null
                 }
-                MaskChip(if (mask.inverted) "Inverted" else "Invert", mask.inverted, Modifier.weight(1f)) {
-                    editor.updateMask(layer.id, mask.copy(inverted = !mask.inverted), push = true)
+            }
+            .pointerInput(layer.id, tool) {
+                detectDragGestures(onDragStart = { p ->
+                    pending = VectorPoint((p.x / size.width).coerceIn(0f, 1f), (p.y / size.height).coerceIn(0f, 1f))
+                }) { change, _ ->
+                    change.consume()
+                    pending = VectorPoint((change.position.x / size.width).coerceIn(0f, 1f), (change.position.y / size.height).coerceIn(0f, 1f))
                 }
-                MaskChip("Clear", false, Modifier.weight(1f)) { editor.clearMask(layer.id) }
+            }) {
+            val points = layer.maskPath?.points.orEmpty()
+            for (i in 1 until points.size) {
+                drawLine(KColors.Accent, Offset(points[i-1].x * size.width, points[i-1].y * size.height),
+                    Offset(points[i].x * size.width, points[i].y * size.height), strokeWidth = 2.dp.toPx())
+            }
+            points.forEach { drawCircle(Color.White, 4.dp.toPx(), Offset(it.x * size.width, it.y * size.height)) }
+            pending?.let { drawCircle(KColors.Accent, 5.dp.toPx(), Offset(it.x * size.width, it.y * size.height)) }
+            if (points.isEmpty()) drawContext.canvas.nativeCanvas.let { canvas ->
+                val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = android.graphics.Color.LTGRAY; textSize = 11.sp.toPx() }
+                canvas.drawText("Swipe to position next point, then tap to place it", 8.dp.toPx(), size.height / 2f, paint)
             }
         }
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            MaskSlider("Feather", mask.feather, 0f, 100f, "%.0f px") {
-                editor.updateMask(layer.id, mask.copy(feather = it), push = false)
-            }
-            Spacer(Modifier.width(8.dp))
-            MaskSlider("Expansion", mask.expansion, -50f, 50f, "%+.0f px") {
-                editor.updateMask(layer.id, mask.copy(expansion = it), push = false)
-            }
-        }
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            MaskSlider("Opacity", mask.opacity, 0f, 100f, "%.0f%%") {
-                editor.updateMask(layer.id, mask.copy(opacity = it), push = false)
-            }
-            Spacer(Modifier.width(8.dp))
-            if (activeTool == "Draw" || activeTool == "Roto Brush") {
-                MaskSlider("Brush", mask.brushSize * 100f, 1f, 18f, "%.1f%%") {
-                    editor.updateMask(layer.id, mask.copy(brushSize = it / 100f), push = false)
+    }
+}
+
+@Composable
+private fun MaskValueRow(editor: EditorState, layer: Layer, label: String, id: PropId, fallback: Float,
+    min: Float, max: Float, step: Float, format: String) {
+    val value = layer.props[id]?.valueAt(editor.time) ?: fallback
+    Row(Modifier.fillMaxWidth().height(29.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, color = if (editor.selectedProp == id) KColors.Accent else KColors.Text, fontSize = 10.sp,
+            modifier = Modifier.width(65.dp).clickable { editor.selectProp(id) })
+        ScrubValueBar(label = "", value = value, modifier = Modifier.weight(1f), step = step,
+            selected = editor.selectedProp == id, minValue = min, maxValue = max, valueFormat = format,
+            onSelect = { editor.selectProp(id) }) { next ->
+            editor.selectProp(id)
+            editor.updateLayer(layer.id, push = false) { current ->
+                val old = current.maskPath ?: LayerMask()
+                val updated = current.p(id).withValueAt(editor.time, next, editor.frame / 2f)
+                val changed = when (id) {
+                    PropId.MASK_OPACITY -> old.copy(opacity = next)
+                    PropId.MASK_FEATHER -> old.copy(feather = next)
+                    PropId.MASK_EXPANSION -> old.copy(expansion = next)
+                    else -> old.copy(brushSize = next / 100f)
                 }
-            } else {
-                Text("${mask.points.size} points", color = KColors.Muted, fontSize = 8.sp)
+                current.copy(maskEnabled = true, maskPath = changed, props = current.props + (id to updated))
             }
         }
-        Text(
-            when (activeTool) {
-                "Pen" -> "Tap the preview to add vertices. Drag a point to refine the mask path."
-                "Ellipse" -> "Drag across the preview to create an ellipse mask. Drag its points to reshape it."
-                "Draw" -> "Paint directly on the preview to build a freehand mask."
-                else -> "Paint foreground and background strokes, then freeze the matte when ready."
-            },
-            color = KColors.Muted, fontSize = 8.sp, maxLines = 2
-        )
     }
 }
 
 @Composable
 private fun MaskChip(label: String, selected: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
-    Box(modifier.height(25.dp).clip(RoundedCornerShape(5.dp))
+    Box(modifier.height(24.dp).clip(RoundedCornerShape(5.dp))
         .background(if (selected) KColors.Accent.copy(alpha = .14f) else KColors.Bg)
         .border(1.dp, if (selected) KColors.Accent.copy(alpha = .55f) else KColors.Line, RoundedCornerShape(5.dp))
         .clickable(onClick = onClick), contentAlignment = Alignment.Center) {
-        Text(label, color = if (selected) KColors.Accent else KColors.Text, fontSize = 8.sp,
-            fontWeight = FontWeight.Medium)
-    }
-}
-
-@Composable
-private fun RowScope.MaskSlider(
-    label: String, value: Float, min: Float, max: Float, format: String, onValue: (Float) -> Unit
-) {
-    Column(Modifier.weight(1f)) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text(label, color = KColors.Muted, fontSize = 8.sp, modifier = Modifier.weight(1f))
-            Text(String.format(java.util.Locale.US, format, value), color = KColors.Text, fontSize = 8.sp)
-        }
-        Slider(value = value.coerceIn(min, max), onValueChange = onValue, valueRange = min..max)
+        Text(label, color = if (selected) KColors.Accent else KColors.Text, fontSize = 8.sp, fontWeight = FontWeight.Medium)
     }
 }
 

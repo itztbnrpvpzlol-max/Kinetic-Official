@@ -34,6 +34,10 @@ enum class PropId(
     OPACITY("Opacity", 0.5f),
     SPEED("Speed", 0.02f),
     VOLUME("Volume", 0.02f),
+    MASK_OPACITY("Mask Opacity", 0.5f),
+    MASK_FEATHER("Mask Feather", 0.5f),
+    MASK_EXPANSION("Mask Expansion", 0.5f),
+    MASK_BRUSH_SIZE("Mask Brush Size", 0.08f),
     VECTOR_P1_X("Point 1 X", 0.004f, 0, 'X'),
     VECTOR_P1_Y("Point 1 Y", 0.004f, 0, 'Y'),
     VECTOR_P2_X("Point 2 X", 0.004f, 1, 'X'),
@@ -311,6 +315,7 @@ data class Layer(
 ) {
     val end: Float get() = start + duration
     fun p(id: PropId): Prop = props[id] ?: Prop(if (id.isVectorPoint) 0.5f else 0f)
+    fun maskAt(t: Float): LayerMask? = maskPath?.let { mask -> mask.copy(opacity = (props[PropId.MASK_OPACITY]?.valueAt(t) ?: mask.opacity).coerceIn(0f, 100f), feather = (props[PropId.MASK_FEATHER]?.valueAt(t) ?: mask.feather).coerceIn(0f, 100f), expansion = (props[PropId.MASK_EXPANSION]?.valueAt(t) ?: mask.expansion).coerceIn(-50f, 50f), brushSize = (props[PropId.MASK_BRUSH_SIZE]?.valueAt(t) ?: mask.brushSize * 100f).coerceIn(1f, 18f) / 100f) }
     fun vectorPointsAt(t: Float): List<VectorPoint> = vectorPoints.mapIndexed { index, point ->
         val x = PropId.vectorPoint(index, 'X')?.let { props[it]?.valueAt(t) } ?: point.x
         val y = PropId.vectorPoint(index, 'Y')?.let { props[it]?.valueAt(t) } ?: point.y

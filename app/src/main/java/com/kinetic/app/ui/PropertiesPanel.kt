@@ -156,7 +156,7 @@ private fun VectorPointLine(editor: EditorState, layer: Layer, index: Int, point
 @Composable
 fun ScrubValueBar(
     label: String, value: Float, modifier: Modifier = Modifier, step: Float = 0.5f,
-    selected: Boolean = false, onSelect: () -> Unit = {}, onValueChange: (Float) -> Unit
+    selected: Boolean = false, onSelect: () -> Unit = {}, minValue: Float = 0f, maxValue: Float = 1f, valueFormat: String? = null, onValueChange: (Float) -> Unit
 ) {
     val density = LocalDensity.current.density
     val latestValue by rememberUpdatedState(value)
@@ -170,12 +170,12 @@ fun ScrubValueBar(
                 var scrubValue = latestValue
                 detectHorizontalDragGestures(onDragStart = { scrubValue = latestValue }) { change, drag ->
                     change.consume()
-                    scrubValue = (scrubValue + drag / density * step).coerceIn(0f, 1f)
+                    scrubValue = (scrubValue + drag / density * step).coerceIn(minValue, maxValue)
                     latestChange(scrubValue)
                 }
             },
         contentAlignment = Alignment.Center
     ) {
-        Text("$label  ${(value * 100f).toInt()}%", color = if (selected) KColors.Accent else KColors.Text, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+        Text("$label  " + (valueFormat?.let { String.format(java.util.Locale.US, it, value) } ?: "${(value * 100f).toInt()}%"), color = if (selected) KColors.Accent else KColors.Text, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
     }
 }

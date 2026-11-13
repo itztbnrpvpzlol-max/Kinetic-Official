@@ -220,7 +220,7 @@ fun CpuPreviewCanvas(
                 val layerMatrix = layerMatrices.getOrPut(l.id) { Matrix() }
                 layerMatrixInto(l, time, byId, layerMatrix, matrixScratch)
                 nc.concat(layerMatrix)
-                val activeMask = l.maskPath.takeIf { l.maskEnabled }
+                val activeMask = l.maskAt(time).takeIf { l.maskEnabled }
                 if (activeMask != null) nc.saveLayer(RectF(0f, 0f, l.width, l.height), null)
                 paint.xfermode = blendModes[l.blendMode]
                 paint.colorFilter = if ("Grayscale" in l.effects) grayscaleFilter else null
