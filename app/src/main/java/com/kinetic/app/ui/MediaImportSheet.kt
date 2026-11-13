@@ -104,16 +104,17 @@ fun MediaImportSheet(
                         val durationCol = if (hasDuration) cursor.getColumnIndex(MediaStore.MediaColumns.DURATION) else -1
                         val widthCol = cursor.getColumnIndex(MediaStore.MediaColumns.WIDTH)
                         val heightCol = cursor.getColumnIndex(MediaStore.MediaColumns.HEIGHT)
-                        val bucketCol = cursor.getColumnIndex(MediaStore.MediaColumns.BUCKET_DISPLAY_NAME)
+                        val dataCol = cursor.getColumnIndex(MediaStore.MediaColumns.DATA)
                         val pathCol = cursor.getColumnIndex(MediaStore.MediaColumns.RELATIVE_PATH)
                         while (cursor.moveToNext()) {
                             val id = cursor.getLong(idCol)
                             val itemUri = ContentUris.withAppendedId(uri, id)
                             val seconds = if (durationCol >= 0) (cursor.getLong(durationCol) / 1000f).coerceAtLeast(0.1f) else 5f
                             val path = if (pathCol >= 0) cursor.getString(pathCol) else null
-                            val bucket = if (bucketCol >= 0) cursor.getString(bucketCol) else null
+                            val dataPath = if (dataCol >= 0) cursor.getString(dataCol) else null
+                            val legacyFolder = dataPath?.let { java.io.File(it).parentFile?.name }
                             val folderName = (path?.trimEnd('/')?.substringAfterLast('/')?.takeIf { it.isNotBlank() }
-                                ?: bucket?.takeIf { it.isNotBlank() } ?: "Other")
+                                ?: legacyFolder?.takeIf { it.isNotBlank() } ?: "Other")
                             found.add(ImportMediaEntry(
                                 itemUri, cursor.getString(nameCol) ?: "Media", type, seconds,
                                 if (widthCol >= 0) cursor.getInt(widthCol) else 0,
@@ -127,8 +128,7 @@ fun MediaImportSheet(
             if (tab == 0) {
                 val common = arrayOf(MediaStore.MediaColumns._ID, MediaStore.MediaColumns.DISPLAY_NAME,
                     MediaStore.MediaColumns.DATE_ADDED, MediaStore.MediaColumns.WIDTH,
-                    MediaStore.MediaColumns.HEIGHT, MediaStore.MediaColumns.BUCKET_DISPLAY_NAME,
-                    MediaStore.MediaColumns.RELATIVE_PATH)
+                    MediaStore.MediaColumns.HEIGHT, MediaStore.MediaColumns.RELATIVE_PATH, MediaStore.MediaColumns.DATA)
                 read(MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
                     common + MediaStore.Video.VideoColumns.DURATION, LayerType.VIDEO, true)
                 read(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, common, LayerType.IMAGE, false)
@@ -136,7 +136,7 @@ fun MediaImportSheet(
                 read(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
                     arrayOf(MediaStore.Audio.Media._ID, MediaStore.MediaColumns.DISPLAY_NAME,
                         MediaStore.MediaColumns.DATE_ADDED, MediaStore.Audio.AudioColumns.DURATION,
-                        MediaStore.MediaColumns.RELATIVE_PATH, MediaStore.MediaColumns.BUCKET_DISPLAY_NAME),
+                        MediaStore.MediaColumns.RELATIVE_PATH, MediaStore.MediaColumns.DATA),
                     LayerType.AUDIO, true)
             }
             found
