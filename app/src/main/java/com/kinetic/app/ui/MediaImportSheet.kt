@@ -256,7 +256,7 @@ fun MediaImportSheet(
             } else if (tab == 0) {
                 Column(Modifier.fillMaxWidth().wrapContentHeight().clipToBounds().padding(horizontal = 12.dp, vertical = 8.dp)) {
                     Box(
-                        Modifier.fillMaxWidth().height(if (selected == null) 114.dp else 199.dp)
+                        Modifier.fillMaxWidth().aspectRatio(16f / 9f)
                             .clip(RoundedCornerShape(12.dp)).background(KColors.Surface2),
                         contentAlignment = Alignment.Center
                     ) {
