@@ -350,7 +350,15 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                 when (tool) {
                     "Select" -> { editor.select(null); showShapePanel = false; showToolPanel = false }
                     "Properties" -> if (activeLayer != null) { showToolPanel = false; showShapePanel = false; panelTab = 0; showPropertiesPanel = true }
-                    "Speed", "Volume", "Extract audio", "Masking", "Effects", "Blending", "Blend modes" -> {
+                    "Extract audio" -> {
+                        if (activeLayer?.type == LayerType.VIDEO) {
+                            showPropertiesPanel = false
+                            showToolPanel = false
+                            showShapePanel = false
+                            editor.extractAudio(activeLayer.id)
+                        } else Toast.makeText(ctx, "Select a video layer first", Toast.LENGTH_SHORT).show()
+                    }
+                    "Speed", "Volume", "Masking", "Effects", "Blending", "Blend modes" -> {
                         if (activeLayer != null) {
                             showPropertiesPanel = false
                             showShapePanel = false
@@ -488,11 +496,11 @@ private fun FloatingEditingDock(active: String, hasSelection: Boolean, onSelect:
             "Properties" to IconKind.SLIDERS,
             "Speed" to IconKind.STOPWATCH,
             "Volume" to IconKind.VOLUME,
-            "Extract audio" to IconKind.WAVEFORM,
             "Masking" to IconKind.MASK,
             "Effects" to IconKind.EFFECTS,
             "Blending" to IconKind.BLEND,
-            "Blend modes" to IconKind.GRID
+            "Blend modes" to IconKind.GRID,
+            "Extract audio" to IconKind.WAVEFORM
         )
     } else {
         listOf(
@@ -530,10 +538,12 @@ private fun FloatingEditingDock(active: String, hasSelection: Boolean, onSelect:
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.Center
                     ) {
-                        KIcon(icon, if (active == label) KColors.Accent else KColors.Muted, Modifier.size(22.dp))
+                        val itemColor = if (label == "Extract audio") Color(0xFF438BFF)
+                            else if (active == label) KColors.Accent else KColors.Muted
+                        KIcon(icon, itemColor, Modifier.size(22.dp))
                         Text(
                             label,
-                            color = if (active == label) KColors.Accent else KColors.Muted,
+                            color = itemColor,
                             fontSize = 9.sp,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
@@ -589,7 +599,10 @@ private fun ToolEditPanel(
         Row(Modifier.weight(1f).fillMaxWidth()) {
             Column(Modifier.width(44.dp).fillMaxHeight().background(KColors.Bg).padding(vertical = 5.dp),
                 horizontalAlignment = Alignment.CenterHorizontally) {
-                RailAction(IconKind.SLIDERS, true, enabled = false) { }
+                RailAction(IconKind.SLIDERS, !showGraph, enabled = true) {
+                    showGraph = false
+                    animatedProp?.let { editor.selectProp(it) }
+                }
                 if (animatedProp != null) {
                     RailAction(IconKind.GRAPH, showGraph) {
                         editor.selectProp(animatedProp)
@@ -630,10 +643,6 @@ private fun ToolPanelControls(tool: String, editor: EditorState, layer: Layer, d
                 PropertyLine("Opacity", editor, layer, listOf(PropId.OPACITY))
                 ChoiceFloatUnitRow(listOf("0%" to 0f, "25%" to 25f, "50%" to 50f, "75%" to 75f, "100%" to 100f),
                     layer.p(PropId.OPACITY).valueAt(displayTime)) { editor.beginEdit(); editor.setPropValue(layer.id, PropId.OPACITY, it) }
-            }
-            "Extract audio" -> {
-                Text("EXTRACT AUDIO", color = KColors.Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                UnitAction("Extract audio from video", enabled = layer.type == LayerType.VIDEO, onClick = onExtractAudio)
             }
             "Masking" -> {
                 Text("MASKING", color = KColors.Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold)

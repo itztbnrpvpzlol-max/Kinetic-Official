@@ -13,6 +13,12 @@ import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitHorizontalTouchSlopOrCancellation
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.awaitPointerEvent
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -155,22 +161,38 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
             .fillMaxWidth()
             .onSizeChanged { paneW = it.width; paneH = it.height }
             .pointerInput(Unit) { detectPinch { z -> pps = (pps * z).coerceIn(18f, 400f) } }
-            .pointerInput(paneW, leftPx) {
-                var timelineDrag = false
-                detectDragGestures(
-                    onDragStart = { origin ->
-                        // Pan beneath the fixed playhead and update the transport
-                        // time represented by the centered playhead.
-                        timelineDrag = origin.x > leftPx + 12f * dens
-                        if (timelineDrag && editor.playing) editor.playing = false
-                    },
-                    onDragEnd = { timelineDrag = false },
-                    onDragCancel = { timelineDrag = false }
-                ) { change, drag ->
-                    if (timelineDrag && !change.isConsumed) {
+            .pointerInput(paneW, leftPx, pps) {
+                awaitEachGesture {
+                    // Observe before child clip gestures in the Initial pass. A normal
+                    // horizontal swipe over a clip must scrub the timeline just like
+                    // a swipe over empty track space; long-press clip editing remains
+                    // owned by the clip recognizer.
+                    val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                    if (down.position.x <= leftPx + 12f * dens) return@awaitEachGesture
+                    var lastX = 0f
+                    val dragStart = awaitHorizontalTouchSlopOrCancellation(
+                        down.id,
+                        pass = PointerEventPass.Initial
+                    ) { change, over ->
                         change.consume()
-                        hScroll.dispatchRawDelta(-drag.x)
+                        lastX = change.position.x
+                        if (editor.playing) editor.playing = false
+                        hScroll.dispatchRawDelta(-over)
                         editor.seek(hScroll.value.toFloat() / (pps * dens).coerceAtLeast(0.001f))
+                    } ?: return@awaitEachGesture
+
+                    var pointer = dragStart
+                    while (pointer.pressed) {
+                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                        pointer = event.changes.firstOrNull { it.id == down.id } ?: break
+                        if (!pointer.pressed) break
+                        val dx = pointer.position.x - lastX
+                        lastX = pointer.position.x
+                        if (dx != 0f) {
+                            pointer.consume()
+                            hScroll.dispatchRawDelta(-dx)
+                            editor.seek(hScroll.value.toFloat() / (pps * dens).coerceAtLeast(0.001f))
+                        }
                     }
                 }
             }
