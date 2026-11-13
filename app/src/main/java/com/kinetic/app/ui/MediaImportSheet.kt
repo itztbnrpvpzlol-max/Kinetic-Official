@@ -12,12 +12,12 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.RangeSlider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -64,7 +64,6 @@ fun MediaImportSheet(
     var entries by remember { mutableStateOf<List<ImportMediaEntry>>(emptyList()) }
     var selected by remember { mutableStateOf<ImportMediaEntry?>(null) }
     var trim by remember { mutableStateOf(0f..5f) }
-    var previewAt by remember { mutableFloatStateOf(0f) }
     var playingAudio by remember { mutableStateOf<String?>(null) }
     var folderMode by remember { mutableStateOf(false) }
     var folder by remember { mutableStateOf<String?>(null) }
@@ -152,7 +151,6 @@ fun MediaImportSheet(
             player.setMediaItem(MediaItem.fromUri(item.uri))
             player.prepare()
             player.pause()
-            previewAt = 0f
             trim = 0f..item.duration.coerceAtLeast(0.1f)
         } else if (item != null) {
             if (item.type == LayerType.IMAGE) player.pause()
@@ -162,10 +160,6 @@ fun MediaImportSheet(
             player.pause()
         }
     }
-    LaunchedEffect(selected?.uri, previewAt) {
-        if (selected?.type == LayerType.VIDEO) player.seekTo((previewAt * 1000f).toLong())
-    }
-
     val visibleEntries = entries.filter { folder == null || it.folder == folder }
     val folders = entries.map { it.folder }.distinct().sorted()
 
@@ -238,12 +232,15 @@ fun MediaImportSheet(
                 }
             } else if (tab == 0) {
                 Column(Modifier.fillMaxWidth().weight(1f).padding(horizontal = 12.dp, vertical = 8.dp)) {
-                    Box(Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(12.dp)).background(KColors.Surface2),
-                        contentAlignment = Alignment.Center) {
+                    Box(
+                        Modifier.fillMaxWidth().height(if (selected == null) 104.dp else 180.dp)
+                            .clip(RoundedCornerShape(12.dp)).background(KColors.Surface2),
+                        contentAlignment = Alignment.Center
+                    ) {
                         when (selected?.type) {
                             LayerType.IMAGE -> ImportPreviewImage(selected!!)
                             LayerType.VIDEO -> AndroidView(
-                                factory = { PlayerView(it).apply { this.player = player; useController = true } },
+                                factory = { PlayerView(it).apply { this.player = player; useController = false } },
                                 update = { it.player = player },
                                 modifier = Modifier.fillMaxSize()
                             )
@@ -251,28 +248,8 @@ fun MediaImportSheet(
                         }
                     }
                     if (selected?.type == LayerType.VIDEO) {
-                        Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text("Preview", color = KColors.Muted, fontSize = 11.sp)
-                            Spacer(Modifier.weight(1f))
-                            Text(String.format("%.1fs", previewAt), color = KColors.Text, fontSize = 11.sp)
-                        }
-                        androidx.compose.material3.Slider(
-                            value = previewAt.coerceIn(0f, selected!!.duration.coerceAtLeast(0.1f)),
-                            onValueChange = { previewAt = it; player.pause() },
-                            valueRange = 0f..selected!!.duration.coerceAtLeast(0.1f)
-                        )
-                        Text("IN  ${String.format("%.2f", trim.start)}s     OUT  ${String.format("%.2f", trim.endInclusive)}s",
-                            color = KColors.Muted, fontSize = 11.sp)
-                        RangeSlider(
-                            value = trim,
-                            onValueChange = { next ->
-                                val minGap = 0.1f
-                                trim = if (next.endInclusive - next.start < minGap)
-                                    next.start..(next.start + minGap).coerceAtMost(selected!!.duration)
-                                else next
-                            },
-                            valueRange = 0f..selected!!.duration.coerceAtLeast(0.1f)
-                        )
+                        Spacer(Modifier.height(8.dp))
+                        ImportTrimFilmstrip(item = selected!!, trim = trim, onTrimChange = { trim = it })
                     } else if (selected?.type == LayerType.IMAGE) {
                         Text("Image selected", color = KColors.Muted, fontSize = 11.sp,
                             modifier = Modifier.padding(vertical = 8.dp))
@@ -282,7 +259,7 @@ fun MediaImportSheet(
                 }
                 LazyVerticalGrid(
                     columns = GridCells.Adaptive(104.dp),
-                    modifier = Modifier.fillMaxWidth().weight(0.9f),
+                    modifier = Modifier.fillMaxWidth().weight(1f),
                     contentPadding = PaddingValues(8.dp),
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
@@ -349,6 +326,77 @@ fun MediaImportSheet(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun ImportTrimFilmstrip(
+    item: ImportMediaEntry,
+    trim: ClosedFloatingPointRange<Float>,
+    onTrimChange: (ClosedFloatingPointRange<Float>) -> Unit
+) {
+    val duration = item.duration.coerceAtLeast(0.1f)
+    val startFraction = (trim.start / duration).coerceIn(0f, 1f)
+    val endFraction = (trim.endInclusive / duration).coerceIn(startFraction, 1f)
+    BoxWithConstraints(
+        Modifier.fillMaxWidth().height(66.dp)
+            .clip(RoundedCornerShape(9.dp))
+            .background(KColors.Surface2)
+            .pointerInput(item.uri, duration) {
+                var draggingEnd = false
+                var currentStart = trim.start
+                var currentEnd = trim.endInclusive
+                detectDragGestures(
+                    onDragStart = { point ->
+                        currentStart = trim.start
+                        currentEnd = trim.endInclusive
+                        val startX = (currentStart / duration) * size.width
+                        val endX = (currentEnd / duration) * size.width
+                        draggingEnd = kotlin.math.abs(point.x - endX) <= kotlin.math.abs(point.x - startX)
+                    },
+                    onDrag = { change, dragAmount ->
+                        change.consume()
+                        val delta = dragAmount.x / size.width.coerceAtLeast(1) * duration
+                        val minGap = minOf(0.1f, duration)
+                        if (draggingEnd) {
+                            currentEnd = (currentEnd + delta).coerceIn(currentStart + minGap, duration)
+                        } else {
+                            currentStart = (currentStart + delta).coerceIn(0f, currentEnd - minGap)
+                        }
+                        onTrimChange(currentStart..currentEnd)
+                    }
+                )
+            }
+    ) {
+        Row(Modifier.fillMaxSize()) {
+            (0 until 6).forEach { index ->
+                ImportTrimFrame(item, duration * (index + 0.5f) / 6f, Modifier.weight(1f).fillMaxHeight())
+            }
+        }
+        Box(Modifier.align(Alignment.CenterStart).fillMaxHeight().fillMaxWidth(startFraction)
+            .background(KColors.Bg.copy(alpha = 0.58f)))
+        Box(Modifier.align(Alignment.CenterEnd).fillMaxHeight().fillMaxWidth(1f - endFraction)
+            .background(KColors.Bg.copy(alpha = 0.58f)))
+        Box(Modifier.align(Alignment.CenterStart).offset(x = maxWidth * startFraction - 3.dp)
+            .width(6.dp).fillMaxHeight().background(KColors.Accent))
+        Box(Modifier.align(Alignment.CenterStart).offset(x = maxWidth * endFraction - 3.dp)
+            .width(6.dp).fillMaxHeight().background(KColors.Accent))
+    }
+}
+
+@Composable
+private fun ImportTrimFrame(item: ImportMediaEntry, time: Float, modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    val bitmap by produceState<android.graphics.Bitmap?>(null, item.uri, time) {
+        value = MediaLoader.bitmapFor(
+            context, item.uri, item.type, time,
+            sampleFps = 3, maxEdge = 220, persistToDisk = false, lowPriorityRequest = true
+        )
+    }
+    if (bitmap != null) {
+        Image(bitmap!!.asImageBitmap(), null, modifier, contentScale = ContentScale.Crop)
+    } else {
+        Box(modifier.background(KColors.Surface2))
     }
 }
 
