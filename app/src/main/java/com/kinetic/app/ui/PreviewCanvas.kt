@@ -258,7 +258,7 @@ fun CpuPreviewCanvas(
                 if (activeMask != null) {
                     val maskPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                         color = android.graphics.Color.WHITE
-                        alpha = (activeMask.opacity * 2.55f).toInt().coerceIn(0, 255)
+                        setAlpha((activeMask.opacity * 2.55f).toInt().coerceIn(0, 255))
                         xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_IN)
                         if (activeMask.feather > 0f) {
                             maskFilter = BlurMaskFilter(activeMask.feather.coerceIn(0f, 100f), BlurMaskFilter.Blur.NORMAL)
