@@ -569,6 +569,7 @@ private fun ToolEditPanel(
     modifier: Modifier = Modifier
 ) {
     val displayTime = rememberEditorDisplayTime(editor)
+    var showGraph by remember(tool, layer.id) { mutableStateOf(false) }
     val animatedProp = when (tool) {
         "Speed" -> PropId.SPEED
         "Volume" -> PropId.VOLUME
@@ -590,6 +591,10 @@ private fun ToolEditPanel(
                 horizontalAlignment = Alignment.CenterHorizontally) {
                 RailAction(IconKind.SLIDERS, true, enabled = false) { }
                 if (animatedProp != null) {
+                    RailAction(IconKind.GRAPH, showGraph) {
+                        editor.selectProp(animatedProp)
+                        showGraph = !showGraph
+                    }
                     Box(Modifier.padding(vertical = 5.dp).width(24.dp).height(1.dp).background(KColors.Line))
                     RailAction(if (hasAnimatedKey) IconKind.DIAMOND_FILLED else IconKind.DIAMOND, hasAnimatedKey, enabled = true) {
                         editor.selectProp(animatedProp)
@@ -598,7 +603,7 @@ private fun ToolEditPanel(
                 }
             }
             Box(Modifier.weight(1f).fillMaxHeight()) {
-                ToolPanelControls(tool, editor, layer, displayTime, onExtractAudio)
+                if (showGraph) GraphPanel(editor, layer) else ToolPanelControls(tool, editor, layer, displayTime, onExtractAudio)
             }
         }
     }
