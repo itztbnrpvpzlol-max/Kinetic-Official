@@ -124,10 +124,9 @@ private fun MaskPointWorkspace(editor: EditorState, layer: Layer, tool: String) 
         }
         Canvas(Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(6.dp))
             .background(KColors.Bg)
-            .pointerInput(layer.id, tool) {
-                val latestPending by rememberUpdatedState(pending)
+            .pointerInput(layer.id, tool, pending) {
                 detectTapGestures { p ->
-                    val candidate = latestPending ?: VectorPoint((p.x / size.width).coerceIn(0f, 1f), (p.y / size.height).coerceIn(0f, 1f))
+                    val candidate = pending ?: VectorPoint((p.x / size.width).coerceIn(0f, 1f), (p.y / size.height).coerceIn(0f, 1f))
                     editor.addMaskPoint(layer.id, candidate)
                     pending = null
                 }
@@ -161,10 +160,16 @@ private fun MaskValueRow(editor: EditorState, layer: Layer, label: String, id: P
     val value = layer.props[id]?.valueAt(editor.time) ?: fallback
     Row(Modifier.fillMaxWidth().height(29.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(label, color = if (editor.selectedProp == id) KColors.Accent else KColors.Text, fontSize = 10.sp,
-            modifier = Modifier.width(65.dp).clickable {\n                editor.updateLayer(layer.id, push = false) { current -> if (id in current.props) current else current.copy(props = current.props + (id to com.kinetic.app.model.Prop(fallback))) }\n                editor.selectProp(id)\n            })
+            modifier = Modifier.width(65.dp).clickable {
+                editor.updateLayer(layer.id, push = false) { current -> if (id in current.props) current else current.copy(props = current.props + (id to com.kinetic.app.model.Prop(fallback))) }
+                editor.selectProp(id)
+            })
         ScrubValueBar(label = "", value = value, modifier = Modifier.weight(1f), step = step,
             selected = editor.selectedProp == id, minValue = min, maxValue = max, valueFormat = format,
-            onSelect = {\n                editor.updateLayer(layer.id, push = false) { current -> if (id in current.props) current else current.copy(props = current.props + (id to com.kinetic.app.model.Prop(fallback))) }\n                editor.selectProp(id)\n            }) { next ->
+            onSelect = {
+                editor.updateLayer(layer.id, push = false) { current -> if (id in current.props) current else current.copy(props = current.props + (id to com.kinetic.app.model.Prop(fallback))) }
+                editor.selectProp(id)
+            }) { next ->
             editor.selectProp(id)
             editor.updateLayer(layer.id, push = false) { current ->
                 val old = current.maskPath ?: LayerMask()
