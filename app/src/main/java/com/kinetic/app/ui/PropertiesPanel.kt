@@ -20,7 +20,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.material3.Text
-import androidx.compose.material3.Slider
 import com.kinetic.app.model.EditorState
 import com.kinetic.app.model.Layer
 import com.kinetic.app.model.LayerType
@@ -78,7 +77,7 @@ fun PropertiesList(editor: EditorState, layer: Layer, onParent: () -> Unit) {
 }
 
 @Composable
-private fun PropertyLine(label: String, editor: EditorState, layer: Layer, ids: List<PropId>, onLongPress: (() -> Unit)? = null) {
+fun PropertyLine(label: String, editor: EditorState, layer: Layer, ids: List<PropId>, onLongPress: (() -> Unit)? = null) {
     Row(Modifier.fillMaxWidth().height(35.dp).padding(horizontal = 2.dp), verticalAlignment = Alignment.CenterVertically) {
         Row(Modifier.weight(1f).pointerInput(layer.id, layer.scaleLinked, layer.positionLinked, ids) {
             detectTapGestures(
@@ -130,12 +129,41 @@ private fun VectorPointLine(editor: EditorState, layer: Layer, index: Int, point
     var xEditing by remember(layer.id, index) { mutableStateOf(false) }
     var yEditing by remember(layer.id, index) { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
-        Text("Point ${index + 1}   X ${(point.x * 100).toInt()}%   Y ${(point.y * 100).toInt()}%", color = KColors.Text, fontSize = 9.sp, fontWeight = FontWeight.Medium)
+        Text("Point ${index + 1}", color = KColors.Text, fontSize = 9.sp, fontWeight = FontWeight.Medium)
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("X", color = KColors.Muted, fontSize = 9.sp, modifier = Modifier.width(14.dp))
-            Slider(value = point.x.coerceIn(0f, 1f), onValueChange = { if (!xEditing) { editor.beginEdit(); xEditing = true }; editor.updateShapePoint(layer.id, index, x = it) }, onValueChangeFinished = { xEditing = false }, valueRange = 0f..1f, modifier = Modifier.weight(1f))
-            Text("Y", color = KColors.Muted, fontSize = 9.sp, modifier = Modifier.width(14.dp))
-            Slider(value = point.y.coerceIn(0f, 1f), onValueChange = { if (!yEditing) { editor.beginEdit(); yEditing = true }; editor.updateShapePoint(layer.id, index, y = it) }, onValueChangeFinished = { yEditing = false }, valueRange = 0f..1f, modifier = Modifier.weight(1f))
+            ScrubValueBar("X", point.x, Modifier.weight(1f), step = 0.004f) {
+                if (!xEditing) { editor.beginEdit(); xEditing = true }
+                editor.updateShapePoint(layer.id, index, x = it)
+            }
+            Spacer(Modifier.width(5.dp))
+            ScrubValueBar("Y", point.y, Modifier.weight(1f), step = 0.004f) {
+                if (!yEditing) { editor.beginEdit(); yEditing = true }
+                editor.updateShapePoint(layer.id, index, y = it)
+            }
         }
+    }
+}
+
+
+@Composable
+fun ScrubValueBar(label: String, value: Float, modifier: Modifier = Modifier, step: Float = 0.5f, onValueChange: (Float) -> Unit) {
+    val density = LocalDensity.current.density
+    val latestValue by rememberUpdatedState(value)
+    val latestChange by rememberUpdatedState(onValueChange)
+    Box(
+        modifier.height(30.dp).clip(RoundedCornerShape(6.dp))
+            .background(KColors.Bg)
+            .border(1.dp, KColors.Line, RoundedCornerShape(6.dp))
+            .pointerInput(step) {
+                var scrubValue = latestValue
+                detectHorizontalDragGestures(onDragStart = { scrubValue = latestValue }) { change, drag ->
+                    change.consume()
+                    scrubValue = (scrubValue + drag / density * step).coerceIn(0f, 1f)
+                    latestChange(scrubValue)
+                }
+            },
+        contentAlignment = Alignment.Center
+    ) {
+        Text("$label  ${(value * 100f).toInt()}%", color = KColors.Text, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
     }
 }

@@ -44,7 +44,6 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.Slider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -345,14 +344,12 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
             }
             FloatingEditingDock(
                 dockTool,
-                activeLayer != null,
-                activeLayer?.props?.values?.any { prop -> prop.keys.isNotEmpty() } == true
+                activeLayer != null
             ) { tool ->
                 dockTool = tool
                 when (tool) {
                     "Select" -> { editor.select(null); showShapePanel = false; showToolPanel = false }
                     "Properties" -> if (activeLayer != null) { showToolPanel = false; showShapePanel = false; panelTab = 0; showPropertiesPanel = true }
-                    "Graph" -> if (activeLayer != null) { showToolPanel = false; showShapePanel = false; panelTab = 1; showPropertiesPanel = true }
                     "Speed", "Volume", "Extract audio", "Masking", "Effects", "Blending", "Blend modes" -> {
                         if (activeLayer != null) {
                             showPropertiesPanel = false
@@ -484,7 +481,7 @@ private fun TopBar(editor: EditorState, onMenuHome: () -> Unit, onOpenSettings: 
 
 
 @Composable
-private fun FloatingEditingDock(active: String, hasSelection: Boolean, hasGraphKeys: Boolean, onSelect: (String) -> Unit) {
+private fun FloatingEditingDock(active: String, hasSelection: Boolean, onSelect: (String) -> Unit) {
     // Keep Import inside the capsule, but visually separate it from the tools.
     val tools = if (hasSelection) {
         listOf(
@@ -496,7 +493,7 @@ private fun FloatingEditingDock(active: String, hasSelection: Boolean, hasGraphK
             "Effects" to IconKind.EFFECTS,
             "Blending" to IconKind.BLEND,
             "Blend modes" to IconKind.GRID
-        ) + if (hasGraphKeys) listOf("Graph" to IconKind.GRAPH) else emptyList()
+        )
     } else {
         listOf(
             "Select" to IconKind.SELECT,
@@ -593,7 +590,6 @@ private fun ToolEditPanel(
                 horizontalAlignment = Alignment.CenterHorizontally) {
                 RailAction(IconKind.SLIDERS, true, enabled = false) { }
                 if (animatedProp != null) {
-                    RailAction(IconKind.GRAPH, true) { editor.selectProp(animatedProp) }
                     Box(Modifier.padding(vertical = 5.dp).width(24.dp).height(1.dp).background(KColors.Line))
                     RailAction(if (hasAnimatedKey) IconKind.DIAMOND_FILLED else IconKind.DIAMOND, hasAnimatedKey, enabled = true) {
                         editor.selectProp(animatedProp)
@@ -602,131 +598,99 @@ private fun ToolEditPanel(
                 }
             }
             Box(Modifier.weight(1f).fillMaxHeight()) {
-                when (tool) {
-                    "Speed" -> SpeedRemapControls(editor, layer, displayTime)
-                    "Volume" -> AnimatedPropertyControls(editor, layer, displayTime, PropId.VOLUME, 0f..2f, listOf(0f, .5f, 1f, 1.5f, 2f), "VOLUME")
-                    "Blending" -> AnimatedPropertyControls(editor, layer, displayTime, PropId.OPACITY, 0f..100f, listOf(0f, 25f, 50f, 75f, 100f), "OPACITY")
-                    else -> DockToolControls(tool, editor, layer, onExtractAudio)
-                }
+                ToolPanelControls(tool, editor, layer, displayTime, onExtractAudio)
             }
         }
     }
 }
 
 @Composable
-private fun SpeedRemapControls(editor: EditorState, layer: Layer, displayTime: Float) {
-    var editing by remember(layer.id) { mutableStateOf(false) }
-    val speed = layer.p(PropId.SPEED).valueAt(displayTime).coerceIn(0.1f, 4f)
-    Column(Modifier.fillMaxSize().background(KColors.Surface).padding(horizontal = 9.dp, vertical = 4.dp)) {
-        Row(Modifier.fillMaxWidth().height(38.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.width(70.dp)) {
-                Text("SPEED", color = KColors.Muted, fontSize = 8.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-                Text(String.format("%.2f×", speed), color = KColors.Accent, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-            }
-            Slider(value = speed, onValueChange = {
-                if (!editing) { editor.beginEdit(); editing = true }
-                editor.setPropValue(layer.id, PropId.SPEED, it)
-            }, onValueChangeFinished = { editing = false }, valueRange = 0.1f..4f, modifier = Modifier.weight(1f))
-            Text("4×", color = KColors.Muted, fontSize = 9.sp, modifier = Modifier.padding(start = 4.dp))
-        }
-        Row(Modifier.fillMaxWidth().height(24.dp), horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
-            listOf(0.25f, 0.5f, 1f, 2f, 4f).forEach { preset ->
-                Box(Modifier.weight(1f).clip(RoundedCornerShape(6.dp))
-                    .background(if (kotlin.math.abs(speed - preset) < .01f) KColors.Accent.copy(alpha = .16f) else KColors.Bg)
-                    .border(1.dp, if (kotlin.math.abs(speed - preset) < .01f) KColors.Accent else KColors.Line, RoundedCornerShape(6.dp))
-                    .clickable { editor.beginEdit(); editor.setPropValue(layer.id, PropId.SPEED, preset) }.padding(vertical = 3.dp),
-                    contentAlignment = Alignment.Center) {
-                    Text("${preset}×", color = if (kotlin.math.abs(speed - preset) < .01f) KColors.Accent else KColors.Text, fontSize = 9.sp)
-                }
-            }
-            Text("TIME REMAP", color = KColors.Muted, fontSize = 8.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 4.dp))
-        }
-        GraphPanel(editor, layer, Modifier.weight(1f).fillMaxWidth())
-    }
-}
-
-@Composable
-private fun AnimatedPropertyControls(
-    editor: EditorState, layer: Layer, displayTime: Float, property: PropId,
-    range: ClosedFloatingPointRange<Float>, presets: List<Float>, heading: String
-) {
-    var editing by remember(layer.id, property) { mutableStateOf(false) }
-    val value = layer.p(property).valueAt(displayTime).coerceIn(range.start, range.endInclusive)
-    Column(Modifier.fillMaxSize().background(KColors.Surface).padding(horizontal = 9.dp, vertical = 4.dp)) {
-        Row(Modifier.fillMaxWidth().height(38.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.width(70.dp)) {
-                Text(heading, color = KColors.Muted, fontSize = 8.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-                Text(property.format(value), color = KColors.Accent, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-            }
-            Slider(value = value, onValueChange = {
-                if (!editing) { editor.beginEdit(); editing = true }
-                editor.setPropValue(layer.id, property, it)
-            }, onValueChangeFinished = { editing = false }, valueRange = range, modifier = Modifier.weight(1f))
-        }
-        Row(Modifier.fillMaxWidth().height(24.dp), horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
-            presets.forEach { preset ->
-                Box(Modifier.weight(1f).clip(RoundedCornerShape(6.dp))
-                    .background(if (kotlin.math.abs(value - preset) < .01f) KColors.Accent.copy(alpha = .16f) else KColors.Bg)
-                    .border(1.dp, if (kotlin.math.abs(value - preset) < .01f) KColors.Accent else KColors.Line, RoundedCornerShape(6.dp))
-                    .clickable { editor.beginEdit(); editor.setPropValue(layer.id, property, preset) }.padding(vertical = 3.dp),
-                    contentAlignment = Alignment.Center) {
-                    Text(property.format(preset), color = if (kotlin.math.abs(value - preset) < .01f) KColors.Accent else KColors.Text, fontSize = 8.sp)
-                }
-            }
-            Text("ANIMATION", color = KColors.Muted, fontSize = 8.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 3.dp))
-        }
-        GraphPanel(editor, layer, Modifier.weight(1f).fillMaxWidth())
-    }
-}
-@Composable
-private fun DockToolControls(
-    tool: String, editor: EditorState, layer: Layer,
-    onExtractAudio: () -> Unit
-) {
-    val displayTime = rememberEditorDisplayTime(editor)
-    var sliderEditing by remember(tool, layer.id) { mutableStateOf(false) }
-    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)) {
+private fun ToolPanelControls(tool: String, editor: EditorState, layer: Layer, displayTime: Float, onExtractAudio: () -> Unit) {
+    Column(Modifier.fillMaxSize().background(KColors.Surface).padding(horizontal = 12.dp, vertical = 7.dp),
+        verticalArrangement = Arrangement.spacedBy(5.dp)) {
         when (tool) {
             "Speed" -> {
-                Text("Playback speed  ·  ${String.format("%.2f×", layer.p(PropId.SPEED).valueAt(displayTime))}", color = KColors.Text, fontSize = 14.sp)
-                Slider(value = layer.p(PropId.SPEED).valueAt(displayTime).coerceIn(0.1f, 4f), onValueChange = { v -> if (!sliderEditing) { editor.beginEdit(); sliderEditing = true }; editor.setPropValue(layer.id, PropId.SPEED, v) }, onValueChangeFinished = { sliderEditing = false }, valueRange = 0.1f..4f)
-                Text("Applies to video preview and linked audio playback.", color = KColors.Muted, fontSize = 12.sp)
+                PropertyLine("Speed", editor, layer, listOf(PropId.SPEED))
+                Text("Remaps source time for video and linked audio.", color = KColors.Muted, fontSize = 9.sp)
+                ChoiceFloatUnitRow(listOf("0.25×" to .25f, "0.5×" to .5f, "1×" to 1f, "2×" to 2f, "4×" to 4f),
+                    layer.p(PropId.SPEED).valueAt(displayTime)) { editor.beginEdit(); editor.setPropValue(layer.id, PropId.SPEED, it) }
             }
             "Volume" -> {
-                val volume = layer.p(PropId.VOLUME).valueAt(displayTime).coerceIn(0f, 2f)
-                Text("Clip volume  ·  ${(volume * 100).toInt()}%", color = KColors.Text, fontSize = 14.sp)
-                Slider(value = volume, onValueChange = { v -> if (!sliderEditing) { editor.beginEdit(); sliderEditing = true }; editor.setPropValue(layer.id, PropId.VOLUME, v) }, onValueChangeFinished = { sliderEditing = false }, valueRange = 0f..2f)
-                Text("Audio layers use this level during playback.", color = KColors.Muted, fontSize = 12.sp)
+                PropertyLine("Volume", editor, layer, listOf(PropId.VOLUME))
+                Text("Audio level for this layer.", color = KColors.Muted, fontSize = 9.sp)
+                ChoiceFloatUnitRow(listOf("0%" to 0f, "25%" to .25f, "50%" to .5f, "100%" to 1f, "150%" to 1.5f, "200%" to 2f),
+                    layer.p(PropId.VOLUME).valueAt(displayTime)) { editor.beginEdit(); editor.setPropValue(layer.id, PropId.VOLUME, it) }
+            }
+            "Blending" -> {
+                PropertyLine("Opacity", editor, layer, listOf(PropId.OPACITY))
+                ChoiceFloatUnitRow(listOf("0%" to 0f, "25%" to 25f, "50%" to 50f, "75%" to 75f, "100%" to 100f),
+                    layer.p(PropId.OPACITY).valueAt(displayTime)) { editor.beginEdit(); editor.setPropValue(layer.id, PropId.OPACITY, it) }
             }
             "Extract audio" -> {
-                Text(if (layer.type == LayerType.VIDEO) "Create a linked audio layer using this video's audio track." else "Select a video layer to extract its audio.", color = KColors.Muted, fontSize = 13.sp)
-                DialogItem("Extract audio from video") { if (layer.type == LayerType.VIDEO) onExtractAudio() }
+                Text("EXTRACT AUDIO", color = KColors.Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                UnitAction("Extract audio from video", enabled = layer.type == LayerType.VIDEO, onClick = onExtractAudio)
             }
             "Masking" -> {
-                Text("Rectangular layer mask", color = KColors.Text, fontSize = 14.sp)
-                DialogItem((if (layer.maskEnabled) "✓  " else "") + "Enable mask (80% frame)") { editor.updateLayer(layer.id) { it.copy(maskEnabled = !it.maskEnabled) } }
+                Text("MASKING", color = KColors.Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                UnitAction(if (layer.maskEnabled) "Mask enabled" else "Enable mask", selected = layer.maskEnabled) {
+                    editor.updateLayer(layer.id) { it.copy(maskEnabled = !it.maskEnabled) }
+                }
             }
             "Effects" -> {
-                Text("Basic preview effect", color = KColors.Text, fontSize = 14.sp)
-                DialogItem((if ("Grayscale" in layer.effects) "✓  " else "") + "Toggle grayscale") {
+                val grayscale = "Grayscale" in layer.effects
+                Text("EFFECTS", color = KColors.Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                UnitAction(if (grayscale) "Grayscale on" else "Grayscale off", selected = grayscale) {
                     editor.updateLayer(layer.id) { it.copy(effects = if ("Grayscale" in it.effects) it.effects - "Grayscale" else it.effects + "Grayscale") }
                 }
             }
-            "Blending", "Blend modes" -> {
-                if (tool == "Blending") {
-                    val opacity = layer.p(PropId.OPACITY).valueAt(displayTime).coerceIn(0f, 100f)
-                    Text("Opacity  ·  ${opacity.toInt()}%", color = KColors.Text, fontSize = 14.sp)
-                    Slider(value = opacity, onValueChange = { if (!sliderEditing) { editor.beginEdit(); sliderEditing = true }; editor.setPropValue(layer.id, PropId.OPACITY, it) }, onValueChangeFinished = { sliderEditing = false }, valueRange = 0f..100f)
-                }
-                Text("Layer blend mode", color = KColors.Text, fontSize = 14.sp)
-                listOf("Normal", "Multiply", "Screen", "Add").forEach { mode ->
-                    DialogItem((if (layer.blendMode == mode) "✓  " else "") + mode) {
-                        editor.updateLayer(layer.id) { it.copy(blendMode = mode) }
-                    }
-                }
+            "Blend modes" -> {
+                Text("BLEND MODE", color = KColors.Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                ChoiceStringUnitRow(listOf("Normal" to "Normal", "Multiply" to "Multiply", "Screen" to "Screen", "Add" to "Add"),
+                    layer.blendMode) { mode -> editor.updateLayer(layer.id) { it.copy(blendMode = mode) } }
             }
         }
-        Spacer(Modifier.height(8.dp))
+    }
+}
+
+@Composable
+private fun ChoiceFloatUnitRow(choices: List<Pair<String, Float>>, value: Float, onSelect: (Float) -> Unit) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+        choices.forEach { (label, choice) ->
+            val selected = kotlin.math.abs(value - choice) < .01f
+            Box(Modifier.weight(1f).height(30.dp).clip(RoundedCornerShape(6.dp))
+                .background(if (selected) KColors.Accent.copy(alpha = .12f) else KColors.Bg)
+                .border(1.dp, if (selected) KColors.Accent.copy(alpha = .55f) else KColors.Line, RoundedCornerShape(6.dp))
+                .clickable { onSelect(choice) }, contentAlignment = Alignment.Center) {
+                Text(label, color = if (selected) KColors.Accent else KColors.Text, fontSize = 9.sp, fontWeight = FontWeight.SemiBold)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ChoiceStringUnitRow(choices: List<Pair<String, String>>, value: String, onSelect: (String) -> Unit) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+        choices.forEach { (label, choice) ->
+            val selected = value == choice
+            Box(Modifier.weight(1f).height(30.dp).clip(RoundedCornerShape(6.dp))
+                .background(if (selected) KColors.Accent.copy(alpha = .12f) else KColors.Bg)
+                .border(1.dp, if (selected) KColors.Accent.copy(alpha = .55f) else KColors.Line, RoundedCornerShape(6.dp))
+                .clickable { onSelect(choice) }, contentAlignment = Alignment.Center) {
+                Text(label, color = if (selected) KColors.Accent else KColors.Text, fontSize = 8.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+            }
+        }
+    }
+}
+
+@Composable
+private fun UnitAction(label: String, enabled: Boolean = true, selected: Boolean = false, onClick: () -> Unit) {
+    Box(Modifier.fillMaxWidth().height(32.dp).clip(RoundedCornerShape(6.dp))
+        .background(if (selected) KColors.Accent.copy(alpha = .12f) else KColors.Bg)
+        .border(1.dp, if (selected) KColors.Accent.copy(alpha = .55f) else KColors.Line, RoundedCornerShape(6.dp))
+        .clickable(enabled = enabled, onClick = onClick).padding(horizontal = 10.dp),
+        contentAlignment = Alignment.CenterStart) {
+        Text(label, color = if (enabled) (if (selected) KColors.Accent else KColors.Text) else KColors.Dim,
+            fontSize = 10.sp, fontWeight = FontWeight.Medium)
     }
 }
 

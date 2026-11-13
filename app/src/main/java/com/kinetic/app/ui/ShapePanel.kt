@@ -16,8 +16,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -131,27 +129,48 @@ fun ShapeLibraryPanel(onClose: () -> Unit, onSelect: (ShapePreset) -> Unit, modi
         Row(Modifier.weight(1f).fillMaxWidth()) {
             Column(Modifier.width(54.dp).fillMaxHeight().background(KColors.Bg).padding(vertical=5.dp),horizontalAlignment=Alignment.CenterHorizontally) {
                 categories.forEach { item ->
-                    val selected=category==item
-                    Box(Modifier.padding(vertical=3.dp).width(46.dp).height(34.dp).clip(RoundedCornerShape(7.dp))
-                        .background(if(selected) KColors.Accent.copy(alpha=.14f) else androidx.compose.ui.graphics.Color.Transparent)
-                        .clickable { category=item },contentAlignment=Alignment.Center) {
-                        Text(item.take(3).uppercase(),color=if(selected) KColors.Accent else KColors.Muted,fontSize=8.sp,fontWeight=FontWeight.Bold)
+                    val selected = category == item
+                    val icon = when (item) {
+                        "Basic" -> IconKind.SHAPES
+                        "Polygons" -> IconKind.GRID
+                        "Stars" -> IconKind.STAR
+                        "Arrows" -> IconKind.NEXT
+                        else -> IconKind.EFFECTS
+                    }
+                    Box(Modifier.padding(vertical = 3.dp).size(40.dp).clip(RoundedCornerShape(7.dp))
+                        .background(if (selected) KColors.Accent.copy(alpha = .14f) else androidx.compose.ui.graphics.Color.Transparent)
+                        .clickable { category = item }, contentAlignment = Alignment.Center) {
+                        KIcon(icon, if (selected) KColors.Accent else KColors.Muted, Modifier.size(19.dp))
                     }
                 }
             }
             LazyVerticalGrid(columns=GridCells.Adaptive(minSize=66.dp),modifier=Modifier.weight(1f).fillMaxHeight().padding(horizontal=7.dp,vertical=6.dp),
                 verticalArrangement=Arrangement.spacedBy(5.dp),horizontalArrangement=Arrangement.spacedBy(5.dp)) {
                 items(visible,key={it.name}) { preset ->
-                    Column(Modifier.height(65.dp).clip(RoundedCornerShape(8.dp)).background(KColors.Bg)
-                        .border(1.dp,KColors.Line,RoundedCornerShape(8.dp)).clickable { onSelect(preset) }.padding(5.dp),
-                        horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.Center) {
-                        Canvas(Modifier.weight(1f).fillMaxWidth()) {
-                            val path=Path()
-                            preset.points.forEachIndexed { i,p -> val o=Offset(p.x*size.width,p.y*size.height); if(i==0) path.moveTo(o.x,o.y) else path.lineTo(o.x,o.y) }
-                            path.close(); drawPath(path,KColors.Accent.copy(alpha=.88f))
-                            drawPath(path,KColors.Text.copy(alpha=.8f),style=Stroke(width=1.dp.toPx(),cap=StrokeCap.Round))
+                    Column(Modifier.height(78.dp).clip(RoundedCornerShape(8.dp))
+                        .background(KColors.Bg).clickable { onSelect(preset) }.padding(horizontal = 3.dp, vertical = 4.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Canvas(Modifier.size(46.dp)) {
+                            val minX = preset.points.minOfOrNull { it.x } ?: 0f
+                            val maxX = preset.points.maxOfOrNull { it.x } ?: 1f
+                            val minY = preset.points.minOfOrNull { it.y } ?: 0f
+                            val maxY = preset.points.maxOfOrNull { it.y } ?: 1f
+                            val spanX = (maxX - minX).coerceAtLeast(.001f)
+                            val spanY = (maxY - minY).coerceAtLeast(.001f)
+                            val scale = minOf(size.width * .82f / spanX, size.height * .82f / spanY)
+                            val left = (size.width - spanX * scale) / 2f
+                            val top = (size.height - spanY * scale) / 2f
+                            val path = Path()
+                            preset.points.forEachIndexed { i, point ->
+                                val x = left + (point.x - minX) * scale
+                                val y = top + (point.y - minY) * scale
+                                if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+                            }
+                            path.close()
+                            drawPath(path, KColors.Muted)
                         }
-                        Text(preset.name,color=KColors.Text,fontSize=8.sp,maxLines=1,textAlign=TextAlign.Center)
+                        Text(preset.name, color = KColors.Text, fontSize = 8.sp, maxLines = 1, textAlign = TextAlign.Center)
                     }
                 }
             }
