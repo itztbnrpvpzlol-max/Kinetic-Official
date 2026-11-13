@@ -62,10 +62,8 @@ fun GraphPanel(editor: EditorState, layer: Layer, modifier: Modifier = Modifier)
     val currentLayer = editor.layers.firstOrNull { it.id == layer.id } ?: layer
     // Keep spatial position channels out of the graph editor; use it for
     // animated visual properties such as scale, rotation, opacity and anchors.
-    val animated = PropId.values().filter {
-        it !in setOf(PropId.POS_X, PropId.POS_Y) &&
-            currentLayer.p(it).keys.isNotEmpty()
-    }
+    // Keep the graph bound to the property selected in Properties, including Position X/Y.
+    val animated = PropId.values().filter { currentLayer.p(it).keys.isNotEmpty() }
     val selected = editor.selectedProp?.takeIf { it in animated }
         ?: animated.firstOrNull()
         ?: PropId.OPACITY
@@ -269,7 +267,7 @@ private fun GraphCanvas(
         modifier.clipToBounds().pointerInput(mode, segment) {
             var activeHandle = 0
             var activeKey = -1
-            val pad = 0f
+            val pad = 10.dp.toPx()
             val inset = 0f
             val left = pad + inset
             val right = size.width - pad - inset
@@ -320,7 +318,7 @@ private fun GraphCanvas(
             }
         }
     ) {
-        val pad = 0f
+        val pad = 10.dp.toPx()
         val inset = 0f
         val left = pad + inset
         val right = size.width - pad - inset

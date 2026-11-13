@@ -229,7 +229,8 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
         Canvas(Modifier.fillMaxSize()) {
             // Keep the playhead aligned with the center Preview play/pause control,
             // not the center of the timeline viewport (which excludes the layer column).
-            val x = leftPx + leadingPadPx + editor.time * pps * dens - hScroll.value
+            // The playhead is the fixed center marker, aligned with PreviewToolsBar's centered transport.
+            val x = size.width / 2f
             if (x >= leftPx - 1f && x <= size.width) {
                 drawLine(Color.White, Offset(x, 14.dp.toPx()), Offset(x, size.height), 2.dp.toPx())
                 val tri = Path().apply {
