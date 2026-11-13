@@ -123,7 +123,12 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
     // The track viewport starts immediately after the resizable layer-controls column.
     // Time zero is anchored at that edge; the playhead follows the actual timeline time.
     val viewportW = ((paneW - leftPx).coerceAtLeast(0f) / dens).dp
-    val contentW = viewportW + (contentSec * pps).dp + 48.dp
+    // Give time zero a real leading margin so the playhead can sit on the transport center from frame zero.
+    // The trailing margin provides the same centered view at the end of the composition.
+    val leadingPadPx = (paneW / 2f - leftPx).coerceAtLeast(0f)
+    val leadingPad = (leadingPadPx / dens).dp
+    val trailingPad = (viewportW.value / 2f).dp
+    val contentW = viewportW + leadingPad + (contentSec * pps).dp + trailingPad
 
     // Center the playhead under the preview transport's play control.
     // During playback, sample auto-scroll at the composition frame cadence.
@@ -134,7 +139,7 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
             .let { times -> if (editor.playing) times.sample(autoScrollIntervalMs) else times }
             .collect { time ->
                 if (paneW > leftPx) {
-                    val playheadX = leftPx + time * pps * dens
+                    val playheadX = leftPx + leadingPadPx + time * pps * dens
                     val target = (playheadX - paneW / 2f).coerceAtLeast(0f)
                     val delta = target - hScroll.value.toFloat()
                     if (kotlin.math.abs(delta) > 0.5f) hScroll.dispatchRawDelta(delta)
@@ -157,7 +162,7 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
                     if (timelineDrag) {
                         change.consume()
                         hScroll.dispatchRawDelta(-drag.x)
-                        val centeredTime = (hScroll.value + paneW / 2f - leftPx) / dens / pps
+                        val centeredTime = (hScroll.value + paneW / 2f - leftPx - leadingPadPx) / dens / pps
                         editor.seek(centeredTime.coerceAtLeast(0f))
                     }
                 }
@@ -167,7 +172,7 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
             Row(Modifier.fillMaxWidth().height(30.dp)) {
                 Spacer(Modifier.width(leftW))
                 Box(Modifier.weight(1f).fillMaxHeight().horizontalScroll(hScroll)) {
-                    Ruler(editor, pps, contentW)
+                    Ruler(editor, pps, contentW, leadingPad)
                 }
             }
             LazyColumn(
@@ -189,7 +194,7 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
                     }
                 }
                 items(editor.layers, key = { it.id }) { layer ->
-                    LayerRow(editor, layer, pps, hScroll, contentW, leftW)
+                    LayerRow(editor, layer, pps, hScroll, contentW, leftW, leadingPad)
                 }
             }
         }
@@ -211,7 +216,7 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
         Canvas(Modifier.fillMaxSize()) {
             // Keep the playhead aligned with the center Preview play/pause control,
             // not the center of the timeline viewport (which excludes the layer column).
-            val x = leftPx + editor.time * pps * dens - hScroll.value
+            val x = leftPx + leadingPadPx + editor.time * pps * dens - hScroll.value
             if (x >= leftPx - 1f && x <= size.width) {
                 drawLine(Color.White, Offset(x, 14.dp.toPx()), Offset(x, size.height), 2.dp.toPx())
                 val tri = Path().apply {
@@ -227,7 +232,7 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun Ruler(editor: EditorState, pps: Float, contentW: Dp) {
+private fun Ruler(editor: EditorState, pps: Float, contentW: Dp, leadingPad: Dp) {
     val dens = LocalDensity.current.density
     val textPaint = remember {
         Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF8D8BA3.toInt() }
@@ -236,11 +241,11 @@ private fun Ruler(editor: EditorState, pps: Float, contentW: Dp) {
         Modifier
             .width(contentW)
             .fillMaxHeight()
-            .pointerInput(pps) { detectTapGestures { o -> editor.seekSnap((o.x / dens / pps).coerceAtLeast(0f), 8f / pps) } }
-            .pointerInput(pps) {
+            .pointerInput(pps, leadingPad) { detectTapGestures { o -> editor.seekSnap(((o.x / dens - leadingPad.value) / pps).coerceAtLeast(0f), 8f / pps) } }
+            .pointerInput(pps, leadingPad) {
                 detectDragGestures { change, _ ->
                     change.consume()
-                    editor.seekSnap((change.position.x / dens / pps).coerceAtLeast(0f), 8f / pps)
+                    editor.seekSnap(((change.position.x / dens - leadingPad.value) / pps).coerceAtLeast(0f), 8f / pps)
                 }
             }
     ) {
@@ -248,7 +253,7 @@ private fun Ruler(editor: EditorState, pps: Float, contentW: Dp) {
         val step = if (pps >= 40f) 1 else if (pps >= 20f) 2 else 5
         val secs = (size.width / dens / pps).toInt() + 1
         val tick = Color(0xFF34344A)
-        val originX = 0f
+        val originX = leadingPad.value * dens
         val endX = originX + editor.duration * pps * dens
         if (endX < size.width) drawRect(Color(0x55000000), Offset(endX, 0f), Size(size.width - endX, size.height))
         for (s in 0..secs) {
@@ -267,7 +272,7 @@ private fun Ruler(editor: EditorState, pps: Float, contentW: Dp) {
 
 @Composable
 private fun LayerRow(
-    editor: EditorState, layer: Layer, pps: Float, hScroll: ScrollState, contentW: Dp, leftW: Dp
+    editor: EditorState, layer: Layer, pps: Float, hScroll: ScrollState, contentW: Dp, leftW: Dp, leadingPad: Dp
 ) {
     val selected = editor.selectedId == layer.id
     val hasLayerKeyframes = layer.props.values.any { it.keys.isNotEmpty() }
@@ -334,7 +339,7 @@ private fun LayerRow(
                 }
             }
             Box(Modifier.weight(1f).fillMaxHeight().horizontalScroll(hScroll)) {
-                Box(Modifier.width(contentW).fillMaxHeight()) { Clip(editor, layer, pps, selected) }
+                Box(Modifier.width(contentW).fillMaxHeight()) { Clip(editor, layer, pps, selected, leadingPad) }
             }
         }
         if (selected && hasLayerKeyframes) {
@@ -342,7 +347,7 @@ private fun LayerRow(
                 .filter { it.value.keys.isNotEmpty() }
                 .sortedBy { it.key.ordinal }
                 .forEach { (propId, prop) ->
-                    KeyframeTrackRow(editor, layer, propId, prop.keys, pps, hScroll, contentW, leftW)
+                    KeyframeTrackRow(editor, layer, propId, prop.keys, pps, hScroll, contentW, leftW, leadingPad)
                 }
         }
         val parentName = layer.parentId?.let { id -> editor.layers.firstOrNull { it.id == id }?.name }
@@ -364,11 +369,12 @@ private fun KeyframeTrackRow(
     pps: Float,
     hScroll: ScrollState,
     contentW: Dp,
-    leftW: Dp
+    leftW: Dp,
+    leadingPad: Dp
 ) {
     val dens = LocalDensity.current.density
     Row(
-        Modifier.fillMaxWidth().height(22.dp).background(KColors.Bg),
+        Modifier.fillMaxWidth().height(28.dp).background(KColors.Bg),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(
@@ -386,9 +392,9 @@ private fun KeyframeTrackRow(
         Box(Modifier.weight(1f).fillMaxHeight().horizontalScroll(hScroll)) {
             Canvas(
                 Modifier.width(contentW).fillMaxHeight()
-                    .pointerInput(layer.id, propId, keys, pps) {
+                     .pointerInput(layer.id, propId, keys, pps, leadingPad) {
                         detectTapGestures { tap ->
-                            val time = (tap.x / dens / pps).coerceAtLeast(0f)
+                            val time = ((tap.x / dens - leadingPad.value) / pps).coerceAtLeast(0f)
                             val nearest = keys.minByOrNull { abs(it.t - time) }
                             if (nearest != null) {
                                 editor.select(layer.id)
@@ -400,8 +406,8 @@ private fun KeyframeTrackRow(
             ) {
                 val centerY = size.height / 2f
                 keys.forEach { key ->
-                    val x = key.t * pps * dens
-                    val r = 4.dp.toPx()
+                    val x = leadingPad.value * dens + key.t * pps * dens
+                    val r = 5.dp.toPx()
                     val diamond = Path().apply {
                         moveTo(x, centerY - r)
                         lineTo(x + r, centerY)
@@ -417,7 +423,7 @@ private fun KeyframeTrackRow(
 }
 
 @Composable
-private fun Clip(editor: EditorState, layer: Layer, pps: Float, selected: Boolean) {
+private fun Clip(editor: EditorState, layer: Layer, pps: Float, selected: Boolean, leadingPad: Dp) {
     val ctx = LocalContext.current
     val dens = LocalDensity.current.density
     val shape = RoundedCornerShape(8.dp)
@@ -451,7 +457,7 @@ private fun Clip(editor: EditorState, layer: Layer, pps: Float, selected: Boolea
     val dashed = layer.type == LayerType.ADJUSTMENT || layer.type == LayerType.NULL
     Box(
         Modifier
-            .offset(x = (layer.start * pps).dp)
+             .offset(x = leadingPad + (layer.start * pps).dp)
             .width(max(layer.duration * pps, 6f).dp)
             .fillMaxHeight()
             .padding(vertical = 3.dp)

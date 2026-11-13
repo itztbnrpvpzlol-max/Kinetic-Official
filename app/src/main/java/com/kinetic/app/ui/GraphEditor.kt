@@ -71,33 +71,33 @@ fun GraphPanel(editor: EditorState, layer: Layer, modifier: Modifier = Modifier)
 
     Column(modifier.fillMaxSize().background(KColors.Surface)) {
         Row(
-            Modifier.fillMaxWidth().height(42.dp).padding(horizontal = 12.dp),
+            Modifier.fillMaxWidth().height(36.dp).padding(horizontal = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column(Modifier.weight(1f)) {
-                Text("GRAPH EDITOR", color = KColors.Text, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-                Text(selected.label, color = KColors.Muted, fontSize = 9.sp)
-            }
+            Text(selected.label, color = KColors.Text, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.weight(1f), maxLines = 1)
             GraphModeButton("Ease", mode == GraphMode.EASE) { mode = GraphMode.EASE }
-            Spacer(Modifier.width(5.dp))
+            Spacer(Modifier.width(4.dp))
             GraphModeButton("Value", mode == GraphMode.VALUE) { mode = GraphMode.VALUE }
-            Spacer(Modifier.width(5.dp))
+            Spacer(Modifier.width(4.dp))
             GraphModeButton("Speed", mode == GraphMode.SPEED) { mode = GraphMode.SPEED }
         }
 
         if (animated.size > 1) {
             Row(
-                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 10.dp, vertical = 5.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                Modifier.fillMaxWidth().height(32.dp).horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 8.dp, vertical = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 animated.forEach { id ->
                     val active = id == selected
                     Box(
-                        Modifier.clip(RoundedCornerShape(7.dp))
+                        Modifier.clip(RoundedCornerShape(6.dp))
                             .background(if (active) KColors.Accent.copy(alpha = 0.16f) else KColors.Bg)
-                            .border(1.dp, if (active) KColors.Accent.copy(alpha = 0.6f) else KColors.Line, RoundedCornerShape(7.dp))
+                            .border(1.dp, if (active) KColors.Accent.copy(alpha = 0.6f) else KColors.Line, RoundedCornerShape(6.dp))
                             .clickable { editor.selectProp(id) }
-                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                            .padding(horizontal = 8.dp, vertical = 5.dp)
                     ) {
                         Text(id.label, color = if (active) KColors.Accent else KColors.Muted, fontSize = 9.sp)
                     }
@@ -106,112 +106,90 @@ fun GraphPanel(editor: EditorState, layer: Layer, modifier: Modifier = Modifier)
         }
 
         if (keys.size < 2) {
-            Box(Modifier.weight(1f).fillMaxWidth().padding(22.dp), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Box(Modifier.weight(1f).fillMaxWidth().padding(18.dp), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(7.dp)) {
                     Text(
                         if (keys.isEmpty()) "No keyframes on ${selected.label}" else "Add a second keyframe to shape a transition",
-                        color = KColors.Text, fontSize = 14.sp, textAlign = TextAlign.Center
+                        color = KColors.Text, fontSize = 13.sp, textAlign = TextAlign.Center
                     )
                     Text("Add another keyframe from the timeline or the diamond control.",
                         color = KColors.Muted, fontSize = 10.sp, textAlign = TextAlign.Center)
                 }
             }
         } else {
-            Row(
-                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 10.dp, vertical = 5.dp),
-                horizontalArrangement = Arrangement.spacedBy(5.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                keys.zipWithNext().forEachIndexed { index, pair ->
-                    val active = index == segment
-                    Box(
-                        Modifier.clip(RoundedCornerShape(6.dp))
-                            .background(if (active) KColors.Accent.copy(alpha = 0.16f) else KColors.Bg)
-                            .border(1.dp, if (active) KColors.Accent else KColors.Line, RoundedCornerShape(6.dp))
-                            .clickable { editor.selectKey(selected, index, pair.first.t) }
-                            .padding(horizontal = 9.dp, vertical = 5.dp)
-                    ) {
-                        Text("K${index + 1} → K${index + 2}", color = if (active) KColors.Accent else KColors.Muted, fontSize = 9.sp)
-                    }
-                }
-            }
-
-            GraphCanvas(
-                modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(KColors.Bg)
-                    .border(1.dp, KColors.Line, RoundedCornerShape(12.dp)),
-                mode = mode,
-                keys = keys,
-                segment = segment,
-                property = selected,
-                layer = currentLayer,
-                onBeginEdit = { editor.beginEdit() },
-                onHandleChange = { handle, x, y ->
-                    if (segment in 0 until keys.lastIndex) {
-                        val key = keys[segment]
-                        val gap = 0.015f
-                        val updated = when (handle) {
-                            1 -> key.copy(
-                                type = KeyType.BEZIER,
-                                x1 = x.coerceIn(0f, (key.x2 - gap).coerceAtLeast(0f)),
-                                y1 = y.coerceIn(-0.25f, 1.25f)
-                            )
-                            else -> key.copy(
-                                type = KeyType.BEZIER,
-                                x2 = x.coerceIn((key.x1 + gap).coerceAtMost(1f), 1f),
-                                y2 = y.coerceIn(-0.25f, 1.25f)
-                            )
+            Row(Modifier.weight(1f).fillMaxWidth().padding(start = 8.dp, end = 7.dp, top = 4.dp, bottom = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                GraphCanvas(
+                    modifier = Modifier.weight(1f).fillMaxHeight()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(KColors.Bg)
+                        .border(1.dp, KColors.Line, RoundedCornerShape(10.dp)),
+                    mode = mode,
+                    keys = keys,
+                    segment = segment,
+                    property = selected,
+                    layer = currentLayer,
+                    onBeginEdit = { editor.beginEdit() },
+                    onHandleChange = { handle, x, y ->
+                        if (segment in 0 until keys.lastIndex) {
+                            val key = keys[segment]
+                            val gap = 0.015f
+                            val updated = when (handle) {
+                                1 -> key.copy(type = KeyType.BEZIER,
+                                    x1 = x.coerceIn(0f, (key.x2 - gap).coerceAtLeast(0f)),
+                                    y1 = y.coerceIn(-0.25f, 1.25f))
+                                else -> key.copy(type = KeyType.BEZIER,
+                                    x2 = x.coerceIn((key.x1 + gap).coerceAtMost(1f), 1f),
+                                    y2 = y.coerceIn(-0.25f, 1.25f))
+                            }
+                            editor.replaceKey(layer.id, selected, segment, updated, push = false)
                         }
-                        editor.replaceKey(layer.id, selected, segment, updated, push = false)
+                    },
+                    onKeyValueChange = { index, value ->
+                        if (index in keys.indices) {
+                            editor.replaceKey(layer.id, selected, index, keys[index].copy(v = value), push = false)
+                        }
                     }
-                },
-                onKeyValueChange = { index, value ->
-                    if (index in keys.indices) {
-                        editor.replaceKey(layer.id, selected, index, keys[index].copy(v = value), push = false)
-                    }
-                }
-            )
+                )
 
-            if (mode == GraphMode.EASE) {
-                Row(
-                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 10.dp, vertical = 5.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    graphPresets.forEach { preset ->
-                        GraphPresetChip(preset, segmentKey?.let {
-                            it.type == preset.type &&
-                                (preset.type == KeyType.LINEAR ||
-                                    (abs(it.x1 - preset.x1) < 0.025f && abs(it.y1 - preset.y1) < 0.025f &&
-                                     abs(it.x2 - preset.x2) < 0.025f && abs(it.y2 - preset.y2) < 0.025f))
-                        } == true) {
-                            if (segment >= 0) {
-                                editor.beginEdit()
-                                editor.replaceKey(
-                                    layer.id, selected, segment,
-                                    keys[segment].copy(
-                                        type = preset.type, x1 = preset.x1, y1 = preset.y1,
-                                        x2 = preset.x2, y2 = preset.y2
-                                    ), push = false
-                                )
+                if (mode == GraphMode.EASE) {
+                    Column(
+                        Modifier.width(102.dp).fillMaxHeight()
+                            .clip(RoundedCornerShape(9.dp)).background(KColors.Bg)
+                            .border(1.dp, KColors.Line, RoundedCornerShape(9.dp))
+                            .verticalScroll(rememberScrollState()).padding(5.dp),
+                        verticalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        Text("PRESETS", color = KColors.Muted, fontSize = 8.sp, fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(start = 3.dp, top = 2.dp))
+                        graphPresets.forEach { preset ->
+                            GraphPresetChip(preset, segmentKey?.let {
+                                it.type == preset.type &&
+                                    (preset.type == KeyType.LINEAR ||
+                                        (abs(it.x1 - preset.x1) < 0.025f && abs(it.y1 - preset.y1) < 0.025f &&
+                                         abs(it.x2 - preset.x2) < 0.025f && abs(it.y2 - preset.y2) < 0.025f))
+                            } == true) {
+                                if (segment >= 0) {
+                                    editor.beginEdit()
+                                    editor.replaceKey(layer.id, selected, segment,
+                                        keys[segment].copy(type = preset.type, x1 = preset.x1, y1 = preset.y1,
+                                            x2 = preset.x2, y2 = preset.y2), push = false)
+                                }
                             }
                         }
                     }
                 }
-                Text(
-                    if (hasBezier) "Drag either colored control point. Each handle moves independently."
-                    else "Linear segment · choose an easing preset to reveal its two Bézier handles.",
-                    color = KColors.Muted, fontSize = 9.sp,
-                    modifier = Modifier.fillMaxWidth().padding(start = 13.dp, end = 13.dp, bottom = 8.dp)
-                )
-            } else {
-                Text(
-                    if (mode == GraphMode.VALUE) "Drag a keyframe point vertically to change its value."
-                    else "Speed is derived from the selected segment's value curve.",
-                    color = KColors.Muted, fontSize = 9.sp,
-                    modifier = Modifier.fillMaxWidth().padding(start = 13.dp, end = 13.dp, bottom = 8.dp)
-                )
             }
+            Text(
+                when (mode) {
+                    GraphMode.EASE -> if (hasBezier) "Drag either control point to shape the curve." else "Choose a preset, then drag its control points."
+                    GraphMode.VALUE -> "Drag a keyframe point vertically to change its value."
+                    GraphMode.SPEED -> "Speed is derived from the selected segment's value curve."
+                },
+                color = KColors.Muted, fontSize = 9.sp,
+                modifier = Modifier.fillMaxWidth().height(20.dp).padding(horizontal = 10.dp, vertical = 2.dp),
+                maxLines = 1
+            )
         }
     }
 }
@@ -231,15 +209,15 @@ private fun GraphModeButton(label: String, selected: Boolean, onClick: () -> Uni
 
 @Composable
 private fun GraphPresetChip(preset: GraphPreset, selected: Boolean, onClick: () -> Unit) {
-    Row(
-        Modifier.height(34.dp).clip(RoundedCornerShape(8.dp))
-            .background(if (selected) KColors.Accent.copy(alpha = 0.16f) else KColors.Bg)
-            .border(1.dp, if (selected) KColors.Accent else KColors.Line, RoundedCornerShape(8.dp))
-            .clickable(onClick = onClick).padding(horizontal = 9.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(7.dp))
+            .background(if (selected) KColors.Accent.copy(alpha = 0.16f) else KColors.Surface)
+            .border(1.dp, if (selected) KColors.Accent else KColors.Line, RoundedCornerShape(7.dp))
+            .clickable(onClick = onClick).padding(vertical = 6.dp, horizontal = 3.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(3.dp)
     ) {
-        Canvas(Modifier.size(27.dp, 20.dp)) {
+        Canvas(Modifier.fillMaxWidth().height(22.dp).padding(horizontal = 8.dp)) {
             val path = Path()
             val left = 1.dp.toPx()
             val right = size.width - left
@@ -251,9 +229,11 @@ private fun GraphPresetChip(preset: GraphPreset, selected: Boolean, onClick: () 
                 val p = Offset(left + (right - left) * u, bottom - (bottom - top) * v)
                 if (i == 0) path.moveTo(p.x, p.y) else path.lineTo(p.x, p.y)
             }
-            drawPath(path, if (selected) KColors.Accent else KColors.Text, style = Stroke(1.7.dp.toPx(), cap = StrokeCap.Round))
+            drawPath(path, if (selected) KColors.Accent else KColors.Text,
+                style = Stroke(1.7.dp.toPx(), cap = StrokeCap.Round))
         }
-        Text(preset.label, color = if (selected) KColors.Accent else KColors.Text, fontSize = 9.sp, maxLines = 1)
+        Text(preset.label, color = if (selected) KColors.Accent else KColors.Text,
+            fontSize = 8.sp, maxLines = 1, textAlign = TextAlign.Center)
     }
 }
 
