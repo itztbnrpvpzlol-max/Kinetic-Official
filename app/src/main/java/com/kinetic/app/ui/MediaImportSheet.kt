@@ -256,7 +256,7 @@ fun MediaImportSheet(
             } else if (tab == 0) {
                 Column(Modifier.fillMaxWidth().wrapContentHeight().clipToBounds().padding(horizontal = 12.dp, vertical = 8.dp)) {
                     Box(
-                        Modifier.fillMaxWidth().height(if (selected == null) 106.dp else 184.dp)
+                        Modifier.fillMaxWidth().height(if (selected == null) 114.dp else 199.dp)
                             .clip(RoundedCornerShape(12.dp)).background(KColors.Surface2),
                         contentAlignment = Alignment.Center
                     ) {
@@ -283,14 +283,14 @@ fun MediaImportSheet(
                                     KColors.Text, Modifier.size(24.dp)
                                 )
                             }
-                            Box(
-                                Modifier.align(Alignment.BottomCenter).fillMaxWidth()
-                                    .padding(horizontal = 8.dp, vertical = 8.dp)
-                            ) {
-                                ImportTrimFilmstrip(item = selected!!, trim = trim,
-                                    onTrimChange = { trim = it })
-                            }
                         }
+                    }
+                    if (selected?.type == LayerType.VIDEO) {
+                        ImportTrimFilmstrip(
+                            item = selected!!,
+                            trim = trim,
+                            onTrimChange = { trim = it }
+                        )
                     }
                     if (selected?.type == LayerType.IMAGE) {
                         Text("Image selected", color = KColors.Muted, fontSize = 11.sp,
