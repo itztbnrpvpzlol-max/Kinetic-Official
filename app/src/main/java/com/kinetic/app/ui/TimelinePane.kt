@@ -202,7 +202,6 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
                             }
                         }
                     }
-                    }
                 }
             }
     ) {
