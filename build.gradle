@@ -1,0 +1,22 @@
+plugins {
+    id 'base'
+}
+
+tasks.register('buildPatchedApk') {
+    group = 'build'
+    description = 'Decode Aurea, patch GLES shader headers, rebuild and sign the APK with Apktool.'
+    inputs.file('apks/Aurea-0.4.7-32bits.apk.gz')
+    inputs.file('scripts/patch_aurea_shader_headers.py')
+    inputs.file('scripts/build_aurea_gradle.sh')
+    outputs.file(layout.buildDirectory.file('outputs/apk/Aurea-0.4.7-GLES-patched.apk'))
+
+    doLast {
+        exec {
+            commandLine 'bash', 'scripts/build_aurea_gradle.sh'
+        }
+    }
+}
+
+tasks.named('build') {
+    dependsOn tasks.named('buildPatchedApk')
+}
