@@ -84,7 +84,6 @@ fun GraphPanel(editor: EditorState, layer: Layer, modifier: Modifier = Modifier)
                 (item.first == "Scale" && selectedProp in setOf(PropId.SCALE_X, PropId.SCALE_Y))
         }?.second
     } ?: graphItems.firstOrNull()?.second ?: PropId.OPACITY
-    val isPositionGraph = selected == PropId.POS_X || selected == PropId.POS_Y
     var mode by remember(layer.id) { mutableStateOf(GraphMode.EASE) }
     val prop = currentLayer.p(selected)
     val keys = prop.keys
@@ -94,37 +93,37 @@ fun GraphPanel(editor: EditorState, layer: Layer, modifier: Modifier = Modifier)
 
     Column(modifier.fillMaxSize().background(KColors.Surface)) {
         Row(
-            Modifier.fillMaxWidth().height(28.dp).padding(horizontal = 8.dp),
-            horizontalArrangement = Arrangement.End,
+            Modifier.fillMaxWidth().height(34.dp).padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            if (graphItems.size > 1) {
+                Row(
+                    Modifier.weight(1f).horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    graphItems.forEach { (label, id) ->
+                        val active = id == selected
+                        Box(
+                            Modifier.clip(RoundedCornerShape(6.dp))
+                                .background(if (active) KColors.Accent.copy(alpha = 0.16f) else KColors.Bg)
+                                .border(1.dp, if (active) KColors.Accent.copy(alpha = 0.6f) else KColors.Line, RoundedCornerShape(6.dp))
+                                .clickable { editor.selectProp(id) }
+                                .padding(horizontal = 8.dp, vertical = 5.dp)
+                        ) {
+                            Text(label, color = if (active) KColors.Accent else KColors.Muted, fontSize = 9.sp)
+                        }
+                    }
+                }
+                Spacer(Modifier.width(6.dp))
+            } else {
+                Spacer(Modifier.weight(1f))
+            }
             GraphModeButton("Ease", mode == GraphMode.EASE) { mode = GraphMode.EASE }
             Spacer(Modifier.width(4.dp))
             GraphModeButton("Value", mode == GraphMode.VALUE) { mode = GraphMode.VALUE }
             Spacer(Modifier.width(4.dp))
             GraphModeButton("Speed", mode == GraphMode.SPEED) { mode = GraphMode.SPEED }
-        }
-
-        if (graphItems.size > 1) {
-            Row(
-                Modifier.fillMaxWidth().height(28.dp).horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(5.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                graphItems.forEach { (label, id) ->
-                    val active = id == selected
-                    Box(
-                        Modifier.clip(RoundedCornerShape(6.dp))
-                            .background(if (active) KColors.Accent.copy(alpha = 0.16f) else KColors.Bg)
-                            .border(1.dp, if (active) KColors.Accent.copy(alpha = 0.6f) else KColors.Line, RoundedCornerShape(6.dp))
-                            .clickable { editor.selectProp(id) }
-                            .padding(horizontal = 8.dp, vertical = 5.dp)
-                    ) {
-                        Text(label, color = if (active) KColors.Accent else KColors.Muted, fontSize = 9.sp)
-                    }
-                }
-            }
         }
 
         if (keys.size < 2) {
@@ -163,29 +162,13 @@ fun GraphPanel(editor: EditorState, layer: Layer, modifier: Modifier = Modifier)
                                     y2 = y.coerceIn(0f, 1f))
                             }
                             editor.replaceKey(layer.id, selected, segment, updated, push = false)
-                            if (isPositionGraph) {
-                                val other = if (selected == PropId.POS_X) PropId.POS_Y else PropId.POS_X
-                                val otherKeys = editor.selected?.p(other)?.keys.orEmpty()
-                                val paired = otherKeys.indexOfFirst { abs(it.t - key.t) <= editor.frame / 2f }
-                                if (paired >= 0) editor.replaceKey(layer.id, other, paired, otherKeys[paired].copy(
-                                    type = updated.type, x1 = updated.x1, y1 = updated.y1,
-                                    x2 = updated.x2, y2 = updated.y2
-                                ), push = false)
-                            }
+
                         }
                     },
                     onKeyValueChange = { index, value ->
                         if (index in keys.indices) {
                             editor.replaceKey(layer.id, selected, index, keys[index].copy(v = value), push = false)
-                            if (isPositionGraph) {
-                                val other = if (selected == PropId.POS_X) PropId.POS_Y else PropId.POS_X
-                                val otherKeys = editor.selected?.p(other)?.keys.orEmpty()
-                                val paired = otherKeys.indexOfFirst { abs(it.t - keys[index].t) <= editor.frame / 2f }
-                                if (paired >= 0) {
-                                    val delta = value - keys[index].v
-                                    editor.replaceKey(layer.id, other, paired, otherKeys[paired].copy(v = otherKeys[paired].v + delta), push = false)
-                                }
-                            }
+
                         }
                     }
                 )
@@ -212,15 +195,7 @@ fun GraphPanel(editor: EditorState, layer: Layer, modifier: Modifier = Modifier)
                                     val updated = keys[segment].copy(type = preset.type, x1 = preset.x1, y1 = preset.y1,
                                         x2 = preset.x2, y2 = preset.y2)
                                     editor.replaceKey(layer.id, selected, segment, updated, push = false)
-                                    if (isPositionGraph) {
-                                        val other = if (selected == PropId.POS_X) PropId.POS_Y else PropId.POS_X
-                                        val otherKeys = editor.selected?.p(other)?.keys.orEmpty()
-                                        val paired = otherKeys.indexOfFirst { abs(it.t - keys[segment].t) <= editor.frame / 2f }
-                                        if (paired >= 0) editor.replaceKey(layer.id, other, paired, otherKeys[paired].copy(
-                                            type = updated.type, x1 = updated.x1, y1 = updated.y1,
-                                            x2 = updated.x2, y2 = updated.y2
-                                        ), push = false)
-                                    }
+
                                 }
                             }
                         }

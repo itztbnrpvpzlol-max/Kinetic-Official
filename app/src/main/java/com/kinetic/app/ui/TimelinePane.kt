@@ -208,9 +208,15 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
         // Center the grabber on the actual layer stack instead of stretching it down the pane.
         val layerStackHeight = editor.layers.sumOf { layer ->
             40.0 +
-                (if (layer.id == editor.selectedId) layer.props.entries.count { (id, prop) ->
-                    prop.keys.isNotEmpty() && !(layer.scaleLinked && id == PropId.SCALE_Y)
-                } * 28.0 else 0.0) +
+                (if (layer.id == editor.selectedId) (
+                    (if (layer.p(PropId.POS_X).keys.isNotEmpty() || layer.p(PropId.POS_Y).keys.isNotEmpty()) 1 else 0) +
+                    (if (layer.scaleLinked && (layer.p(PropId.SCALE_X).keys.isNotEmpty() || layer.p(PropId.SCALE_Y).keys.isNotEmpty())) 1 else 0) +
+                    layer.props.entries.count { (id, prop) ->
+                        id != PropId.POS_X && id != PropId.POS_Y &&
+                            !(layer.scaleLinked && (id == PropId.SCALE_X || id == PropId.SCALE_Y)) &&
+                            prop.keys.isNotEmpty()
+                    }
+                ) * 28.0 else 0.0) +
                 (if (layer.parentId != null) 20.0 else 0.0)
         }.toFloat()
         val handleTop = (30f + layerStackHeight / 2f - 17f)
@@ -287,10 +293,17 @@ private fun LayerRow(
     editor: EditorState, layer: Layer, pps: Float, hScroll: ScrollState, contentW: Dp, leftW: Dp, leadingPad: Dp
 ) {
     val selected = editor.selectedId == layer.id
+    val positionPropId = if (layer.p(PropId.POS_X).keys.isNotEmpty()) PropId.POS_X else PropId.POS_Y
+    val hasPositionKeyframes = layer.p(PropId.POS_X).keys.isNotEmpty() || layer.p(PropId.POS_Y).keys.isNotEmpty()
+    val scalePropId = if (layer.p(PropId.SCALE_X).keys.isNotEmpty()) PropId.SCALE_X else PropId.SCALE_Y
+    val hasLinkedScaleKeyframes = layer.scaleLinked &&
+        (layer.p(PropId.SCALE_X).keys.isNotEmpty() || layer.p(PropId.SCALE_Y).keys.isNotEmpty())
     val visibleKeyframeProps = layer.props.entries.filter { (id, prop) ->
-        prop.keys.isNotEmpty() && !(layer.scaleLinked && id == PropId.SCALE_Y)
+        id != PropId.POS_X && id != PropId.POS_Y &&
+            !(layer.scaleLinked && (id == PropId.SCALE_X || id == PropId.SCALE_Y)) &&
+            prop.keys.isNotEmpty()
     }
-    val hasLayerKeyframes = visibleKeyframeProps.isNotEmpty()
+    val hasLayerKeyframes = hasPositionKeyframes || hasLinkedScaleKeyframes || visibleKeyframeProps.isNotEmpty()
     val dens = LocalDensity.current.density
     var acc by remember { mutableFloatStateOf(0f) }
     var parentDrag by remember { mutableFloatStateOf(0f) }
@@ -358,6 +371,14 @@ private fun LayerRow(
             }
         }
         if (selected && hasLayerKeyframes) {
+            if (hasPositionKeyframes) {
+                KeyframeTrackRow(editor, layer, positionPropId, layer.p(positionPropId).keys,
+                    pps, hScroll, contentW, leftW, leadingPad, "Position")
+            }
+            if (hasLinkedScaleKeyframes) {
+                KeyframeTrackRow(editor, layer, scalePropId, layer.p(scalePropId).keys,
+                    pps, hScroll, contentW, leftW, leadingPad, "Scale")
+            }
             visibleKeyframeProps.sortedBy { it.key.ordinal }
                 .forEach { (propId, prop) ->
                     KeyframeTrackRow(editor, layer, propId, prop.keys, pps, hScroll, contentW, leftW, leadingPad)
@@ -383,7 +404,8 @@ private fun KeyframeTrackRow(
     hScroll: ScrollState,
     contentW: Dp,
     leftW: Dp,
-    leadingPad: Dp
+    leadingPad: Dp,
+    trackLabel: String = propId.label
 ) {
     val dens = LocalDensity.current.density
     val latestKeys by rememberUpdatedState(keys)
@@ -398,7 +420,7 @@ private fun KeyframeTrackRow(
             contentAlignment = Alignment.CenterStart
         ) {
             Text(
-                propId.label,
+                trackLabel,
                 color = KColors.Muted,
                 fontSize = 9.sp,
                 maxLines = 1,
