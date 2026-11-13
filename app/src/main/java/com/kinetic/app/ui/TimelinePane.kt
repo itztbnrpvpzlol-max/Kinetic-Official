@@ -155,17 +155,14 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
             .fillMaxWidth()
             .onSizeChanged { paneW = it.width; paneH = it.height }
             .pointerInput(Unit) { detectPinch { z -> pps = (pps * z).coerceIn(18f, 400f) } }
-            .pointerInput(pps, paneW, leftPx, leadingPadPx, editor.layers) {
+            .pointerInput(paneW, leftPx) {
                 var timelineDrag = false
                 detectDragGestures(
                     onDragStart = { origin ->
-                        val trackX = origin.x - leftPx + hScroll.value
-                        val timeAtPointer = (trackX - leadingPadPx) / (dens * pps)
-                        val overKeyframe = origin.x > leftPx + 12f * dens &&
-                            editor.layers.any { layer -> layer.props.values.any { prop ->
-                                prop.keys.any { abs((leadingPadPx + it.t * pps * dens) - trackX) <= 18f * dens }
-                            } }
-                        timelineDrag = origin.x > leftPx + 12f * dens && !overKeyframe
+                        // A drag in the track area is a timeline pan, never a seek.
+                        // Keep editor.time unchanged so the playhead stays attached
+                        // to its actual frame while the timeline content scrolls.
+                        timelineDrag = origin.x > leftPx + 12f * dens
                     },
                     onDragEnd = { timelineDrag = false },
                     onDragCancel = { timelineDrag = false }
@@ -173,8 +170,6 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
                     if (timelineDrag && !change.isConsumed) {
                         change.consume()
                         hScroll.dispatchRawDelta(-drag.x)
-                        val centeredTime = (hScroll.value + paneW / 2f - leftPx - leadingPadPx) / dens / pps
-                        editor.seek(centeredTime.coerceAtLeast(0f))
                     }
                 }
             }
