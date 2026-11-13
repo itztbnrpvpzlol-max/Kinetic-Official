@@ -71,18 +71,15 @@ class AudioEngine(context: Context) {
         ready
     }
 
-    fun sync(layers: List<Layer>, time: Float, playing: Boolean, frameOffsetSeconds: Float = 0f) {
+    fun sync(layers: List<Layer>, time: Float, playing: Boolean) {
         if (released.get()) return
-        // A negative one-frame clip offset means the audio is heard one frame
-        // earlier than the video at the same transport-clock position.
-        val audioTime = (time + frameOffsetSeconds.coerceAtLeast(0f)).coerceAtLeast(0f)
         val now = SystemClock.elapsedRealtime()
         val activeIds = HashSet<String>()
         for (layer in layers) {
             val uri = layer.uri ?: continue
             if (layer.type != LayerType.AUDIO && layer.type != LayerType.VIDEO) continue
             activeIds += layer.id
-            val shouldPlay = playing && layer.visible && layer.volume > 0f && layer.activeAt(audioTime)
+            val shouldPlay = playing && layer.visible && layer.volume > 0f && layer.activeAt(time)
             var player = players[layer.id]
             if (player != null && playerUris[layer.id] != uri) {
                 releasePlayer(layer.id)
@@ -104,9 +101,8 @@ class AudioEngine(context: Context) {
                 players[layer.id] = player
                 playerUris[layer.id] = uri
             }
-            // Apply the one-frame audio lead to both clip activation and source
-            // position so the sound starts early without changing the video clock.
-            val targetMs = sourcePositionMs(layer, audioTime)
+            // Keep audio on the exact same timeline time as the video transport clock.
+            val targetMs = sourcePositionMs(layer, time)
             player.sync(targetMs, layer.speed, layer.volume)
         }
         players.keys.filter { it !in activeIds }.toList().forEach(::releasePlayer)
