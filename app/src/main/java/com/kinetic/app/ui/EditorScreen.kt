@@ -309,7 +309,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                 AlightCutBar(editor, activeLayer)
                 if (showPropertiesPanel && !compactHeight) {
                     // A stable shared workspace height keeps Properties and Graph usable without manual resizing.
-                    val adaptivePanelHeight = (windowMaxHeight.value * 0.25f).coerceIn(176f, 218f)
+                    val adaptivePanelHeight = (windowMaxHeight.value * 0.27f).coerceIn(180f, 228f)
                     EditPanel(editor, activeLayer, panelTab, { panelTab = it }, { showPropertiesPanel = false },
                         onRename = { renameTarget = activeLayer }, onParent = { parentPicker = true },
                         modifier = Modifier.fillMaxWidth().height(adaptivePanelHeight.dp))

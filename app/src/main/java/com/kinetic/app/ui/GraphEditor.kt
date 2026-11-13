@@ -60,10 +60,15 @@ private fun graphSegment(keys: List<Keyframe>, selected: Int): Int =
 @Composable
 fun GraphPanel(editor: EditorState, layer: Layer, modifier: Modifier = Modifier) {
     val currentLayer = editor.layers.firstOrNull { it.id == layer.id } ?: layer
-    val animated = PropId.values().filter { currentLayer.p(it).keys.isNotEmpty() }
+    // Keep spatial position channels out of the graph editor; use it for
+    // animated visual properties such as scale, rotation, opacity and anchors.
+    val animated = PropId.values().filter {
+        it !in setOf(PropId.POS_X, PropId.POS_Y, PropId.POS_Z) &&
+            currentLayer.p(it).keys.isNotEmpty()
+    }
     val selected = editor.selectedProp?.takeIf { it in animated }
         ?: animated.firstOrNull()
-        ?: PropId.POS_X
+        ?: PropId.OPACITY
     var mode by remember(layer.id) { mutableStateOf(GraphMode.EASE) }
     val prop = currentLayer.p(selected)
     val keys = prop.keys
@@ -73,11 +78,10 @@ fun GraphPanel(editor: EditorState, layer: Layer, modifier: Modifier = Modifier)
 
     Column(modifier.fillMaxSize().background(KColors.Surface)) {
         Row(
-            Modifier.fillMaxWidth().height(36.dp).padding(horizontal = 10.dp),
+            Modifier.fillMaxWidth().height(32.dp).padding(horizontal = 10.dp),
+            horizontalArrangement = Arrangement.End,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(selected.label, color = KColors.Text, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.weight(1f), maxLines = 1)
             GraphModeButton("Ease", mode == GraphMode.EASE) { mode = GraphMode.EASE }
             Spacer(Modifier.width(4.dp))
             GraphModeButton("Value", mode == GraphMode.VALUE) { mode = GraphMode.VALUE }
