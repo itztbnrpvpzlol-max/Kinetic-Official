@@ -489,7 +489,8 @@ private fun Clip(editor: EditorState, layer: Layer, pps: Float, selected: Boolea
     val ctx = LocalContext.current
     val dens = LocalDensity.current.density
     val shape = RoundedCornerShape(8.dp)
-    var previewStart by remember(layer.id, layer.start) { mutableFloatStateOf(layer.start) }
+    var previewStart by remember(layer.id, layer.start, layer.duration) { mutableFloatStateOf(layer.start) }
+    var previewDuration by remember(layer.id, layer.start, layer.duration) { mutableFloatStateOf(layer.duration) }
     var thumbnails by remember(
         layer.uri, layer.type, layer.duration, layer.srcOffset, layer.speed
     ) { mutableStateOf<List<Bitmap>>(emptyList()) }
@@ -521,7 +522,7 @@ private fun Clip(editor: EditorState, layer: Layer, pps: Float, selected: Boolea
     Box(
         Modifier
              .offset(x = leadingPad + (previewStart * pps).dp)
-            .width(max(layer.duration * pps, 6f).dp)
+            .width(max(previewDuration * pps, 6f).dp)
             .fillMaxHeight()
             .padding(vertical = 3.dp)
             .alpha(if (layer.visible) 1f else 0.4f)
@@ -550,6 +551,7 @@ private fun Clip(editor: EditorState, layer: Layer, pps: Float, selected: Boolea
                         dragStart = layer.start
                         dragDelta = 0f
                         previewStart = dragStart
+                        previewDuration = layer.duration
                         editor.select(layer.id)
                         editor.beginEdit()
                     },
@@ -557,7 +559,7 @@ private fun Clip(editor: EditorState, layer: Layer, pps: Float, selected: Boolea
                         val totalDelta = previewStart - layer.start
                         if (totalDelta != 0f) editor.moveClip(layer.id, totalDelta)
                     },
-                    onDragCancel = { previewStart = layer.start },
+                    onDragCancel = { previewStart = layer.start; previewDuration = layer.duration },
                     onDrag = { change, drag ->
                         change.consume()
                         dragDelta += drag.x / dens / pps
@@ -594,8 +596,19 @@ private fun Clip(editor: EditorState, layer: Layer, pps: Float, selected: Boolea
                     .align(Alignment.CenterStart).width(16.dp).fillMaxHeight()
                     .background(KColors.Accent.copy(alpha = 0.35f))
                     .pointerInput(layer.id, pps) {
-                        detectHorizontalDragGestures(onDragStart = { editor.beginEdit() }) { change, dx ->
-                            change.consume(); editor.trimLeft(layer.id, dx / dens / pps, push = false)
+                        var totalDelta = 0f
+                        detectHorizontalDragGestures(
+                            onDragStart = { totalDelta = 0f; editor.beginEdit() },
+                            onDragEnd = { if (totalDelta != 0f) editor.trimLeft(layer.id, totalDelta, push = false) },
+                            onDragCancel = { previewStart = layer.start; previewDuration = layer.duration }
+                        ) { change, dx ->
+                            change.consume()
+                            totalDelta += dx / dens / pps
+                            val lo = max(-layer.srcOffset, -layer.start)
+                            val hi = layer.duration - 0.1f
+                            val delta = totalDelta.coerceIn(lo, max(lo, hi))
+                            previewStart = layer.start + delta
+                            previewDuration = layer.duration - delta
                         }
                     }
             )
@@ -604,8 +617,17 @@ private fun Clip(editor: EditorState, layer: Layer, pps: Float, selected: Boolea
                     .align(Alignment.CenterEnd).width(16.dp).fillMaxHeight()
                     .background(KColors.Accent.copy(alpha = 0.35f))
                     .pointerInput(layer.id, pps) {
-                        detectHorizontalDragGestures(onDragStart = { editor.beginEdit() }) { change, dx ->
-                            change.consume(); editor.trimRight(layer.id, dx / dens / pps)
+                        var totalDelta = 0f
+                        detectHorizontalDragGestures(
+                            onDragStart = { totalDelta = 0f; editor.beginEdit() },
+                            onDragEnd = { if (totalDelta != 0f) editor.trimRight(layer.id, totalDelta) },
+                            onDragCancel = { previewDuration = layer.duration }
+                        ) { change, dx ->
+                            change.consume()
+                            totalDelta += dx / dens / pps
+                            val maxDuration = if (layer.srcLength.isFinite())
+                                (layer.srcLength - layer.srcOffset).coerceAtLeast(0.1f) else Float.POSITIVE_INFINITY
+                            previewDuration = (layer.duration + totalDelta).coerceIn(0.1f, maxDuration)
                         }
                     }
             )
