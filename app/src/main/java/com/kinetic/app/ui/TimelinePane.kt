@@ -171,7 +171,9 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
                 }
             }
             LazyColumn(
-                Modifier.weight(1f).fillMaxWidth(),
+                Modifier.weight(1f).fillMaxWidth()
+                    // A tap on unused timeline space clears the active layer selection.
+                    .clickable { editor.select(null) },
                 state = rememberLazyListState(),
                 // Stable item keys let Compose retain only the visible layer rows.
                 // Large projects no longer compose every layer and every property row.
@@ -400,7 +402,12 @@ private fun Clip(editor: EditorState, layer: Layer, pps: Float, selected: Boolea
                 } else Modifier
             )
             .then(if (selected) Modifier.border(1.5.dp, KColors.Accent, shape) else Modifier)
-            .pointerInput(layer.id) { detectTapGestures { editor.select(layer.id) } }
+            .pointerInput(layer.id, editor.selectedId) {
+                detectTapGestures {
+                    // Tapping the already-selected clip exits layer selection.
+                    editor.select(if (editor.selectedId == layer.id) null else layer.id)
+                }
+            }
             .pointerInput(layer.id, pps) {
                 detectDragGesturesAfterLongPress(
                     onDragStart = { editor.select(layer.id); editor.beginEdit() },
