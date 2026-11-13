@@ -15,6 +15,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -138,10 +139,10 @@ fun GraphPanel(editor: EditorState, layer: Layer, modifier: Modifier = Modifier)
                             val updated = when (handle) {
                                 1 -> key.copy(type = KeyType.BEZIER,
                                     x1 = x.coerceIn(0f, (key.x2 - gap).coerceAtLeast(0f)),
-                                    y1 = y.coerceIn(-0.25f, 1.25f))
+                                    y1 = y.coerceIn(0f, 1f))
                                 else -> key.copy(type = KeyType.BEZIER,
                                     x2 = x.coerceIn((key.x1 + gap).coerceAtMost(1f), 1f),
-                                    y2 = y.coerceIn(-0.25f, 1.25f))
+                                    y2 = y.coerceIn(0f, 1f))
                             }
                             editor.replaceKey(layer.id, selected, segment, updated, push = false)
                         }
@@ -263,14 +264,15 @@ private fun GraphCanvas(
     val latestValueHigh by rememberUpdatedState(valueHigh)
 
     Canvas(
-        modifier.pointerInput(mode, segment) {
+        modifier.clipToBounds().pointerInput(mode, segment) {
             var activeHandle = 0
             var activeKey = -1
             val pad = 30.dp.toPx()
-            val left = pad
-            val right = size.width - pad
-            val top = pad
-            val bottom = size.height - pad
+            val inset = 8.dp.toPx()
+            val left = pad + inset
+            val right = size.width - pad - inset
+            val top = pad + inset
+            val bottom = size.height - pad - inset
             val width = (right - left).coerceAtLeast(1f)
             val height = (bottom - top).coerceAtLeast(1f)
 
@@ -283,8 +285,8 @@ private fun GraphCanvas(
 
                     if (mode == GraphMode.EASE && currentKeys[segment].type == KeyType.BEZIER) {
                         val key = currentKeys[segment]
-                        val p1 = Offset(left + width * key.x1, bottom - height * ((key.y1 + 0.25f) / 1.5f))
-                        val p2 = Offset(left + width * key.x2, bottom - height * ((key.y2 + 0.25f) / 1.5f))
+                        val p1 = Offset(left + width * key.x1, bottom - height * key.y1.coerceIn(0f, 1f))
+                        val p2 = Offset(left + width * key.x2, bottom - height * key.y2.coerceIn(0f, 1f))
                         val d1 = (point - p1).getDistance()
                         val d2 = (point - p2).getDistance()
                         val hit = 38.dp.toPx()
@@ -307,8 +309,8 @@ private fun GraphCanvas(
                 change.consume()
                 val nx = ((change.position.x - left) / width).coerceIn(0f, 1f)
                 if (activeHandle != 0) {
-                    val ny = 1.5f * (1f - (change.position.y - top) / height) - 0.25f
-                    latestHandleChange(activeHandle, nx, ny.coerceIn(-0.25f, 1.25f))
+                    val ny = (1f - (change.position.y - top) / height).coerceIn(0f, 1f)
+                    latestHandleChange(activeHandle, nx, ny)
                 } else {
                     val normalized = (1f - (change.position.y - top) / height).coerceIn(0f, 1f)
                     latestValueChange(activeKey, latestValueLow + normalized * (latestValueHigh - latestValueLow))
@@ -317,10 +319,11 @@ private fun GraphCanvas(
         }
     ) {
         val pad = 30.dp.toPx()
-        val left = pad
-        val right = size.width - pad
-        val top = pad
-        val bottom = size.height - pad
+        val inset = 8.dp.toPx()
+        val left = pad + inset
+        val right = size.width - pad - inset
+        val top = pad + inset
+        val bottom = size.height - pad - inset
         val width = (right - left).coerceAtLeast(1f)
         val height = (bottom - top).coerceAtLeast(1f)
         val grid = KColors.Line.copy(alpha = 0.72f)
@@ -339,7 +342,7 @@ private fun GraphCanvas(
             for (i in 0..140) {
                 val u = i / 140f
                 val y = when (mode) {
-                    GraphMode.EASE -> if (a.type == KeyType.LINEAR) u else cubicProgress(u, a.x1, a.y1, a.x2, a.y2)
+                    GraphMode.EASE -> if (a.type == KeyType.LINEAR) u else cubicProgress(u, a.x1, a.y1.coerceIn(0f, 1f), a.x2, a.y2.coerceIn(0f, 1f)).coerceIn(0f, 1f)
                     GraphMode.VALUE -> {
                         val t = a.t + (b.t - a.t) * u
                         val value = layer.p(property).valueAt(t)
@@ -364,8 +367,8 @@ private fun GraphCanvas(
                 val start = Offset(left, bottom)
                 val end = Offset(right, top)
                 if (a.type == KeyType.BEZIER) {
-                    val c1 = Offset(left + width * a.x1, bottom - height * ((a.y1 + 0.25f) / 1.5f))
-                    val c2 = Offset(left + width * a.x2, bottom - height * ((a.y2 + 0.25f) / 1.5f))
+                    val c1 = Offset(left + width * a.x1, bottom - height * a.y1.coerceIn(0f, 1f))
+                    val c2 = Offset(left + width * a.x2, bottom - height * a.y2.coerceIn(0f, 1f))
                     drawLine(Color(0xFF42D982), start, c1, 2.dp.toPx(), cap = StrokeCap.Round)
                     drawLine(Color(0xFFFFB45B), end, c2, 2.dp.toPx(), cap = StrokeCap.Round)
                     drawCircle(Color(0xFF42D982).copy(alpha = 0.18f), 16.dp.toPx(), c1)

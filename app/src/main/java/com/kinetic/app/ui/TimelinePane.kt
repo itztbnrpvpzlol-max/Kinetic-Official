@@ -116,6 +116,7 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
     val hScroll = rememberScrollState()
     val vScroll = rememberScrollState()
     var paneW by remember { mutableIntStateOf(0) }
+    var paneH by remember { mutableIntStateOf(0) }
     var leftWidth by remember { mutableFloatStateOf(160f) }
     // Never let the layer column cover the transport center; the playhead must remain visible there.
     val maxLeftWidth = (paneW / dens / 2f - 16f).coerceAtLeast(124f).coerceAtMost(320f)
@@ -152,16 +153,26 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
     Box(
         modifier
             .fillMaxWidth()
-            .onSizeChanged { paneW = it.width }
+            .onSizeChanged { paneW = it.width; paneH = it.height }
             .pointerInput(Unit) { detectPinch { z -> pps = (pps * z).coerceIn(18f, 400f) } }
-            .pointerInput(pps, paneW, leftPx) {
+            .pointerInput(pps, paneW, leftPx, leadingPadPx, editor.layers) {
                 var timelineDrag = false
                 detectDragGestures(
-                    onDragStart = { origin -> timelineDrag = origin.x > leftPx + 12f * dens },
+                    onDragStart = { origin ->
+                        val trackX = origin.x - leftPx + hScroll.value
+                        val timeAtPointer = (trackX - leadingPadPx) / (dens * pps)
+                        val overClip = origin.x > leftPx + 12f * dens &&
+                            editor.layers.any { timeAtPointer >= it.start && timeAtPointer <= it.end }
+                        val overKeyframe = origin.x > leftPx + 12f * dens &&
+                            editor.layers.any { layer -> layer.props.values.any { prop ->
+                                prop.keys.any { abs((leadingPadPx + it.t * pps * dens) - trackX) <= 18f * dens }
+                            } }
+                        timelineDrag = origin.x > leftPx + 12f * dens && !overClip && !overKeyframe
+                    },
                     onDragEnd = { timelineDrag = false },
                     onDragCancel = { timelineDrag = false }
                 ) { change, drag ->
-                    if (timelineDrag) {
+                    if (timelineDrag && !change.isConsumed) {
                         change.consume()
                         hScroll.dispatchRawDelta(-drag.x)
                         val centeredTime = (hScroll.value + paneW / 2f - leftPx - leadingPadPx) / dens / pps
@@ -200,10 +211,17 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
                 }
             }
         }
-        // Drag the divider to resize the layer-controls column independently of timeline zoom.
+        // Center the grabber on the actual layer stack instead of stretching it down the pane.
+        val layerStackHeight = editor.layers.sumOf { layer ->
+            40.0 +
+                (if (layer.id == editor.selectedId) layer.props.values.count { it.keys.isNotEmpty() } * 28.0 else 0.0) +
+                (if (layer.parentId != null) 20.0 else 0.0)
+        }.toFloat()
+        val handleTop = (30f + layerStackHeight / 2f - 17f)
+            .coerceIn(30f, (paneH / dens - 34f).coerceAtLeast(30f))
         Box(
-            Modifier.offset(x = (leftW - 4.dp)).width(8.dp).fillMaxHeight()
-                .pointerInput(Unit) {
+            Modifier.offset(x = leftW - 4.dp, y = handleTop.dp).width(8.dp).height(34.dp)
+                .pointerInput(maxLeftWidth, dens) {
                     detectHorizontalDragGestures { change, drag ->
                         change.consume()
                         leftWidth = (leftWidth + drag / dens).coerceIn(124f, maxLeftWidth)
@@ -375,6 +393,7 @@ private fun KeyframeTrackRow(
     leadingPad: Dp
 ) {
     val dens = LocalDensity.current.density
+    val latestKeys by rememberUpdatedState(keys)
     Row(
         Modifier.fillMaxWidth().height(28.dp).background(KColors.Bg),
         verticalAlignment = Alignment.CenterVertically
@@ -394,14 +413,41 @@ private fun KeyframeTrackRow(
         Box(Modifier.weight(1f).fillMaxHeight().horizontalScroll(hScroll)) {
             Canvas(
                 Modifier.width(contentW).fillMaxHeight()
-                     .pointerInput(layer.id, propId, keys, pps, leadingPad) {
+                    .pointerInput(layer.id, propId, pps, leadingPad) {
+                        var draggingIndex = -1
+                        detectDragGestures(
+                            onDragStart = { point ->
+                                val currentKeys = latestKeys
+                                val time = ((point.x / dens - leadingPad.value) / pps).coerceAtLeast(0f)
+                                val nearestIndex = currentKeys.indices.minByOrNull { abs(currentKeys[it].t - time) } ?: -1
+                                val nearest = currentKeys.getOrNull(nearestIndex)
+                                draggingIndex = if (nearest != null && abs(nearest.t - time) <= 18f / pps) nearestIndex else -1
+                                if (draggingIndex >= 0) {
+                                    editor.select(layer.id)
+                                    editor.selectKey(propId, draggingIndex, currentKeys[draggingIndex].t)
+                                    editor.beginEdit()
+                                }
+                            },
+                            onDragEnd = { draggingIndex = -1 },
+                            onDragCancel = { draggingIndex = -1 }
+                        ) { change, _ ->
+                            if (draggingIndex >= 0) {
+                                change.consume()
+                                val time = ((change.position.x / dens - leadingPad.value) / pps).coerceAtLeast(0f)
+                                editor.moveKeyTime(layer.id, propId, editor.selectedKey, time)
+                                draggingIndex = editor.selectedKey
+                            }
+                        }
+                    }
+                    .pointerInput(layer.id, propId, pps, leadingPad) {
                         detectTapGestures { tap ->
+                            val currentKeys = latestKeys
                             val time = ((tap.x / dens - leadingPad.value) / pps).coerceAtLeast(0f)
-                            val nearest = keys.minByOrNull { abs(it.t - time) }
-                            if (nearest != null) {
+                            val nearestIndex = currentKeys.indices.minByOrNull { abs(currentKeys[it].t - time) } ?: -1
+                            val nearest = currentKeys.getOrNull(nearestIndex)
+                            if (nearest != null && abs(nearest.t - time) <= 18f / pps) {
                                 editor.select(layer.id)
-                                editor.selectProp(propId)
-                                editor.seek(nearest.t)
+                                editor.selectKey(propId, nearestIndex, nearest.t)
                             }
                         }
                     }

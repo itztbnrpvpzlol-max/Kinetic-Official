@@ -48,7 +48,7 @@ fun PropertiesList(editor: EditorState, layer: Layer, onParent: () -> Unit) {
                 modifier = Modifier.padding(start = 2.dp, top = 3.dp, bottom = 5.dp))
             PropertyLine("Anchor", editor, layer, listOf(PropId.ANCHOR_X, PropId.ANCHOR_Y))
         }
-        Row(Modifier.fillMaxWidth().height(42.dp).clickable(onClick = onParent).padding(horizontal = 2.dp),
+        Row(Modifier.fillMaxWidth().height(34.dp).clickable(onClick = onParent).padding(horizontal = 2.dp),
             verticalAlignment = Alignment.CenterVertically) {
             Text("Parent", color = KColors.Text, fontSize = 12.sp, modifier = Modifier.weight(1f))
             Text(layer.parentId?.let { id -> editor.layers.firstOrNull { it.id == id }?.name } ?: "None",
@@ -61,7 +61,7 @@ fun PropertiesList(editor: EditorState, layer: Layer, onParent: () -> Unit) {
 
 @Composable
 private fun PropertyLine(label: String, editor: EditorState, layer: Layer, ids: List<PropId>, onLongPress: (() -> Unit)? = null) {
-    Row(Modifier.fillMaxWidth().height(43.dp).padding(horizontal = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().height(35.dp).padding(horizontal = 2.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(label, color = if (ids.any { editor.selectedProp == it }) KColors.Accent else KColors.Text,
             fontSize = 12.sp, fontWeight = FontWeight.Medium,
             modifier = Modifier.weight(1f).pointerInput(layer.id, layer.scaleLinked, ids) {

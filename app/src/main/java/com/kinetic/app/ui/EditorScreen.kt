@@ -283,7 +283,8 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                 PreviewDiagnosticsBadge(editor.playing, Modifier.align(Alignment.BottomEnd).padding(8.dp))
             }
         } else {
-            Box(Modifier.fillMaxWidth().height(adaptivePreviewHeight.dp)) {
+            val visiblePreviewHeight = if (showPropertiesPanel) minOf(adaptivePreviewHeight, 150f) else adaptivePreviewHeight
+            Box(Modifier.fillMaxWidth().height(visiblePreviewHeight.dp)) {
                 PreviewCanvas(editor, Modifier.fillMaxSize(), editor.settings.previewQualityIndex, playback = playback)
                 PreviewQualityControl(editor, Modifier.align(Alignment.TopStart).padding(8.dp))
                 PreviewDiagnosticsBadge(editor.playing, Modifier.align(Alignment.BottomEnd).padding(8.dp))
@@ -308,7 +309,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                 AlightCutBar(editor, activeLayer)
                 if (showPropertiesPanel && !compactHeight) {
                     // A stable shared workspace height keeps Properties and Graph usable without manual resizing.
-                    val adaptivePanelHeight = (windowMaxHeight.value * 0.34f).coerceIn(220f, 280f)
+                    val adaptivePanelHeight = (windowMaxHeight.value * 0.25f).coerceIn(176f, 218f)
                     EditPanel(editor, activeLayer, panelTab, { panelTab = it }, { showPropertiesPanel = false },
                         onRename = { renameTarget = activeLayer }, onParent = { parentPicker = true },
                         modifier = Modifier.fillMaxWidth().height(adaptivePanelHeight.dp))
@@ -683,12 +684,17 @@ private fun PreviewToolsBar(
     // Transport skip controls step through the selected property's keyframes.
     val selectedLayer = editor.selected
     val selectedProp = editor.selectedProp
-    val selectedKeys = selectedLayer?.let { layer ->
-        selectedProp?.let { prop -> layer.p(prop).keys }
-    }.orEmpty()
+    val selectedKeyframes = selectedLayer?.let { layer ->
+        if (selectedProp != null) layer.p(selectedProp).keys.map { selectedProp to it }
+        else layer.props.flatMap { (id, prop) -> prop.keys.map { id to it } }
+    }.orEmpty().sortedBy { it.second.t }
     val keyframeTolerance = editor.frame / 2f
-    val canSkipPrevious = selectedKeys.any { it.t < editor.time - keyframeTolerance }
-    val canSkipNext = selectedKeys.any { it.t > editor.time + keyframeTolerance }
+    val canSkipPrevious = selectedKeyframes.any { it.second.t < editor.time - keyframeTolerance } ||
+        (selectedLayer != null && editor.time > selectedLayer.start + keyframeTolerance) ||
+        editor.time > keyframeTolerance
+    val canSkipNext = selectedKeyframes.any { it.second.t > editor.time + keyframeTolerance } ||
+        (selectedLayer != null && editor.time < selectedLayer.end - keyframeTolerance) ||
+        editor.time < editor.duration - keyframeTolerance
 
     // Undo/redo stay on the left; Add Layer and fullscreen controls are grouped
     // on the right. Transport remains centered against the full preview width.
@@ -707,20 +713,32 @@ private fun PreviewToolsBar(
             horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             PreviewTool(IconKind.BACK, canSkipPrevious) {
+                editor.playing = false
                 val layer = editor.selected
-                val prop = editor.selectedProp
-                if (layer != null && prop != null) {
-                    editor.playing = false
-                    editor.jumpKey(layer.id, prop, -1)
+                val previous = selectedKeyframes.lastOrNull { it.second.t < editor.time - keyframeTolerance }
+                when {
+                    previous != null && layer != null -> {
+                        val (id, key) = previous
+                        editor.selectProp(id)
+                        editor.selectKey(id, layer.p(id).keys.indexOf(key), key.t)
+                    }
+                    layer != null && editor.time > layer.start + keyframeTolerance -> editor.seek(layer.start)
+                    else -> editor.seek(0f)
                 }
             }
             PreviewTool(if (editor.playing) IconKind.PAUSE else IconKind.PLAY, onClick = onPlay)
             PreviewTool(IconKind.NEXT, canSkipNext) {
+                editor.playing = false
                 val layer = editor.selected
-                val prop = editor.selectedProp
-                if (layer != null && prop != null) {
-                    editor.playing = false
-                    editor.jumpKey(layer.id, prop, 1)
+                val next = selectedKeyframes.firstOrNull { it.second.t > editor.time + keyframeTolerance }
+                when {
+                    next != null && layer != null -> {
+                        val (id, key) = next
+                        editor.selectProp(id)
+                        editor.selectKey(id, layer.p(id).keys.indexOf(key), key.t)
+                    }
+                    layer != null && editor.time < layer.end - keyframeTolerance -> editor.seek(layer.end)
+                    else -> editor.seek(editor.duration)
                 }
             }
         }
