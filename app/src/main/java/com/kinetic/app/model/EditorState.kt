@@ -263,10 +263,18 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
         l.copy(start = l.start + d, duration = l.duration - d, srcOffset = l.srcOffset + d)
     }
 
-    /** Move the entire selected clip so its start aligns with the playhead. */
-    fun bringLayerToPlayhead(id: String) {
+    /**
+     * Move the selected clip so either its start or end aligns with the playhead.
+     * When aligning the end before time zero, shorten only as much as needed to
+     * keep the clip inside the composition.
+     */
+    fun bringLayerToPlayhead(id: String, alignEnd: Boolean) {
+        val l = layers.firstOrNull { it.id == id } ?: return
         val target = time.coerceIn(0f, duration)
-        updateLayer(id) { it.copy(start = target) }
+        if (alignEnd && target < frame) return
+        val nextDuration = if (alignEnd) minOf(l.duration, target) else l.duration
+        val nextStart = if (alignEnd) target - nextDuration else target
+        updateLayer(id) { it.copy(start = nextStart.coerceAtLeast(0f), duration = nextDuration) }
     }
 
     fun moveLayerStartToPlayhead(id: String) {
@@ -289,9 +297,31 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
 
     fun extendLayerToPlayhead(id: String) {
         val l = layers.firstOrNull { it.id == id } ?: return
-        if (time <= l.end) return
-        val maxDuration = if (l.srcLength.isFinite()) (l.srcLength - l.srcOffset).coerceAtLeast(l.duration) else duration - l.start
-        updateLayer(id) { it.copy(duration = (time - it.start).coerceIn(it.duration, maxDuration)) }
+        val target = time.coerceIn(0f, duration)
+        when {
+            target > l.end + frame -> {
+                val maxDuration = if (l.srcLength.isFinite()) {
+                    (l.srcLength - l.srcOffset).coerceAtLeast(l.duration)
+                } else {
+                    (duration - l.start).coerceAtLeast(l.duration)
+                }
+                val nextDuration = (target - l.start).coerceIn(l.duration, maxDuration)
+                updateLayer(id) { it.copy(duration = nextDuration) }
+            }
+            target < l.start - frame -> {
+                // Extend left only through source media that exists before the current in-point.
+                val availableBefore = if (l.srcLength.isFinite()) l.srcOffset.coerceAtLeast(0f) else l.start
+                val extendBy = minOf(l.start - target, availableBefore, l.start)
+                if (extendBy <= 0f) return
+                updateLayer(id) {
+                    it.copy(
+                        start = it.start - extendBy,
+                        duration = it.duration + extendBy,
+                        srcOffset = if (it.srcLength.isFinite()) (it.srcOffset - extendBy).coerceAtLeast(0f) else it.srcOffset
+                    )
+                }
+            }
+        }
     }
 
     /** Parenting keeps the child where it is on screen (position only, if position isn't keyframed). */

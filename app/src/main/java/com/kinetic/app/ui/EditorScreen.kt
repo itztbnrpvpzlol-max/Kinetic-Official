@@ -32,6 +32,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
@@ -630,14 +631,15 @@ private fun rememberEditorDisplayTime(editor: EditorState): Float {
 @Composable
 private fun AlightCutBar(editor: EditorState, layer: Layer) {
     val displayTime = rememberEditorDisplayTime(editor)
-    val inside = displayTime > layer.start + editor.frame && displayTime < layer.end - editor.frame
+    val beforeLayer = displayTime < layer.start - editor.frame
+    val afterLayer = displayTime > layer.end + editor.frame
+    val inside = !beforeLayer && !afterLayer
     Row(
         Modifier.fillMaxWidth().height(42.dp).padding(horizontal = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Keep the three timing actions grouped in the center, with duplicate
-        // and delete anchored at the outside edges.
+        // Duplicate and Delete stay at the outside edges; timing actions stay grouped.
         CutAction("Duplicate", IconKind.DUPLICATE, Modifier.weight(1f)) { editor.duplicate(layer.id) }
         if (inside) {
             CutAction("Trim start", IconKind.TRIM_START, Modifier.weight(1f)) {
@@ -648,8 +650,15 @@ private fun AlightCutBar(editor: EditorState, layer: Layer) {
                 editor.moveLayerEndToPlayhead(layer.id)
             }
         } else {
-            CutAction("Bring to playhead", IconKind.BRING_TO_PLAYHEAD, Modifier.weight(1f)) {
-                editor.bringLayerToPlayhead(layer.id)
+            // Tap aligns the edge nearest the playhead. Holding aligns the opposite edge.
+            CutAction(
+                "Bring to playhead",
+                IconKind.BRING_TO_PLAYHEAD,
+                Modifier.weight(1f),
+                onLongClick = { editor.bringLayerToPlayhead(layer.id, alignEnd = !afterLayer) }
+            ) { editor.bringLayerToPlayhead(layer.id, alignEnd = afterLayer) }
+            CutAction("Extend to playhead", IconKind.EXTEND_TO_PLAYHEAD, Modifier.weight(1f)) {
+                editor.extendLayerToPlayhead(layer.id)
             }
         }
         CutAction("Delete", IconKind.DELETE, Modifier.weight(1f)) { editor.deleteLayer(layer.id) }
@@ -657,10 +666,22 @@ private fun AlightCutBar(editor: EditorState, layer: Layer) {
 }
 
 @Composable
-private fun CutAction(label: String, icon: IconKind, modifier: Modifier = Modifier, onClick: () -> Unit) {
+private fun CutAction(
+    label: String,
+    icon: IconKind,
+    modifier: Modifier = Modifier,
+    onLongClick: (() -> Unit)? = null,
+    onClick: () -> Unit
+) {
     Row(
         modifier.height(34.dp).clip(RoundedCornerShape(8.dp))
-            .background(KColors.Surface2).clickable(onClick = onClick)
+            .background(KColors.Surface2)
+            .pointerInput(onClick, onLongClick) {
+                detectTapGestures(
+                    onTap = { onClick() },
+                    onLongPress = { (onLongClick ?: onClick).invoke() }
+                )
+            }
             .padding(horizontal = 3.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center

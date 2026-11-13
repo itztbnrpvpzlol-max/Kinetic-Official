@@ -27,7 +27,7 @@ enum class IconKind {
     SELECT, SHAPES, STAR, LAYERS, SLIDERS, PREV, NEXT, CHEVRON_DOWN, CHEVRON_UP, MENU, PLUS,
     IMAGE, MUSIC, VIDEO, NULL, ADJ, TEXT, PARENT,
     LOCK, UNLOCK, SETTINGS, EXPORT, IMPORT, DELETE, CUT, SPLIT, CROP, ROTATE, FLIP,
-    COPY, DUPLICATE, TRIM_START, TRIM_END, BRING_TO_PLAYHEAD, MORE, ZOOM_IN, ZOOM_OUT, EFFECTS, FILTER, MASK, BLEND, WAVEFORM, SEARCH,
+    COPY, DUPLICATE, TRIM_START, TRIM_END, BRING_TO_PLAYHEAD, EXTEND_TO_PLAYHEAD, MORE, ZOOM_IN, ZOOM_OUT, EFFECTS, FILTER, MASK, BLEND, WAVEFORM, SEARCH,
     BACK, CLOSE, CHECK, SHARE, FOLDER, HOME, MIC, MUTE, VOLUME, GRID, ALIGN, FIT,
     FULLSCREEN, DOWNLOAD, UPLOAD, INFO, GRAPH
 }
@@ -112,7 +112,13 @@ fun KIcon(kind: IconKind, tint: Color, modifier: Modifier = Modifier.size(22.dp)
             IconKind.EXPORT, IconKind.UPLOAD -> { line(pt(.5f,.68f),pt(.5f,.14f)); drawPath(poly(false,pt(.28f,.36f),pt(.5f,.14f),pt(.72f,.36f)),tint,style=st); line(pt(.18f,.72f),pt(.18f,.88f)); line(pt(.18f,.88f),pt(.82f,.88f)); line(pt(.82f,.88f),pt(.82f,.72f)) }
             IconKind.IMPORT, IconKind.DOWNLOAD -> { line(pt(.5f,.14f),pt(.5f,.68f)); drawPath(poly(false,pt(.28f,.46f),pt(.5f,.68f),pt(.72f,.46f)),tint,style=st); line(pt(.18f,.72f),pt(.18f,.88f)); line(pt(.18f,.88f),pt(.82f,.88f)); line(pt(.82f,.88f),pt(.82f,.72f)) }
             IconKind.DELETE -> { rect(.24f,.28f,.52f,.62f,.04f); line(pt(.16f,.22f),pt(.84f,.22f)); line(pt(.38f,.12f),pt(.62f,.12f)); line(pt(.42f,.4f),pt(.42f,.78f)); line(pt(.58f,.4f),pt(.58f,.78f)) }
-            IconKind.CUT, IconKind.SPLIT -> { outlinedCircle(.28f,.25f,.13f); outlinedCircle(.28f,.75f,.13f); line(pt(.38f,.32f),pt(.84f,.82f)); line(pt(.38f,.68f),pt(.84f,.18f)); if(kind==IconKind.SPLIT) line(pt(.5f,.08f),pt(.5f,.92f)) }
+            IconKind.CUT -> { outlinedCircle(.28f,.25f,.13f); outlinedCircle(.28f,.75f,.13f); line(pt(.38f,.32f),pt(.84f,.82f)); line(pt(.38f,.68f),pt(.84f,.18f)) }
+            IconKind.SPLIT -> {
+                rect(.08f,.3f,.34f,.4f,.04f)
+                rect(.58f,.3f,.34f,.4f,.04f)
+                line(pt(.5f,.08f),pt(.5f,.92f))
+                drawPath(poly(true,pt(.39f,.16f),pt(.5f,.28f),pt(.61f,.16f)),tint)
+            }
             IconKind.CROP -> { line(pt(.22f,.08f),pt(.22f,.78f)); line(pt(.22f,.78f),pt(.92f,.78f)); line(pt(.08f,.22f),pt(.78f,.22f)); line(pt(.78f,.22f),pt(.78f,.92f)) }
             IconKind.ROTATE -> { drawArc(tint,-35f,285f,true,pt(.12f,.12f),Size(w*.76f,h*.76f),style=st); drawPath(poly(true,pt(.72f,.08f),pt(.9f,.28f),pt(.66f,.3f)),tint) }
             IconKind.FLIP -> { line(pt(.5f,.12f),pt(.5f,.88f)); drawPath(poly(true,pt(.12f,.3f),pt(.42f,.5f),pt(.12f,.7f)),tint,style=st); drawPath(poly(true,pt(.88f,.3f),pt(.58f,.5f),pt(.88f,.7f)),tint,style=st) }
@@ -140,6 +146,12 @@ fun KIcon(kind: IconKind, tint: Color, modifier: Modifier = Modifier.size(22.dp)
                 line(pt(.12f,.5f),pt(.64f,.5f))
                 drawPath(poly(false,pt(.5f,.34f),pt(.68f,.5f),pt(.5f,.66f)),tint,style=st)
                 line(pt(.18f,.3f),pt(.18f,.7f))
+            }
+            IconKind.EXTEND_TO_PLAYHEAD -> {
+                line(pt(.82f,.12f),pt(.82f,.88f))
+                line(pt(.12f,.5f),pt(.76f,.5f))
+                drawPath(poly(false,pt(.62f,.34f),pt(.78f,.5f),pt(.62f,.66f)),tint,style=st)
+                line(pt(.12f,.3f),pt(.12f,.7f))
             }
             IconKind.MORE -> { filledCircle(.2f,.5f,.07f); filledCircle(.5f,.5f,.07f); filledCircle(.8f,.5f,.07f) }
             IconKind.ZOOM_OUT -> { outlinedCircle(.42f,.42f,.27f); line(pt(.62f,.62f),pt(.88f,.88f)); line(pt(.29f,.42f),pt(.55f,.42f)) }
