@@ -71,7 +71,7 @@ class AudioEngine(context: Context) {
         ready
     }
 
-    fun sync(layers: List<Layer>, time: Float, playing: Boolean) {
+    fun sync(layers: List<Layer>, time: Float, playing: Boolean, fps: Float) {
         if (released.get()) return
         val now = SystemClock.elapsedRealtime()
         val activeIds = HashSet<String>()
@@ -101,7 +101,10 @@ class AudioEngine(context: Context) {
                 players[layer.id] = player
                 playerUris[layer.id] = uri
             }
-            val targetMs = sourcePositionMs(layer, time)
+            // Keep the audio content one project frame behind the video frame.
+            // Clip activity still uses the true transport time above.
+            val audioTime = (time - 1f / fps.coerceIn(1f, 240f)).coerceAtLeast(0f)
+            val targetMs = sourcePositionMs(layer, audioTime)
             player.sync(targetMs, layer.speed, layer.volume)
         }
         players.keys.filter { it !in activeIds }.toList().forEach(::releasePlayer)

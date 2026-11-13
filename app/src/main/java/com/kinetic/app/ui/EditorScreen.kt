@@ -200,7 +200,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
             var publishedFrame = (editor.time * uiFps).toInt()
             var publishedGeneration = playback.clockSnapshot().generation
             var lastAudioSyncMs = 0L
-            audio.sync(editor.layers, editor.time, true)
+            audio.sync(editor.layers, editor.time, true, editor.fps.toFloat())
 
             while (editor.playing) {
                 delay(16L)
@@ -226,7 +226,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
 
                 val now = SystemClock.elapsedRealtime()
                 if (now - lastAudioSyncMs >= 33L) {
-                    audio.sync(editor.layers, transportTime, playback.isPlaying())
+                    audio.sync(editor.layers, transportTime, playback.isPlaying(), editor.fps.toFloat())
                     lastAudioSyncMs = now
                 }
             }
@@ -236,7 +236,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                 editor.time = editor.duration
                 editor.playing = false
             }
-            audio.sync(editor.layers, editor.time, false)
+            audio.sync(editor.layers, editor.time, false, editor.fps.toFloat())
         } else {
             playback.pause()
             audio.pauseAll()
