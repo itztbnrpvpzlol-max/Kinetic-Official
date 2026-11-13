@@ -439,16 +439,9 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
 
 @Composable
 private fun TopBar(editor: EditorState, onMenuHome: () -> Unit, onOpenSettings: () -> Unit, onExport: () -> Unit) {
-    var menu by remember { mutableStateOf(false) }
     var resMenu by remember { mutableStateOf(false) }
     Row(Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-        Box {
-            IconButton(onClick = { menu = true }) { KIcon(IconKind.MENU, KColors.Text) }
-            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, containerColor = KColors.Surface2) {
-                DropdownMenuItem(text = { Text("Home", color = KColors.Text) }, onClick = { menu = false; onMenuHome() })
-                DropdownMenuItem(text = { Text("Preferences", color = KColors.Text) }, onClick = { menu = false; onOpenSettings() })
-            }
-        }
+        IconButton(onClick = onMenuHome) { KIcon(IconKind.HOME, KColors.Text) }
         Text(
             "Untitled", color = KColors.Text, fontSize = 20.sp, fontWeight = FontWeight.SemiBold,
             modifier = Modifier.weight(1f).padding(start = 6.dp), maxLines = 1, overflow = TextOverflow.Ellipsis

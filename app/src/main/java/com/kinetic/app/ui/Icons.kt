@@ -109,7 +109,13 @@ fun KIcon(kind: IconKind, tint: Color, modifier: Modifier = Modifier.size(22.dp)
                 drawPath(shackle,tint,style=st)
             }
             IconKind.SETTINGS -> { outlinedCircle(.5f,.5f,.32f); outlinedCircle(.5f,.5f,.11f); for(i in 0 until 8){ val a=i*Math.PI/4; line(pt(.5f+.34f*cos(a).toFloat(),.5f+.34f*sin(a).toFloat()),pt(.5f+.44f*cos(a).toFloat(),.5f+.44f*sin(a).toFloat())) } }
-            IconKind.EXPORT, IconKind.UPLOAD -> { line(pt(.5f,.68f),pt(.5f,.14f)); drawPath(poly(false,pt(.28f,.36f),pt(.5f,.14f),pt(.72f,.36f)),tint,style=st); line(pt(.18f,.72f),pt(.18f,.88f)); line(pt(.18f,.88f),pt(.82f,.88f)); line(pt(.82f,.88f),pt(.82f,.72f)) }
+            IconKind.EXPORT -> {
+                rect(.08f,.28f,.56f,.58f,.06f)
+                line(pt(.38f,.62f),pt(.84f,.16f))
+                line(pt(.58f,.16f),pt(.84f,.16f))
+                line(pt(.84f,.16f),pt(.84f,.42f))
+            }
+            IconKind.UPLOAD -> { line(pt(.5f,.68f),pt(.5f,.14f)); drawPath(poly(false,pt(.28f,.36f),pt(.5f,.14f),pt(.72f,.36f)),tint,style=st); line(pt(.18f,.72f),pt(.18f,.88f)); line(pt(.18f,.88f),pt(.82f,.88f)); line(pt(.82f,.88f),pt(.82f,.72f)) }
             IconKind.IMPORT, IconKind.DOWNLOAD -> { line(pt(.5f,.14f),pt(.5f,.68f)); drawPath(poly(false,pt(.28f,.46f),pt(.5f,.68f),pt(.72f,.46f)),tint,style=st); line(pt(.18f,.72f),pt(.18f,.88f)); line(pt(.18f,.88f),pt(.82f,.88f)); line(pt(.82f,.88f),pt(.82f,.72f)) }
             IconKind.DELETE -> { rect(.24f,.28f,.52f,.62f,.04f); line(pt(.16f,.22f),pt(.84f,.22f)); line(pt(.38f,.12f),pt(.62f,.12f)); line(pt(.42f,.4f),pt(.42f,.78f)); line(pt(.58f,.4f),pt(.58f,.78f)) }
             IconKind.CUT -> { outlinedCircle(.28f,.25f,.13f); outlinedCircle(.28f,.75f,.13f); line(pt(.38f,.32f),pt(.84f,.82f)); line(pt(.38f,.68f),pt(.84f,.18f)) }
