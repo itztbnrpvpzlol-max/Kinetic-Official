@@ -362,7 +362,9 @@ class AudioEngine(context: Context) {
                 else -> 2
             }
             // Respect the platform minimum without forcing a 200 ms queue.
-            val targetBytes = rate / 10 * channelCount * bytesPerSample
+            // Keep the software queue near 50 ms; the platform minimum still wins on devices
+            // that need a larger buffer to avoid underruns.
+            val targetBytes = rate / 20 * channelCount * bytesPerSample
             val bufferBytes = max(minBuffer, targetBytes)
             val format = AudioFormat.Builder()
                 .setSampleRate(rate)
@@ -434,8 +436,10 @@ class AudioEngine(context: Context) {
     }
 
     companion object {
-        private const val DRIFT_CORRECTION_MS = 24L
-        private const val CORRECTION_COOLDOWN_MS = 64L
+        // Allow normal AudioTrack scheduling jitter before flushing the decoder.
+        // Frequent 24 ms corrections repeatedly discarded queued PCM and sounded laggy.
+        private const val DRIFT_CORRECTION_MS = 80L
+        private const val CORRECTION_COOLDOWN_MS = 240L
         private const val PREPARE_TIMEOUT_MS = 8_000L
         private const val IDLE_PLAYER_RELEASE_MS = 2_500L
     }

@@ -357,7 +357,7 @@ object MediaLoader {
             }?.clone()
         }
 
-    private fun decodeWaveform(ctx: Context, uri: Uri, bins: Int): FloatArray? {
+    private suspend fun decodeWaveform(ctx: Context, uri: Uri, bins: Int): FloatArray? {
         val extractor = MediaExtractor()
         var decoder: MediaCodec? = null
         try {
@@ -388,6 +388,9 @@ object MediaLoader {
             val deadline = SystemClock.elapsedRealtime() + 120_000L
 
             while (!outputDone && SystemClock.elapsedRealtime() < deadline) {
+                // The waveform is optional UI work. Stop native decoding immediately
+                // when playback starts or the clip leaves composition.
+                currentCoroutineContext().ensureActive()
                 if (!inputDone) {
                     val inputIndex = codec.dequeueInputBuffer(10_000L)
                     if (inputIndex >= 0) {
@@ -453,6 +456,8 @@ object MediaLoader {
                 }
             }
             return peaks.takeIf { it.any { peak -> peak > 0f } }
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
         } catch (_: Throwable) {
             return null
         } finally {
