@@ -6,7 +6,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
-import android.view.TextureView
+import androidx.media3.ui.PlayerView
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
@@ -237,20 +237,18 @@ fun MediaImportSheet(
                         }.padding(20.dp))
                 }
             } else if (tab == 0) {
-                Column(Modifier.fillMaxWidth().weight(1f).padding(horizontal = 12.dp, vertical = 8.dp)) {
+                Column(Modifier.fillMaxWidth().wrapContentHeight().clipToBounds().padding(horizontal = 12.dp, vertical = 8.dp)) {
                     Box(
                         Modifier.fillMaxWidth().height(if (selected == null) 104.dp else 180.dp)
-                            .clip(RoundedCornerShape(12.dp)).background(KColors.Surface2),
+                            .clipToBounds().clip(RoundedCornerShape(12.dp)).background(KColors.Surface2),
                         contentAlignment = Alignment.Center
                     ) {
                         when (selected?.type) {
                             LayerType.IMAGE -> ImportPreviewImage(selected!!)
                             LayerType.VIDEO -> AndroidView(
-                                factory = { viewContext ->
-                                    TextureView(viewContext).apply { player.setVideoTextureView(this) }
-                                },
-                                update = { textureView -> player.setVideoTextureView(textureView) },
-                                modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(12.dp))
+                                factory = { PlayerView(it).apply { this.player = player; useController = false } },
+                                update = { it.player = player },
+                                modifier = Modifier.fillMaxSize()
                             )
                             else -> Text("Select a video or image", color = KColors.Muted, fontSize = 13.sp)
                         }
