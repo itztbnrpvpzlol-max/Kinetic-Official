@@ -100,7 +100,6 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
     var showImport by remember { mutableStateOf(false) }
     var showLayers by remember { mutableStateOf(false) }
     var showLeave by remember { mutableStateOf(false) }
-    var panelHeight by remember { mutableFloatStateOf(210f) }
     var panelTab by remember { mutableIntStateOf(0) }
     var showPropertiesPanel by remember { mutableStateOf(false) }
     var renameTarget by remember { mutableStateOf<Layer?>(null) }
@@ -308,8 +307,8 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
             if (activeLayer != null) {
                 AlightCutBar(editor, activeLayer)
                 if (showPropertiesPanel && !compactHeight) {
-                    ResizeHandle(density) { panelHeight = it }
-                    val adaptivePanelHeight = panelHeight.coerceAtMost((windowMaxHeight.value * 0.38f).coerceAtLeast(130f))
+                    // A stable shared workspace height keeps Properties and Graph usable without manual resizing.
+                    val adaptivePanelHeight = (windowMaxHeight.value * 0.34f).coerceIn(220f, 280f)
                     EditPanel(editor, activeLayer, panelTab, { panelTab = it }, { showPropertiesPanel = false },
                         onRename = { renameTarget = activeLayer }, onParent = { parentPicker = true },
                         modifier = Modifier.fillMaxWidth().height(adaptivePanelHeight.dp))
