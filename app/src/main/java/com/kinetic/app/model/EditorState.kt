@@ -96,6 +96,10 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
 
     fun selectProp(id: PropId?) { selectedProp = id; selectedKey = -1 }
 
+    fun togglePositionLink(layerId: String) {
+        updateLayer(layerId) { it.copy(positionLinked = !it.positionLinked) }
+    }
+
     fun selectKey(prop: PropId, index: Int, seekTo: Float?) {
         selectedProp = prop; selectedKey = index
         if (seekTo != null) time = seekTo.coerceIn(0f, duration)
@@ -303,12 +307,19 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
 
     // ---------- properties / keyframes ----------
     /** Live change (no snapshot). Call beginEdit() once at the start of a scrub. */
+    /** Live change (no snapshot). Call beginEdit() once at the start of a scrub. */
     fun setPropValue(layerId: String, id: PropId, value: Float) {
         val v = if (id == PropId.OPACITY) value.coerceIn(0f, 100f) else value
         val t = time
         val eps = frame / 2f
         updateLayer(layerId, push = false) { l ->
             var next = l.props + (id to l.p(id).withValueAt(t, v, eps))
+            if (l.positionLinked && (id == PropId.POS_X || id == PropId.POS_Y)) {
+                val other = if (id == PropId.POS_X) PropId.POS_Y else PropId.POS_X
+                val otherProp = l.p(other)
+                val delta = v - l.p(id).valueAt(t)
+                next = next + (other to otherProp.withValueAt(t, otherProp.valueAt(t) + delta, eps))
+            }
             if (l.scaleLinked && (id == PropId.SCALE_X || id == PropId.SCALE_Y)) {
                 val other = if (id == PropId.SCALE_X) PropId.SCALE_Y else PropId.SCALE_X
                 next = next + (other to l.p(other).withValueAt(t, v, eps))
@@ -323,6 +334,12 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
             val p = l.p(id)
             val np = if (p.animated) Prop(p.valueAt(t)) else Prop(p.base, listOf(Keyframe(t, p.base)))
             var next = l.props + (id to np)
+            if (l.positionLinked && (id == PropId.POS_X || id == PropId.POS_Y)) {
+                val other = if (id == PropId.POS_X) PropId.POS_Y else PropId.POS_X
+                val op = l.p(other)
+                val onp = if (p.animated) Prop(op.valueAt(t)) else Prop(op.base, listOf(Keyframe(t, op.base)))
+                next = next + (other to onp)
+            }
             if (l.scaleLinked && (id == PropId.SCALE_X || id == PropId.SCALE_Y)) {
                 val other = if (id == PropId.SCALE_X) PropId.SCALE_Y else PropId.SCALE_X
                 next = next + (other to np)
@@ -337,14 +354,19 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
         val eps = frame / 2f
         updateLayer(layerId) { l ->
             val p = l.p(id)
-            val idx = p.keys.indexOfFirst { abs(it.t - t) <= eps }
-            val np = if (idx >= 0) {
-                val nk = p.keys.filterIndexed { i, _ -> i != idx }
-                if (nk.isEmpty()) Prop(p.keys[idx].v) else p.copy(keys = nk)
-            } else {
-                p.copy(keys = (p.keys + Keyframe(t, p.valueAt(t))).sortedBy { it.t })
+            fun toggleAt(prop: Prop): Prop {
+                val idx = prop.keys.indexOfFirst { abs(it.t - t) <= eps }
+                return if (idx >= 0) {
+                    val remaining = prop.keys.filterIndexed { i, _ -> i != idx }
+                    if (remaining.isEmpty()) Prop(prop.keys[idx].v) else prop.copy(keys = remaining)
+                } else prop.copy(keys = (prop.keys + Keyframe(t, prop.valueAt(t))).sortedBy { it.t })
             }
+            val np = toggleAt(p)
             var next = l.props + (id to np)
+            if (l.positionLinked && (id == PropId.POS_X || id == PropId.POS_Y)) {
+                val other = if (id == PropId.POS_X) PropId.POS_Y else PropId.POS_X
+                next = next + (other to toggleAt(l.p(other)))
+            }
             if (l.scaleLinked && (id == PropId.SCALE_X || id == PropId.SCALE_Y)) {
                 val other = if (id == PropId.SCALE_X) PropId.SCALE_Y else PropId.SCALE_X
                 next = next + (other to np)
@@ -366,8 +388,19 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
             val p = l.p(id)
             if (index !in p.keys.indices) l
             else {
-                val updated = p.copy(keys = p.keys.toMutableList().also { it[index] = key })
+                val oldKey = p.keys[index]
+                val updated = p.copy(keys = p.keys.toMutableList().also { it[index] = key }.sortedBy { it.t })
                 var next = l.props + (id to updated)
+                if (l.positionLinked && (id == PropId.POS_X || id == PropId.POS_Y)) {
+                    val other = if (id == PropId.POS_X) PropId.POS_Y else PropId.POS_X
+                    val op = l.p(other)
+                    val oi = op.keys.indexOfFirst { abs(it.t - oldKey.t) <= frame / 2f }
+                    if (oi >= 0) {
+                        val paired = op.keys[oi]
+                        val linkedKey = key.copy(v = paired.v + (key.v - oldKey.v))
+                        next = next + (other to op.copy(keys = op.keys.toMutableList().also { it[oi] = linkedKey }.sortedBy { it.t }))
+                    }
+                }
                 if (l.scaleLinked && (id == PropId.SCALE_X || id == PropId.SCALE_Y)) {
                     val other = if (id == PropId.SCALE_X) PropId.SCALE_Y else PropId.SCALE_X
                     next = next + (other to updated)
@@ -377,18 +410,28 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
         }
     }
 
-    /** Move a keyframe in time only; values and interpolation handles remain untouched. */
+    /** Move a keyframe in time only; linked Position dimensions move their paired key too. */
     fun moveKeyTime(layerId: String, id: PropId, index: Int, time: Float) {
         val l = layers.firstOrNull { it.id == layerId } ?: return
         val keys = l.p(id).keys
         if (index !in keys.indices) return
         val previous = if (index > 0) keys[index - 1].t + frame else 0f
-        val next = if (index < keys.lastIndex) keys[index + 1].t - frame else duration
-        val moved = keys[index].copy(t = time.coerceIn(previous, max(previous, next)))
+        val nextTime = if (index < keys.lastIndex) keys[index + 1].t - frame else duration
+        val original = keys[index]
+        val moved = original.copy(t = time.coerceIn(previous, max(previous, nextTime)))
         val sorted = keys.toMutableList().also { it[index] = moved }.sortedBy { it.t }
         updateLayer(layerId, push = false) { layer ->
             val updated = layer.p(id).copy(keys = sorted)
             var next = layer.props + (id to updated)
+            if (layer.positionLinked && (id == PropId.POS_X || id == PropId.POS_Y)) {
+                val other = if (id == PropId.POS_X) PropId.POS_Y else PropId.POS_X
+                val op = layer.p(other)
+                val oi = op.keys.indexOfFirst { abs(it.t - original.t) <= frame / 2f }
+                if (oi >= 0) {
+                    val paired = op.keys[oi].copy(t = moved.t)
+                    next = next + (other to op.copy(keys = op.keys.toMutableList().also { it[oi] = paired }.sortedBy { it.t }))
+                }
+            }
             if (layer.scaleLinked && (id == PropId.SCALE_X || id == PropId.SCALE_Y)) {
                 val other = if (id == PropId.SCALE_X) PropId.SCALE_Y else PropId.SCALE_X
                 next = next + (other to updated)
@@ -406,9 +449,20 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
         updateLayer(layerId) { l ->
             val p = l.p(id)
             if (index !in p.keys.indices) l else {
-                val nk = p.keys.filterIndexed { i, _ -> i != index }
-                val np = if (nk.isEmpty()) Prop(p.keys[index].v) else p.copy(keys = nk)
+                val removed = p.keys[index]
+                val remaining = p.keys.filterIndexed { i, _ -> i != index }
+                val np = if (remaining.isEmpty()) Prop(removed.v) else p.copy(keys = remaining)
                 var next = l.props + (id to np)
+                if (l.positionLinked && (id == PropId.POS_X || id == PropId.POS_Y)) {
+                    val other = if (id == PropId.POS_X) PropId.POS_Y else PropId.POS_X
+                    val op = l.p(other)
+                    val oi = op.keys.indexOfFirst { abs(it.t - removed.t) <= frame / 2f }
+                    if (oi >= 0) {
+                        val pairedRemaining = op.keys.filterIndexed { i, _ -> i != oi }
+                        val pairedNext = if (pairedRemaining.isEmpty()) Prop(op.keys[oi].v) else op.copy(keys = pairedRemaining)
+                        next = next + (other to pairedNext)
+                    }
+                }
                 if (l.scaleLinked && (id == PropId.SCALE_X || id == PropId.SCALE_Y)) {
                     val other = if (id == PropId.SCALE_X) PropId.SCALE_Y else PropId.SCALE_X
                     next = next + (other to np)
@@ -417,5 +471,4 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
             }
         }
         selectedKey = -1
-    }
-}
+    }}

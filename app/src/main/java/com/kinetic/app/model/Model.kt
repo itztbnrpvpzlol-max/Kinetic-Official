@@ -153,6 +153,7 @@ data class Layer(
     val visible: Boolean = true,
     val parentId: String? = null,
     val scaleLinked: Boolean = true,
+    val positionLinked: Boolean = true,
     val text: String = "Text",
     val color: Int = 0xFF8D8BA3.toInt(),
     val props: Map<PropId, Prop>,

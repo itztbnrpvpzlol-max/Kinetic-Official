@@ -34,7 +34,8 @@ fun PropertiesList(editor: EditorState, layer: Layer, onParent: () -> Unit) {
     ) {
         Text("TRANSFORM", color = KColors.Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.1.sp,
             modifier = Modifier.padding(start = 2.dp, top = 3.dp, bottom = 5.dp))
-        PropertyLine("Position", editor, layer, listOf(PropId.POS_X, PropId.POS_Y))
+        PropertyLine("Position", editor, layer, listOf(PropId.POS_X, PropId.POS_Y),
+            onLongPress = { editor.togglePositionLink(layer.id) }, linkState = layer.positionLinked)
         if (layer.type != LayerType.AUDIO) {
             PropertyLine("Scale", editor, layer,
                 if (layer.scaleLinked) listOf(PropId.SCALE_X) else listOf(PropId.SCALE_X, PropId.SCALE_Y),
@@ -60,16 +61,21 @@ fun PropertiesList(editor: EditorState, layer: Layer, onParent: () -> Unit) {
 }
 
 @Composable
-private fun PropertyLine(label: String, editor: EditorState, layer: Layer, ids: List<PropId>, onLongPress: (() -> Unit)? = null) {
+private fun PropertyLine(label: String, editor: EditorState, layer: Layer, ids: List<PropId>, onLongPress: (() -> Unit)? = null, linkState: Boolean? = null) {
     Row(Modifier.fillMaxWidth().height(35.dp).padding(horizontal = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(label, color = if (ids.any { editor.selectedProp == it }) KColors.Accent else KColors.Text,
-            fontSize = 12.sp, fontWeight = FontWeight.Medium,
-            modifier = Modifier.weight(1f).pointerInput(layer.id, layer.scaleLinked, ids) {
-                detectTapGestures(
-                    onTap = { ids.firstOrNull()?.let { editor.selectProp(it) } },
-                    onLongPress = { onLongPress?.invoke() }
-                )
-            })
+        Row(Modifier.weight(1f).pointerInput(layer.id, layer.scaleLinked, layer.positionLinked, ids) {
+            detectTapGestures(
+                onTap = { ids.firstOrNull()?.let { editor.selectProp(it) } },
+                onLongPress = { onLongPress?.invoke() }
+            )
+        }, verticalAlignment = Alignment.CenterVertically) {
+            Text(label, color = if (ids.any { editor.selectedProp == it }) KColors.Accent else KColors.Text,
+                fontSize = 12.sp, fontWeight = FontWeight.Medium)
+            if (linkState != null) {
+                Spacer(Modifier.width(5.dp))
+                Text(if (linkState) "LINKED" else "SEPARATE", color = KColors.Muted, fontSize = 7.sp, fontWeight = FontWeight.Bold)
+            }
+        }
         ids.forEachIndexed { index, id ->
             if (ids.size > 1 && index > 0) Spacer(Modifier.width(5.dp))
             ValueController(editor, layer, id, if (ids.size > 1) if (index == 0) "X" else "Y" else "", Modifier.weight(1f))
