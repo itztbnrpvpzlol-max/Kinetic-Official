@@ -13,10 +13,6 @@ import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.ui.input.pointer.PointerEventPass
-import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -118,7 +114,6 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
     val dens = density.density
     var pps by remember { mutableFloatStateOf(56f) } // dp per second
     val hScroll = rememberScrollState()
-    val vScroll = rememberScrollState()
     var paneW by remember { mutableIntStateOf(0) }
     var paneH by remember { mutableIntStateOf(0) }
     var leftWidth by remember { mutableFloatStateOf(160f) }
@@ -159,56 +154,6 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
             .fillMaxWidth()
             .onSizeChanged { paneW = it.width; paneH = it.height }
             .pointerInput(Unit) { detectPinch { z -> pps = (pps * z).coerceIn(18f, 400f) } }
-            .pointerInput(paneW, leftPx, pps) {
-                awaitEachGesture {
-                    // Let child gestures (especially long-press keyframe dragging) receive
-                    // Main-pass events first. Ordinary horizontal movement remains a scrub;
-                    // a child that consumes a drag owns that gesture instead.
-                    val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Main)
-                    if (down.position.x <= leftPx + 12f * dens) return@awaitEachGesture
-                    var lastX = down.position.x
-                    var accumulatedX = 0f
-                    var dragStarted = false
-                    val touchSlop = viewConfiguration.touchSlop
-                    while (!dragStarted) {
-                        val event = awaitPointerEvent(PointerEventPass.Main)
-                        val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                        if (!change.pressed || change.isConsumed) break
-                        val dx = change.position.x - lastX
-                        lastX = change.position.x
-                        accumulatedX += dx
-                        if (abs(accumulatedX) > touchSlop) {
-                            val overSlop = accumulatedX - (if (accumulatedX > 0f) touchSlop else -touchSlop)
-                            change.consume()
-                            if (editor.playing) editor.playing = false
-                            hScroll.dispatchRawDelta(-overSlop)
-                            editor.seek(((hScroll.value.toFloat() - leadingPadPx) / (pps * dens).coerceAtLeast(0.001f)).coerceAtLeast(0f))
-                            dragStarted = true
-                        }
-                    }
-
-                    if (dragStarted) {
-                        while (true) {
-                            val event = awaitPointerEvent(PointerEventPass.Main)
-                            val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                            if (!change.pressed) {
-                                break
-                            }
-                            // A child drag can take ownership after its long-press
-                            // threshold; stop scrubbing immediately if it consumes input.
-                            if (change.isConsumed) break
-                            val dx = change.position.x - lastX
-                            lastX = change.position.x
-                            if (dx != 0f) {
-                                change.consume()
-                                hScroll.dispatchRawDelta(-dx)
-                                editor.seek(((hScroll.value.toFloat() - leadingPadPx) / (pps * dens).coerceAtLeast(0.001f)).coerceAtLeast(0f))
-                            }
-                        }
-                        // No magnetic snapping on release; keep the current frame position.
-                    }
-                }
-            }
     ) {
         Column(Modifier.fillMaxSize()) {
             Row(Modifier.fillMaxWidth().height(30.dp)) {
@@ -288,6 +233,21 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
                 drawPath(tri, Color.White)
             }
         }
+        // Dedicated playhead grip: dragging this scrubs; dragging anywhere else
+        // in the track viewport is left to horizontalScroll for normal timeline panning.
+        Box(
+            Modifier
+                .offset(x = (paneW / dens / 2f - 14f).dp)
+                .size(28.dp, 30.dp)
+                .pointerInput(pps, dens) {
+                    detectHorizontalDragGestures { change, drag ->
+                        change.consume()
+                        if (editor.playing) editor.playing = false
+                        hScroll.dispatchRawDelta(drag)
+                        editor.seek((hScroll.value.toFloat() / (pps * dens).coerceAtLeast(0.001f)).coerceAtLeast(0f))
+                    }
+                }
+        )
     }
 }
 
