@@ -397,8 +397,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                 onClose = { showEffectsScreen = false },
                 onAddEffect = { name ->
                     editor.selected?.let { editor.addEffect(it.id, name) }
-                    showEffectsScreen = false
-                    showPropertiesPanel = false
+                    showEffectsScreen = false                    showPropertiesPanel = false
                     showToolPanel = true
                     dockTool = "Effects"
                 }
@@ -797,8 +796,7 @@ private fun CutAction(
     onClick: () -> Unit
 ) {
     Row(
-        modifier.height(34.dp).clip(RoundedCornerShape(8.dp))
-            .background(KColors.Surface2)
+        modifier.height(34.dp).clip(RoundedCornerShape(8.dp))            .background(KColors.Surface2)
             .pointerInput(onClick, onLongClick) {
                 detectTapGestures(
                     onTap = { onClick() },
@@ -885,12 +883,12 @@ private fun PreviewToolsBar(
             }
             PreviewTool(IconKind.FRAME_BACK, canStepBack) {
                 editor.playing = false
-                editor.seek((editor.time - editor.frame).coerceAtLeast(0f), 0f)
+                editor.seek((editor.time - editor.frame).coerceAtLeast(0f))
             }
             PreviewTool(if (editor.playing) IconKind.PAUSE else IconKind.PLAY, onClick = onPlay)
             PreviewTool(IconKind.FRAME_FORWARD, canStepForward) {
                 editor.playing = false
-                editor.seek((editor.time + editor.frame).coerceAtMost(editor.duration), 0f)
+                editor.seek((editor.time + editor.frame).coerceAtMost(editor.duration))
             }
             PreviewTool(IconKind.SKIP_END, canSkipNext) {
                 editor.playing = false
