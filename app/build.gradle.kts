@@ -8,7 +8,6 @@ plugins {
 
 val manropeGeneratedRes = layout.buildDirectory.dir("generated/res/manrope")
 val manropeGeneratedAssets = layout.buildDirectory.dir("generated/assets/manrope")
-val effectImageResources = layout.buildDirectory.dir("generated/res/effectImages")
 
 android {
     namespace = "com.kinetic.app"
@@ -48,38 +47,7 @@ android {
     kotlinOptions { jvmTarget = "17" }
 
     sourceSets.getByName("main").res.srcDir(manropeGeneratedRes)
-    sourceSets.getByName("main").res.srcDir(effectImageResources)
     sourceSets.getByName("main").assets.srcDir(manropeGeneratedAssets)
-}
-
-val downloadEffectCategoryImages by tasks.registering {
-    val images = mapOf(
-        "effect_category_color_light.jpg" to "https://images.unsplash.com/photo-1550275910-006d8096d19b?auto=format&fit=crop&fm=jpg&q=82&w=900",
-        "effect_category_stylize.jpg" to "https://images.unsplash.com/photo-1635431289101-ef85326518f2?auto=format&fit=crop&fm=jpg&q=82&w=900",
-        "effect_category_drawing.jpg" to "https://images.unsplash.com/photo-1713332126538-0fe6208bf453?auto=format&fit=crop&fm=jpg&q=82&w=900",
-        "effect_category_distortion.jpg" to "https://images.unsplash.com/photo-1635431289101-ef85326518f2?auto=format&fit=crop&fm=jpg&q=82&w=900",
-        "effect_category_procedural.jpg" to "https://images.unsplash.com/photo-1713332126538-0fe6208bf453?auto=format&fit=crop&fm=jpg&q=82&w=900",
-        "effect_category_blur.jpg" to "https://images.unsplash.com/photo-1617892060511-6bee2d26827e?auto=format&fit=crop&fm=jpg&q=82&w=900",
-        "effect_category_3d.jpg" to "https://images.unsplash.com/photo-1713332126538-0fe6208bf453?auto=format&fit=crop&fm=jpg&q=82&w=900",
-        "effect_category_text.jpg" to "https://images.unsplash.com/photo-1550275910-006d8096d19b?auto=format&fit=crop&fm=jpg&q=82&w=900",
-        "effect_category_audio.jpg" to "https://images.unsplash.com/photo-1617892060511-6bee2d26827e?auto=format&fit=crop&fm=jpg&q=82&w=900",
-        "effect_category_other.jpg" to "https://images.unsplash.com/photo-1635431289101-ef85326518f2?auto=format&fit=crop&fm=jpg&q=82&w=900"
-    )
-    val outputFiles = images.keys.map { effectImageResources.map { dir -> dir.file("drawable-nodpi/$it") } }
-    outputs.files(outputFiles)
-    doLast {
-        images.forEach { (name, source) ->
-            val target = effectImageResources.get().file("drawable-nodpi/$name").asFile
-            target.parentFile.mkdirs()
-            URL(source).openConnection().apply {
-                connectTimeout = 20_000
-                readTimeout = 30_000
-            }.getInputStream().use { input ->
-                target.outputStream().use { output -> input.copyTo(output) }
-            }
-            require(target.length() > 10_000L) { "Effect category image download was incomplete: $name" }
-        }
-    }
 }
 
 val downloadManropeAssets by tasks.registering {
@@ -115,7 +83,7 @@ val downloadManropeAssets by tasks.registering {
 }
 
 tasks.named("preBuild").configure {
-    dependsOn(downloadManropeAssets, downloadEffectCategoryImages)
+    dependsOn(downloadManropeAssets)
 }
 
 dependencies {
