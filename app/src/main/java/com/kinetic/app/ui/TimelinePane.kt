@@ -149,6 +149,19 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
             }
     }
 
+    LaunchedEffect(hScroll, paneW, leftPx, leadingPadPx, pps, dens) {
+        snapshotFlow { hScroll.isScrollInProgress to hScroll.value }
+            .collect { (scrolling, scrollX) ->
+                if (scrolling && !editor.playing && paneW > leftPx) {
+                    val centreTime = (
+                        (scrollX + paneW / 2f - leftPx - leadingPadPx) /
+                            (pps * dens).coerceAtLeast(0.001f)
+                        ).coerceAtLeast(0f)
+                    if (kotlin.math.abs(editor.time - centreTime) > editor.frame / 2f) editor.seek(centreTime)
+                }
+            }
+    }
+
     Box(
         modifier
             .fillMaxWidth()
@@ -182,6 +195,11 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
                 }
                 items(editor.layers, key = { it.id }) { layer ->
                     LayerRow(editor, layer, pps, hScroll, contentW, leftW, leadingPad)
+                }
+                item(key = "timeline-empty-scroll-space") {
+                    Box(Modifier.fillMaxWidth().height(72.dp).horizontalScroll(hScroll)) {
+                        Spacer(Modifier.width(contentW).fillMaxHeight())
+                    }
                 }
             }
         }
@@ -244,7 +262,11 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
                         change.consume()
                         if (editor.playing) editor.playing = false
                         hScroll.dispatchRawDelta(drag)
-                        editor.seek((hScroll.value.toFloat() / (pps * dens).coerceAtLeast(0.001f)).coerceAtLeast(0f))
+                        val centreTime = (
+                            (hScroll.value.toFloat() + paneW / 2f - leftPx - leadingPadPx) /
+                                (pps * dens).coerceAtLeast(0.001f)
+                            ).coerceAtLeast(0f)
+                        editor.seek(centreTime)
                     }
                 }
         )
