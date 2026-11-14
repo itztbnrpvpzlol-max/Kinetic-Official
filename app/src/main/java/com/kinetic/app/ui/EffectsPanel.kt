@@ -1,8 +1,10 @@
 package com.kinetic.app.ui
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -30,12 +32,20 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kinetic.app.model.EditorState
 import com.kinetic.app.model.EffectInstance
 import com.kinetic.app.model.Layer
+import kotlin.math.abs
+import kotlin.math.sqrt
 
 private data class EffectControlSpec(
     val label: String, val key: String, val min: Float = 0f, val max: Float = 1f,
@@ -116,101 +126,321 @@ fun EffectControlsPanel(editor: EditorState, layer: Layer, onBrowseEffects: () -
     var expandedEffectId by remember(layer.id, layer.effectStack.lastOrNull()?.id) {
         mutableStateOf(layer.effectStack.lastOrNull()?.id)
     }
-    Column(Modifier.fillMaxSize().background(KColors.Surface).verticalScroll(rememberScrollState())
-        .padding(horizontal = 12.dp, vertical = 7.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(Modifier.fillMaxWidth().height(30.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("EFFECT STACK", color = KColors.Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold,
-                letterSpacing = 1.1.sp, modifier = Modifier.weight(1f))
-            Text(layer.effectStack.size.toString() + " applied", color = KColors.Dim, fontSize = 9.sp)
+    Column(
+        Modifier.fillMaxSize().background(KColors.Surface)
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 12.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(11.dp)
+    ) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text("EFFECTS", color = KColors.Text, fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.15.sp)
+                Text("Build and animate this layer's look", color = KColors.Muted, fontSize = 9.sp)
+            }
+            Box(
+                Modifier.clip(RoundedCornerShape(20.dp))
+                    .background(KColors.Accent.copy(alpha = 0.13f))
+                    .border(1.dp, KColors.Accent.copy(alpha = 0.28f), RoundedCornerShape(20.dp))
+                    .padding(horizontal = 10.dp, vertical = 6.dp)
+            ) {
+                Text("${layer.effectStack.size} ACTIVE", color = KColors.Accent,
+                    fontSize = 8.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.6.sp)
+            }
         }
-        if (layer.effectStack.isEmpty()) Text("No effects on this layer yet.", color = KColors.Muted, fontSize = 10.sp)
-        layer.effectStack.forEach { effect ->
+
+        if (layer.effectStack.isEmpty()) {
+            Column(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
+                    .background(KColors.Bg).border(1.dp, KColors.Line, RoundedCornerShape(14.dp))
+                    .padding(vertical = 22.dp, horizontal = 16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(7.dp)
+            ) {
+                Text("◇", color = KColors.Accent, fontSize = 25.sp)
+                Text("Your effect stack is empty", color = KColors.Text, fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold)
+                Text("Add an effect to start shaping this layer.", color = KColors.Muted, fontSize = 9.sp)
+            }
+        }
+
+        layer.effectStack.forEachIndexed { index, effect ->
             val expanded = expandedEffectId == effect.id
-            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(9.dp)).background(KColors.Bg)
-                .border(1.dp, KColors.Line, RoundedCornerShape(9.dp)).padding(horizontal = 9.dp, vertical = 7.dp)) {
-                Row(Modifier.fillMaxWidth().height(36.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.weight(1f).fillMaxHeight().clickable {
+            val keyedParameters = effect.parameterKeys.values.count { it.isNotEmpty() }
+            val accent = if (effect.enabled) KColors.Accent else KColors.Dim
+            Column(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(13.dp))
+                    .background(KColors.Bg)
+                    .border(1.dp, if (expanded) KColors.Accent.copy(alpha = 0.48f) else KColors.Line,
+                        RoundedCornerShape(13.dp))
+            ) {
+                Row(
+                    Modifier.fillMaxWidth().height(58.dp).clickable {
                         expandedEffectId = if (expanded) null else effect.id
-                    }, contentAlignment = Alignment.CenterStart) {
+                    }.padding(horizontal = 11.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        Modifier.width(3.dp).height(31.dp).clip(RoundedCornerShape(4.dp))
+                            .background(accent)
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                         Text(effect.name, color = if (effect.enabled) KColors.Text else KColors.Dim,
-                            fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                            fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                        Text(
+                            when {
+                                !effect.enabled -> "DISABLED"
+                                keyedParameters > 0 -> "$keyedParameters animated parameters"
+                                else -> "EFFECT  ${index + 1}"
+                            },
+                            color = if (keyedParameters > 0) KColors.Accent else KColors.Muted,
+                            fontSize = 8.sp, letterSpacing = 0.55.sp
+                        )
                     }
-                    Box(Modifier.size(28.dp).clip(RoundedCornerShape(5.dp)).clickable {
+                    EffectAction("⌃", expanded) {
                         expandedEffectId = if (expanded) null else effect.id
-                    }, contentAlignment = Alignment.Center) {
-                        Text(if (expanded) "⌃" else "⌄", color = KColors.Muted, fontSize = 17.sp)
                     }
-                    Box(Modifier.size(28.dp).clip(RoundedCornerShape(5.dp)).clickable {
+                    EffectAction(if (effect.enabled) "◉" else "○", effect.enabled) {
                         editor.setEffectEnabled(layer.id, effect.id, !effect.enabled)
-                    }, contentAlignment = Alignment.Center) {
-                        KIcon(if (effect.enabled) IconKind.EYE else IconKind.EYE_OFF,
-                            if (effect.enabled) KColors.Accent else KColors.Dim, Modifier.size(15.dp))
                     }
-                    Box(Modifier.size(28.dp).clip(RoundedCornerShape(5.dp)).clickable {
+                    EffectAction("×", false) {
                         editor.removeEffect(layer.id, effect.id)
                         if (expandedEffectId == effect.id) expandedEffectId = null
-                    }, contentAlignment = Alignment.Center) {
-                        KIcon(IconKind.DELETE, KColors.Muted, Modifier.size(14.dp))
                     }
                 }
                 if (expanded) {
-                    Spacer(Modifier.height(5.dp))
-                    controlsFor(effect).forEach { EffectParameterLine(editor, layer, effect, it) }
+                    Column(
+                        Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 11.dp, top = 2.dp),
+                        verticalArrangement = Arrangement.spacedBy(7.dp)
+                    ) {
+                        Box(Modifier.fillMaxWidth().height(1.dp).background(KColors.Line))
+                        controlsFor(effect).forEach { spec ->
+                            val liveEffect = editor.layers.firstOrNull { it.id == layer.id }
+                                ?.effectStack?.firstOrNull { it.id == effect.id } ?: effect
+                            EffectParameterLine(editor, layer, liveEffect, spec)
+                        }
+                    }
                 }
             }
         }
-        Box(
-            Modifier.fillMaxWidth().height(38.dp).clip(RoundedCornerShape(7.dp))
-                .background(KColors.Accent).clickable(onClick = onBrowseEffects),
-            contentAlignment = Alignment.Center
+
+        Row(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(11.dp))
+                .background(KColors.Accent).clickable(onClick = onBrowseEffects)
+                .padding(vertical = 13.dp),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("Add Effect  +", color = androidx.compose.ui.graphics.Color.White,
-                fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            Text("+", color = androidx.compose.ui.graphics.Color.White, fontSize = 17.sp,
+                fontWeight = FontWeight.Bold)
+            Spacer(Modifier.width(7.dp))
+            Text("ADD EFFECT", color = androidx.compose.ui.graphics.Color.White,
+                fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp)
         }
     }
 }
 
 @Composable
+private fun EffectAction(label: String, active: Boolean, onClick: () -> Unit) {
+    Box(
+        Modifier.padding(start = 4.dp).size(30.dp).clip(RoundedCornerShape(8.dp))
+            .background(if (active) KColors.Accent.copy(alpha = 0.14f) else KColors.Surface)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(label, color = if (active) KColors.Accent else KColors.Muted,
+            fontSize = if (label == "×") 18.sp else 14.sp, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+@Composable
 private fun EffectParameterLine(editor: EditorState, layer: Layer, effect: EffectInstance, spec: EffectControlSpec) {
-    val current = editor.layers.firstOrNull { it.id == layer.id }?.effectStack
-        ?.firstOrNull { it.id == effect.id }?.parameters?.get(spec.key) ?: spec.default
-    Row(Modifier.fillMaxWidth().height(38.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(spec.label, color = KColors.Text, fontSize = 10.sp, modifier = Modifier.weight(1f))
-        when {
-            spec.toggle -> Switch(checked = current >= 0.5f, onCheckedChange = {
-                editor.beginEdit()
-                editor.updateEffectParameter(layer.id, effect.id, spec.key, if (it) 1f else 0f)
-            }, modifier = Modifier.size(width = 42.dp, height = 28.dp))
-            spec.choices.isNotEmpty() -> {
-                var menuOpen by remember(effect.id, spec.key) { mutableStateOf(false) }
-                Box {
-                    Box(Modifier.clip(RoundedCornerShape(6.dp)).background(KColors.Surface2)
-                        .border(1.dp, KColors.Line, RoundedCornerShape(6.dp)).clickable { menuOpen = true }
-                        .padding(horizontal = 10.dp, vertical = 7.dp), contentAlignment = Alignment.Center) {
-                        Text(spec.choices.minByOrNull { kotlin.math.abs(it.second - current) }?.first ?: "Select",
-                            color = KColors.Accent, fontSize = 9.sp, fontWeight = FontWeight.SemiBold)
-                    }
-                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                        spec.choices.forEach { (label, value) ->
-                            DropdownMenuItem(text = { Text(label, fontSize = 10.sp) }, onClick = {
-                                editor.beginEdit()
-                                editor.updateEffectParameter(layer.id, effect.id, spec.key, value)
-                                menuOpen = false
-                            })
+    val current = effect.parameterAt(spec.key, editor.time)
+    val keys = effect.parameterKeys[spec.key].orEmpty()
+    val keyAtTime = keys.any { abs(it.t - editor.time) <= editor.frame / 2f }
+    var graphOpen by remember(effect.id, spec.key) { mutableStateOf(false) }
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(9.dp))
+            .background(KColors.Surface.copy(alpha = 0.62f))
+            .padding(horizontal = 9.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(7.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(spec.label, color = KColors.Text, fontSize = 9.sp,
+                fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+            Box(
+                Modifier.clip(RoundedCornerShape(6.dp))
+                    .background(if (keyAtTime) KColors.Accent.copy(alpha = 0.18f) else KColors.Bg)
+                    .border(1.dp, if (keyAtTime) KColors.Accent.copy(alpha = 0.55f) else KColors.Line,
+                        RoundedCornerShape(6.dp))
+                    .clickable {
+                        editor.toggleEffectParameterKey(layer.id, effect.id, spec.key)
+                    }.padding(horizontal = 8.dp, vertical = 5.dp)
+            ) {
+                Text(if (keyAtTime) "◆ KEY" else "◇ KEY",
+                    color = if (keyAtTime) KColors.Accent else KColors.Muted,
+                    fontSize = 8.sp, fontWeight = FontWeight.Bold)
+            }
+            Spacer(Modifier.width(5.dp))
+            Box(
+                Modifier.clip(RoundedCornerShape(6.dp))
+                    .background(if (graphOpen) KColors.Accent.copy(alpha = 0.18f) else KColors.Bg)
+                    .border(1.dp, if (graphOpen) KColors.Accent.copy(alpha = 0.55f) else KColors.Line,
+                        RoundedCornerShape(6.dp))
+                    .clickable { graphOpen = !graphOpen }
+                    .padding(horizontal = 8.dp, vertical = 5.dp)
+            ) {
+                Text("GRAPH", color = if (graphOpen) KColors.Accent else KColors.Muted,
+                    fontSize = 8.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            when {
+                spec.toggle -> Switch(checked = current >= 0.5f, onCheckedChange = {
+                    editor.beginEdit()
+                    editor.updateEffectParameter(layer.id, effect.id, spec.key, if (it) 1f else 0f)
+                }, modifier = Modifier.size(width = 42.dp, height = 28.dp))
+                spec.choices.isNotEmpty() -> {
+                    var menuOpen by remember(effect.id, spec.key) { mutableStateOf(false) }
+                    Box {
+                        Box(
+                            Modifier.clip(RoundedCornerShape(7.dp)).background(KColors.Bg)
+                                .border(1.dp, KColors.Line, RoundedCornerShape(7.dp))
+                                .clickable { menuOpen = true }
+                                .padding(horizontal = 11.dp, vertical = 8.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(spec.choices.minByOrNull { abs(it.second - current) }?.first ?: "Select",
+                                color = KColors.Accent, fontSize = 9.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                            spec.choices.forEach { (label, value) ->
+                                DropdownMenuItem(text = { Text(label, fontSize = 10.sp) }, onClick = {
+                                    editor.beginEdit()
+                                    editor.updateEffectParameter(layer.id, effect.id, spec.key, value)
+                                    menuOpen = false
+                                })
+                            }
                         }
                     }
                 }
-            }
-            else -> {
-                val valueFormat = "%." + spec.decimals + "f" + spec.suffix
-                ScrubValueBar(
-                    spec.label, current, Modifier.width(132.dp), step = spec.step,
-                    minValue = spec.min, maxValue = spec.max, valueFormat = valueFormat,
-                    onScrubStart = { editor.beginEdit() }
-                ) { value ->
-                    editor.updateEffectParameter(layer.id, effect.id, spec.key, value.coerceIn(spec.min, spec.max))
+                else -> {
+                    val valueFormat = "%." + spec.decimals + "f" + spec.suffix
+                    ScrubValueBar(
+                        spec.label, current, Modifier.width(142.dp), step = spec.step,
+                        minValue = spec.min, maxValue = spec.max, valueFormat = valueFormat,
+                        onScrubStart = { editor.beginEdit() }
+                    ) { value ->
+                        editor.updateEffectParameter(layer.id, effect.id, spec.key, value.coerceIn(spec.min, spec.max))
+                    }
                 }
             }
+        }
+        if (graphOpen) {
+            EffectParameterGraph(editor, layer, effect, spec)
+        }
+    }
+}
+
+@Composable
+private fun EffectParameterGraph(
+    editor: EditorState, layer: Layer, effect: EffectInstance, spec: EffectControlSpec
+) {
+    val keys = effect.parameterKeys[spec.key].orEmpty()
+    val density = LocalDensity.current.density
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
+            .background(KColors.Bg).border(1.dp, KColors.Line, RoundedCornerShape(8.dp))
+            .padding(8.dp),
+        verticalArrangement = Arrangement.spacedBy(5.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("VALUE GRAPH", color = KColors.Muted, fontSize = 8.sp,
+                fontWeight = FontWeight.Bold, letterSpacing = 0.7.sp,
+                modifier = Modifier.weight(1f))
+            Text("${keys.size} keys", color = KColors.Accent, fontSize = 8.sp)
+        }
+        if (keys.isEmpty()) {
+            Text("Tap KEY at the current playhead to create the first point.",
+                color = KColors.Muted, fontSize = 8.sp)
+        } else {
+            Canvas(
+                Modifier.fillMaxWidth().height(112.dp)
+                    .pointerInput(effect.id, spec.key, keys, spec.min, spec.max, layer.start, layer.duration) {
+                        var activeIndex = -1
+                        detectDragGestures(
+                            onDragStart = { offset ->
+                                val minX = 10f
+                                val maxX = (size.width - 10f).coerceAtLeast(11f)
+                                val minY = 10f
+                                val maxY = (size.height - 10f).coerceAtLeast(11f)
+                                activeIndex = keys.indices.minByOrNull { index ->
+                                    val key = keys[index]
+                                    val x = minX + ((key.t - layer.start) / layer.duration.coerceAtLeast(0.001f)).coerceIn(0f, 1f) * (maxX - minX)
+                                    val y = maxY - ((key.v - spec.min) / (spec.max - spec.min).coerceAtLeast(0.0001f)).coerceIn(0f, 1f) * (maxY - minY)
+                                    val dx = offset.x - x
+                                    val dy = offset.y - y
+                                    dx * dx + dy * dy
+                                } ?: -1
+                                val nearest = activeIndex.takeIf { it >= 0 }?.let { index ->
+                                    val key = keys[index]
+                                    val x = minX + ((key.t - layer.start) / layer.duration.coerceAtLeast(0.001f)).coerceIn(0f, 1f) * (maxX - minX)
+                                    val y = maxY - ((key.v - spec.min) / (spec.max - spec.min).coerceAtLeast(0.0001f)).coerceIn(0f, 1f) * (maxY - minY)
+                                    sqrt((offset.x - x) * (offset.x - x) + (offset.y - y) * (offset.y - y))
+                                } ?: Float.MAX_VALUE
+                                if (nearest <= 28f * density) editor.beginEdit() else activeIndex = -1
+                            },
+                            onDragEnd = { activeIndex = -1 },
+                            onDragCancel = { activeIndex = -1 }
+                        ) { change, _ ->
+                            if (activeIndex in keys.indices) {
+                                val minY = 10f
+                                val maxY = (size.height - 10f).coerceAtLeast(11f)
+                                val normalized = (1f - ((change.position.y - minY) / (maxY - minY))).coerceIn(0f, 1f)
+                                val key = keys[activeIndex]
+                                val value = spec.min + normalized * (spec.max - spec.min)
+                                editor.replaceEffectParameterKey(layer.id, effect.id, spec.key,
+                                    activeIndex, key.copy(v = value))
+                                change.consume()
+                            }
+                        }
+                    }
+            ) {
+                val left = 10.dp.toPx()
+                val right = (size.width - 10.dp.toPx()).coerceAtLeast(left + 1f)
+                val top = 10.dp.toPx()
+                val bottom = (size.height - 10.dp.toPx()).coerceAtLeast(top + 1f)
+                for (row in 0..4) {
+                    val y = top + (bottom - top) * row / 4f
+                    drawLine(KColors.Line, Offset(left, y), Offset(right, y), 1.dp.toPx())
+                }
+                val playheadX = left + ((editor.time - layer.start) / layer.duration.coerceAtLeast(0.001f))
+                    .coerceIn(0f, 1f) * (right - left)
+                drawLine(KColors.Accent.copy(alpha = 0.45f), Offset(playheadX, top),
+                    Offset(playheadX, bottom), 1.dp.toPx())
+                if (keys.isNotEmpty()) {
+                    val path = Path()
+                    keys.forEachIndexed { index, key ->
+                        val x = left + ((key.t - layer.start) / layer.duration.coerceAtLeast(0.001f))
+                            .coerceIn(0f, 1f) * (right - left)
+                        val y = bottom - ((key.v - spec.min) / (spec.max - spec.min).coerceAtLeast(0.0001f))
+                            .coerceIn(0f, 1f) * (bottom - top)
+                        if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
+                    }
+                    drawPath(path, KColors.Accent, style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round))
+                    keys.forEach { key ->
+                        val x = left + ((key.t - layer.start) / layer.duration.coerceAtLeast(0.001f))
+                            .coerceIn(0f, 1f) * (right - left)
+                        val y = bottom - ((key.v - spec.min) / (spec.max - spec.min).coerceAtLeast(0.0001f))
+                            .coerceIn(0f, 1f) * (bottom - top)
+                        drawCircle(KColors.Accent, radius = 5.dp.toPx(), center = Offset(x, y))
+                        drawCircle(KColors.Bg, radius = 2.dp.toPx(), center = Offset(x, y))
+                    }
+                }
+            }
+            Text("Drag a point vertically to edit its value. Use KEY at the playhead to add or remove points.",
+                color = KColors.Muted, fontSize = 8.sp)
         }
     }
 }
