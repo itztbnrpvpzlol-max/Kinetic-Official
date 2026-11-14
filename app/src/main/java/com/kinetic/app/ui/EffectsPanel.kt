@@ -198,7 +198,7 @@ fun EffectControlsPanel(editor: EditorState, layer: Layer, onBrowseEffects: () -
                             fontSize = 8.sp, letterSpacing = 0.55.sp
                         )
                     }
-                    EffectAction("⌃", expanded) {
+                    EffectAction(if (expanded) "⌃" else "⌄", expanded) {
                         expandedEffectId = if (expanded) null else effect.id
                     }
                     EffectAction(if (effect.enabled) "◉" else "○", effect.enabled) {
