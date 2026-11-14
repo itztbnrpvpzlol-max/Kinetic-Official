@@ -111,6 +111,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
     var showShapePanel by remember { mutableStateOf(false) }
     var maskTool by remember { mutableStateOf("Pen") }
     var rotoForeground by remember { mutableStateOf(true) }
+    var showEffectsScreen by remember { mutableStateOf(false) }
     LaunchedEffect(editor.selectedId) {
         showToolPanel = false
         showShapePanel = false
@@ -331,6 +332,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                             onExtractAudio = { editor.extractAudio(activeLayer.id); showToolPanel = false },
                             maskTool = maskTool, onMaskToolChange = { maskTool = it },
                             rotoForeground = rotoForeground, onRotoForegroundChange = { rotoForeground = it },
+                            onOpenEffects = { showEffectsScreen = true },
                             modifier = Modifier.fillMaxWidth().height(adaptivePanelHeight.dp))
                     }
                 }
@@ -389,6 +391,15 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                 }
             }
         }
+        }
+        if (showEffectsScreen) {
+            Box(Modifier.fillMaxSize().background(KColors.Bg)) {
+                Box(Modifier.align(Alignment.TopEnd).padding(top = 10.dp, end = 12.dp)
+                    .size(42.dp).clip(CircleShape).background(KColors.Surface2)
+                    .clickable { showEffectsScreen = false }, contentAlignment = Alignment.Center) {
+                    Text("×", color = KColors.Text, fontSize = 27.sp, fontWeight = FontWeight.Light)
+                }
+            }
         }
     }
 
@@ -634,7 +645,7 @@ private fun ToolEditPanel(
 }
 
 @Composable
-private fun ToolPanelControls(tool: String, editor: EditorState, layer: Layer, displayTime: Float, onExtractAudio: () -> Unit, maskTool: String, onMaskToolChange: (String) -> Unit, rotoForeground: Boolean, onRotoForegroundChange: (Boolean) -> Unit) {
+private fun ToolPanelControls(tool: String, editor: EditorState, layer: Layer, displayTime: Float, onExtractAudio: () -> Unit, maskTool: String, onMaskToolChange: (String) -> Unit, rotoForeground: Boolean, onRotoForegroundChange: (Boolean) -> Unit, onOpenEffects: () -> Unit) {
     Column(Modifier.fillMaxSize().background(KColors.Surface).padding(horizontal = 12.dp, vertical = 7.dp),
         verticalArrangement = Arrangement.spacedBy(5.dp)) {
         when (tool) {
@@ -659,10 +670,10 @@ private fun ToolPanelControls(tool: String, editor: EditorState, layer: Layer, d
                 MaskingPanel(editor, layer, maskTool, onMaskToolChange, rotoForeground, onRotoForegroundChange)
             }
             "Effects" -> {
-                val grayscale = "Grayscale" in layer.effects
-                Text("EFFECTS", color = KColors.Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                UnitAction(if (grayscale) "Grayscale on" else "Grayscale off", selected = grayscale) {
-                    editor.updateLayer(layer.id) { it.copy(effects = if ("Grayscale" in it.effects) it.effects - "Grayscale" else it.effects + "Grayscale") }
+                Box(Modifier.fillMaxWidth().height(38.dp).clip(RoundedCornerShape(7.dp))
+                    .background(KColors.Accent).clickable { onOpenEffects() },
+                    contentAlignment = Alignment.Center) {
+                    Text("Add Effect", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 }
             }
             "Blend modes" -> {
