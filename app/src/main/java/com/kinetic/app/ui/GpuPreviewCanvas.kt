@@ -69,14 +69,16 @@ private data class GpuLayer(
     val mask: Boolean,
     val grayscale: Boolean,
     val blend: String,
-    val isVideo: Boolean = false
+    val isVideo: Boolean = false,
+    val effects: FloatArray = FloatArray(0)
 )
 
 private data class GpuScene(
     val layers: List<GpuLayer>,
     val selected: GpuLayer?,
     val background: Int = 0xFF000000.toInt(),
-    val cacheAllowed: Boolean = true
+    val cacheAllowed: Boolean = true,
+    val time: Float = 0f
 )
 
 private fun supportsGles3(context: Context): Boolean = runCatching {
@@ -117,9 +119,12 @@ fun PreviewCanvas(
     // TextureView is a bottom-layer surface. Keep it only when the one active
     // video is the lowest visual layer; Canvas then draws stills/text/shapes
     // above it without ever copying the decoded video frame into a Bitmap.
+    val hasGpuEffects = activeVisualLayers.any { layer -> layer.effectStack.any { it.enabled } }
+    val hasComplexMasks = editor.layers.any { it.visible && it.maskEnabled && it.maskPath != null }
     val directVideo = videoLayers.singleOrNull()
         ?.takeIf {
-            activeVisualLayers.lastOrNull()?.id == it.id && !it.maskEnabled && canUseDirectSurfaceVideo(it)
+            activeVisualLayers.lastOrNull()?.id == it.id && !it.maskEnabled &&
+                !hasGpuEffects && canUseDirectSurfaceVideo(it)
         }
 
     if (directVideo != null) {
@@ -127,9 +132,16 @@ fun PreviewCanvas(
             DirectSurfaceVideoPreview(editor, directVideo, Modifier.fillMaxSize(), playback)
             CpuPreviewCanvas(editor, Modifier.fillMaxSize(), directVideoLayerId = directVideo.id)
         }
-    } else if (videoLayers.isNotEmpty() ||
-        editor.layers.any { it.visible && it.maskEnabled && it.maskPath != null } ||
-        !supportsGles3(context)) {
+    } else if ((videoLayers.isNotEmpty() || hasGpuEffects) && supportsGles3(context) && !hasComplexMasks) {
+        // Effect-bearing footage enters the GLSurfaceView compositor. Its
+        // SurfaceTexture decoder feeds the GPU shader stack without a CPU bitmap hop.
+        val visualLayers = editor.layers.filter {
+            it.visible && it.type != LayerType.AUDIO &&
+                it.type != LayerType.NULL && it.type != LayerType.ADJUSTMENT
+        }
+        val qualityScale = resolvePreviewScale(context, qualityIndex, visualLayers.size)
+        GpuCompositionPreviewCanvas(editor, modifier, qualityScale, playback)
+    } else if (videoLayers.isNotEmpty() || hasComplexMasks || !supportsGles3(context)) {
         // Keep video that needs transforms, overlaps, masks or compositing on
         // the established MediaExtractor/MediaCodec bitmap path. The libmpv
         // external-texture path is not reliable on every GLES driver and could
@@ -319,7 +331,7 @@ private fun GpuCompositionPreviewCanvas(
             renderLayers += GpuLayer(
                 layer.id, null, Matrix(layerMatrix(layer, editor.time, byId)),
                 layer.width, layer.height, opacity, layer.maskEnabled,
-                "Grayscale" in layer.effects, layer.blendMode, true
+                "Grayscale" in layer.effects, layer.blendMode, true, effectUniforms(layer.effectStack)
             )
             continue
         }
@@ -354,7 +366,7 @@ private fun GpuCompositionPreviewCanvas(
         renderLayers += GpuLayer(
             layer.id, bitmap, Matrix(layerMatrix(layer, editor.time, byId)),
             layer.width, layer.height, opacity, layer.maskEnabled,
-            "Grayscale" in layer.effects, layer.blendMode
+            "Grayscale" in layer.effects, layer.blendMode, false, effectUniforms(layer.effectStack)
         )
     }
     val selectedLayer = editor.layers.firstOrNull {
@@ -366,7 +378,7 @@ private fun GpuCompositionPreviewCanvas(
             false, false, "Normal"
         )
     }
-    val scene = GpuScene(renderLayers, selectedLayer, cacheAllowed = !editor.playing)
+    val scene = GpuScene(renderLayers, selectedLayer, cacheAllowed = !editor.playing, time = editor.time)
     val view = remember(context) { GpuPreviewSurfaceView(context) { gpuFailed.value = true } }
         BoxWithConstraints(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             val fitScale = minOf(maxWidth.value / COMP_W, maxHeight.value / COMP_H)
@@ -822,7 +834,8 @@ private class CompositionGlRenderer(
         data[8] = ndcX(points[4], scale, ox); data[9] = ndcY(points[5], scale, oy); data[10] = uvMax; data[11] = 0f
         data[12] = ndcX(points[6], scale, ox); data[13] = ndcY(points[7], scale, oy); data[14] = uvMax; data[15] = uvMax
         NativeRenderEngine.nativeGlDrawTexture(
-            texture, data, layer.opacity, if (layer.grayscale) 1f else 0f, blendModeCode(layer.blend)
+            texture, data, layer.opacity, if (layer.grayscale) 1f else 0f,
+            blendModeCode(layer.blend), layer.effects, scene.time
         )
     }
 
@@ -845,7 +858,7 @@ private class CompositionGlRenderer(
         data[12] = ndcX(points[6], scale, ox); data[13] = ndcY(points[7], scale, oy); data[14] = uvMax; data[15] = uvMax
         NativeRenderEngine.nativeGlDrawExternalTexture(
             output.textureId, data, layer.opacity, if (layer.grayscale) 1f else 0f,
-            output.transform, blendModeCode(layer.blend)
+            output.transform, blendModeCode(layer.blend), layer.effects, scene.time
         )
     }
 

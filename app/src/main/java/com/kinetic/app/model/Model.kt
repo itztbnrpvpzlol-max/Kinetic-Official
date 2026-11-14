@@ -285,6 +285,49 @@ data class LayerMask(
     val frozen: Boolean = false
 )
 
+data class EffectInstance(
+    val id: String = UUID.randomUUID().toString(),
+    val name: String,
+    val enabled: Boolean = true,
+    val parameters: Map<String, Float> = emptyMap()
+)
+
+fun createEffect(name: String): EffectInstance? {
+    val parameters = when (name) {
+        "Motion Tile" -> mapOf("Scale" to 2f, "Mirror Edges" to 1f)
+        "Wave Warp" -> mapOf("Amount" to 0.012f, "Frequency" to 4f, "Speed" to 1f)
+        "Warp Shake" -> mapOf("Amount" to 0.008f, "Frequency" to 8f)
+        "RGB Split" -> mapOf("Amount" to 0.006f, "Angle" to 0f)
+        "Oscillate" -> mapOf("X Amount" to 0.02f, "Y Amount" to 0.02f, "Frequency" to 1f)
+        "Deep Glow" -> mapOf("Threshold" to 0.65f, "Radius" to 0.012f, "Intensity" to 1.2f)
+        "Exposure And Gamma" -> mapOf("Exposure" to 0f, "Gamma" to 1f)
+        else -> return null
+    }
+    return EffectInstance(name = name, parameters = parameters)
+}
+
+/** Packs enabled effects into four-float GLES uniforms, preserving stack order. */
+fun effectUniforms(effects: List<EffectInstance>): FloatArray {
+    val active = effects.filter { it.enabled }.take(8)
+    val output = FloatArray(active.size * 4)
+    active.forEachIndexed { index, effect ->
+        val offset = index * 4
+        val p = effect.parameters
+        val tuple = when (effect.name) {
+            "Motion Tile" -> floatArrayOf(1f, p["Scale"] ?: 2f, p["Mirror Edges"] ?: 1f, 0f)
+            "Wave Warp" -> floatArrayOf(2f, p["Amount"] ?: 0.012f, p["Frequency"] ?: 4f, p["Speed"] ?: 1f)
+            "Warp Shake" -> floatArrayOf(3f, p["Amount"] ?: 0.008f, p["Frequency"] ?: 8f, 0f)
+            "RGB Split" -> floatArrayOf(4f, p["Amount"] ?: 0.006f, p["Angle"] ?: 0f, 0f)
+            "Oscillate" -> floatArrayOf(5f, p["X Amount"] ?: 0.02f, p["Y Amount"] ?: 0.02f, p["Frequency"] ?: 1f)
+            "Deep Glow" -> floatArrayOf(6f, p["Threshold"] ?: 0.65f, p["Radius"] ?: 0.012f, p["Intensity"] ?: 1.2f)
+            "Exposure And Gamma" -> floatArrayOf(7f, p["Exposure"] ?: 0f, p["Gamma"] ?: 1f, 0f)
+            else -> floatArrayOf(0f, 0f, 0f, 0f)
+        }
+        tuple.copyInto(output, offset)
+    }
+    return output
+}
+
 data class Layer(
     val id: String = UUID.randomUUID().toString(),
     val type: LayerType,
@@ -303,8 +346,10 @@ data class Layer(
     val text: String = "Text",
     val color: Int = 0xFF8D8BA3.toInt(),
     val props: Map<PropId, Prop>,
-    /** Reserved for later: adjustment layers will hold effects here. Intentionally empty for now. */
+    /** Legacy simple layer flags (for example Grayscale). */
     val effects: List<String> = emptyList(),
+    /** Ordered, parameterized GPU effect stack. */
+    val effectStack: List<EffectInstance> = emptyList(),
     val speed: Float = 1f,
     val volume: Float = 1f,
     val maskEnabled: Boolean = false,

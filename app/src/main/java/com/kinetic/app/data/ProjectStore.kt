@@ -101,7 +101,16 @@ class ProjectStore(context: Context) {
             .put("width", l.width.toDouble()).put("height", l.height.toDouble()).put("visible", l.visible)
             .put("parentId", l.parentId).put("scaleLinked", l.scaleLinked).put("text", l.text)
             .put("color", l.color).put("props", props)
-            .put("effects", JSONArray(l.effects)).put("speed", l.p(PropId.SPEED).base.toDouble()).put("volume", l.p(PropId.VOLUME).base.toDouble())
+            .put("effects", JSONArray(l.effects))
+            .put("effectStack", JSONArray().also { array ->
+                l.effectStack.forEach { effect ->
+                    val parameters = JSONObject()
+                    effect.parameters.forEach { (key, value) -> parameters.put(key, value.toDouble()) }
+                    array.put(JSONObject().put("id", effect.id).put("name", effect.name)
+                        .put("enabled", effect.enabled).put("parameters", parameters))
+                }
+            })
+            .put("speed", l.p(PropId.SPEED).base.toDouble()).put("volume", l.p(PropId.VOLUME).base.toDouble())
             .put("maskEnabled", l.maskEnabled).put("blendMode", l.blendMode)
             .put("shapeKind", l.shapeKind)
             .put("vectorPoints", JSONArray().also { points -> l.vectorPoints.forEach { point -> points.put(JSONObject().put("x", point.x.toDouble()).put("y", point.y.toDouble())) } })
@@ -175,6 +184,22 @@ class ProjectStore(context: Context) {
             scaleLinked = j.optBoolean("scaleLinked", false), text = j.optString("text", "Text"),
             color = j.optInt("color", 0xFF8D8BA3.toInt()), props = props,
             effects = (j.optJSONArray("effects") ?: JSONArray()).let { a -> (0 until a.length()).map { a.optString(it) } },
+            effectStack = (j.optJSONArray("effectStack") ?: JSONArray()).let { array ->
+                (0 until array.length()).mapNotNull { index ->
+                    val item = array.optJSONObject(index) ?: return@mapNotNull null
+                    val name = item.optString("name")
+                    val defaults = createEffect(name)?.parameters ?: return@mapNotNull null
+                    val jsonParameters = item.optJSONObject("parameters") ?: JSONObject()
+                    val parameters = defaults.toMutableMap()
+                    val iterator = jsonParameters.keys()
+                    while (iterator.hasNext()) {
+                        val key = iterator.next()
+                        parameters[key] = jsonParameters.optDouble(key, parameters[key]?.toDouble() ?: 0.0).toFloat()
+                    }
+                    EffectInstance(item.optString("id", UUID.randomUUID().toString()), name,
+                        item.optBoolean("enabled", true), parameters)
+                }
+            },
             speed = j.optDouble("speed", 1.0).toFloat().coerceIn(0.1f, 4f),
             volume = j.optDouble("volume", 1.0).toFloat().coerceIn(0f, 2f),
             maskEnabled = j.optBoolean("maskEnabled", false), blendMode = j.optString("blendMode", "Normal"),

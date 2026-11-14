@@ -44,7 +44,7 @@ import kotlinx.coroutines.delay
 internal fun canUseDirectSurfaceVideo(layer: Layer): Boolean {
     if (layer.type != com.kinetic.app.model.LayerType.VIDEO ||
         layer.parentId != null || layer.maskEnabled || layer.blendMode != "Normal" ||
-        layer.effects.isNotEmpty()
+        layer.effects.isNotEmpty() || layer.effectStack.any { it.enabled }
     ) return false
 
     val speedProp = layer.p(PropId.SPEED)

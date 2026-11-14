@@ -29,7 +29,7 @@ enum class IconKind {
     LOCK, UNLOCK, SETTINGS, EXPORT, IMPORT, DELETE, CUT, SPLIT, CROP, ROTATE, FLIP,
     COPY, DUPLICATE, TRIM_START, TRIM_END, BRING_TO_PLAYHEAD, EXTEND_TO_PLAYHEAD, MORE, ZOOM_IN, ZOOM_OUT, EFFECTS, FILTER, MASK, BLEND, WAVEFORM, SEARCH,
     BACK, FRAME_BACK, FRAME_FORWARD, SKIP_START, SKIP_END, CLOSE, CHECK, SHARE, FOLDER, HOME, MIC, MUTE, VOLUME, GRID, ALIGN, FIT,
-    FULLSCREEN, DOWNLOAD, UPLOAD, INFO, GRAPH
+    FULLSCREEN, DOWNLOAD, UPLOAD, INFO, GRAPH, MOTION
 }
 
 @Composable
@@ -179,6 +179,16 @@ fun KIcon(kind: IconKind, tint: Color, modifier: Modifier = Modifier.size(22.dp)
             IconKind.ALIGN -> { line(pt(.2f,.2f),pt(.8f,.2f)); line(pt(.2f,.5f),pt(.65f,.5f)); line(pt(.2f,.8f),pt(.72f,.8f)); line(pt(.2f,.1f),pt(.2f,.9f)) }
             IconKind.FIT, IconKind.FULLSCREEN -> { line(pt(.12f,.34f),pt(.12f,.12f)); line(pt(.12f,.12f),pt(.34f,.12f)); line(pt(.66f,.12f),pt(.88f,.12f)); line(pt(.88f,.12f),pt(.88f,.34f)); line(pt(.12f,.66f),pt(.12f,.88f)); line(pt(.12f,.88f),pt(.34f,.88f)); line(pt(.66f,.88f),pt(.88f,.88f)); line(pt(.88f,.88f),pt(.88f,.66f)) }
             IconKind.INFO -> { outlinedCircle(.5f,.5f,.38f); filledCircle(.5f,.32f,.045f); line(pt(.5f,.46f),pt(.5f,.72f)) }
+            IconKind.MOTION -> {
+                val wave = Path().apply {
+                    moveTo(w * .08f, h * .58f)
+                    cubicTo(w * .25f, h * .08f, w * .42f, h * .92f, w * .58f, h * .5f)
+                    cubicTo(w * .7f, h * .18f, w * .78f, h * .28f, w * .9f, h * .22f)
+                }
+                drawPath(wave, tint, style = st)
+                line(pt(.78f,.12f), pt(.9f,.22f))
+                line(pt(.78f,.32f), pt(.9f,.22f))
+            }
             IconKind.GRAPH -> {
                 line(pt(.12f,.12f), pt(.12f,.88f))
                 line(pt(.12f,.88f), pt(.9f,.88f))

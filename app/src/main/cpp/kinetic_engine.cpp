@@ -264,8 +264,10 @@ GLuint gExternalProgram = 0;
 GLuint gSolidProgram = 0;
 GLint gTexturePosition = -1, gTextureUv = -1, gTextureSampler = -1;
 GLint gTextureAlpha = -1, gTextureGray = -1;
+GLint gTextureEffects = -1, gTextureEffectCount = -1, gTextureTime = -1;
 GLint gExternalPosition = -1, gExternalUv = -1, gExternalSampler = -1;
 GLint gExternalAlpha = -1, gExternalGray = -1, gExternalMatrix = -1;
+GLint gExternalEffects = -1, gExternalEffectCount = -1, gExternalTime = -1;
 GLint gSolidPosition = -1, gSolidColor = -1;
 
 GLuint compileGlShader(GLenum type, const char* source) {
@@ -336,7 +338,8 @@ void applyNativeBlend(jint mode) {
 void drawNativeTexture(GLuint program, GLint positionHandle, GLint uvHandle,
                        GLint samplerHandle, GLint alphaHandle, GLint grayHandle,
                        GLenum target, jint textureId, const jfloat* vertices,
-                       jfloat alpha, jfloat gray, jint blendMode) {
+                       jfloat alpha, jfloat gray, jint blendMode,
+                       const jfloat* effects, jint effectCount, jfloat time) {
     if (!program || !vertices || alpha <= 0.f) return;
     if (!gVertexBuffer || !gVertexArrayObject) return;
     glBindVertexArray(gVertexArrayObject);
@@ -354,6 +357,11 @@ void drawNativeTexture(GLuint program, GLint positionHandle, GLint uvHandle,
     glUniform1i(samplerHandle, 0);
     glUniform1f(alphaHandle, alpha);
     glUniform1f(grayHandle, gray);
+    if (program == gTextureProgram) {
+        glUniform1i(gTextureEffectCount, effectCount);
+        glUniform1f(gTextureTime, time);
+        if (effects && effectCount > 0) glUniform4fv(gTextureEffects, effectCount, effects);
+    }
     applyNativeBlend(blendMode);
     glEnable(GL_BLEND);
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
@@ -500,17 +508,48 @@ Java_com_kinetic_app_engine_NativeRenderEngine_nativeGlInit(JNIEnv*, jobject) {
     static const char* textureFragment =
         "#version 300 es\n"
         "precision mediump float; uniform sampler2D uTexture; uniform float uAlpha;"
-        "uniform float uGray; in vec2 vTexCoord; out vec4 fragColor;"
-        "void main(){ vec4 c=texture(uTexture,vTexCoord);"
+        "uniform float uGray; uniform vec4 uEffects[8]; uniform int uEffectCount; uniform float uTime;"
+        "in vec2 vTexCoord; out vec4 fragColor;"
+        "vec2 warpUv(vec2 uv){ for(int i=0;i<8;i++){ if(i>=uEffectCount) break; vec4 e=uEffects[i]; int k=int(e.x+0.5);"
+        "if(k==1){ float s=max(1.0,e.y); vec2 q=uv*s; vec2 cell=floor(q); vec2 f=fract(q);"
+        "if(e.z>0.5) f=mix(f,1.0-f,mod(cell,2.0)); uv=f; }"
+        "else if(k==2){ uv.x+=sin((uv.y*e.z+uTime*e.w)*6.28318)*e.y; }"
+        "else if(k==3){ uv+=vec2(sin(uTime*e.z*6.28318),cos(uTime*e.z*5.13))*e.y; }"
+        "else if(k==5){ uv+=vec2(sin(uTime*e.w*6.28318)*e.y,cos(uTime*e.w*6.28318)*e.z); } } return clamp(uv,0.0,1.0); }"
+        "void main(){ vec2 uv=warpUv(vTexCoord); vec4 c=texture(uTexture,uv);"
+        "for(int i=0;i<8;i++){ if(i>=uEffectCount) break; vec4 e=uEffects[i]; int k=int(e.x+0.5);"
+        "if(k==4){ float a=radians(e.z); vec2 d=vec2(cos(a),sin(a))*e.y;"
+        "c.r=texture(uTexture,clamp(uv+d,0.0,1.0)).r; c.b=texture(uTexture,clamp(uv-d,0.0,1.0)).b; }"
+        "else if(k==6){ float r=max(e.z,0.0005); vec3 s0=texture(uTexture,clamp(uv+vec2(r,0.0),0.0,1.0)).rgb;"
+        "vec3 s1=texture(uTexture,clamp(uv-vec2(r,0.0),0.0,1.0)).rgb;"
+        "vec3 s2=texture(uTexture,clamp(uv+vec2(0.0,r),0.0,1.0)).rgb;"
+        "vec3 s3=texture(uTexture,clamp(uv-vec2(0.0,r),0.0,1.0)).rgb;"
+        "c.rgb+=(max(s0-vec3(e.y),vec3(0.0))+max(s1-vec3(e.y),vec3(0.0))+max(s2-vec3(e.y),vec3(0.0))+max(s3-vec3(e.y),vec3(0.0)))*0.25*e.w; }"
+        "else if(k==7){ c.rgb=pow(max(c.rgb*exp2(e.y),vec3(0.0)),vec3(1.0/max(e.z,0.01))); } }"
         "if(uGray>0.5){ float y=dot(c.rgb,vec3(0.299,0.587,0.114)); c.rgb=vec3(y); }"
         "fragColor=vec4(c.rgb*c.a*uAlpha,c.a*uAlpha); }";
     static const char* externalFragment =
         "#version 300 es\n"
         "#extension GL_OES_EGL_image_external_essl3 : require\n"
         "precision mediump float; uniform samplerExternalOES uTexture; uniform float uAlpha;"
-        "uniform float uGray; uniform mat4 uTexMatrix; in vec2 vTexCoord; out vec4 fragColor;"
-        "void main(){ vec2 uv=(uTexMatrix*vec4(vTexCoord,0.0,1.0)).xy;"
-        "vec4 c=texture(uTexture,uv);"
+        "uniform float uGray; uniform mat4 uTexMatrix; uniform vec4 uEffects[8];"
+        "uniform int uEffectCount; uniform float uTime; in vec2 vTexCoord; out vec4 fragColor;"
+        "vec2 warpUv(vec2 uv){ for(int i=0;i<8;i++){ if(i>=uEffectCount) break; vec4 e=uEffects[i]; int k=int(e.x+0.5);"
+        "if(k==1){ float s=max(1.0,e.y); vec2 q=uv*s; vec2 cell=floor(q); vec2 f=fract(q);"
+        "if(e.z>0.5) f=mix(f,1.0-f,mod(cell,2.0)); uv=f; }"
+        "else if(k==2){ uv.x+=sin((uv.y*e.z+uTime*e.w)*6.28318)*e.y; }"
+        "else if(k==3){ uv+=vec2(sin(uTime*e.z*6.28318),cos(uTime*e.z*5.13))*e.y; }"
+        "else if(k==5){ uv+=vec2(sin(uTime*e.w*6.28318)*e.y,cos(uTime*e.w*6.28318)*e.z); } } return clamp(uv,0.0,1.0); }"
+        "void main(){ vec2 uv=warpUv((uTexMatrix*vec4(vTexCoord,0.0,1.0)).xy); vec4 c=texture(uTexture,uv);"
+        "for(int i=0;i<8;i++){ if(i>=uEffectCount) break; vec4 e=uEffects[i]; int k=int(e.x+0.5);"
+        "if(k==4){ float a=radians(e.z); vec2 d=vec2(cos(a),sin(a))*e.y;"
+        "c.r=texture(uTexture,clamp(uv+d,0.0,1.0)).r; c.b=texture(uTexture,clamp(uv-d,0.0,1.0)).b; }"
+        "else if(k==6){ float r=max(e.z,0.0005); vec3 s0=texture(uTexture,clamp(uv+vec2(r,0.0),0.0,1.0)).rgb;"
+        "vec3 s1=texture(uTexture,clamp(uv-vec2(r,0.0),0.0,1.0)).rgb;"
+        "vec3 s2=texture(uTexture,clamp(uv+vec2(0.0,r),0.0,1.0)).rgb;"
+        "vec3 s3=texture(uTexture,clamp(uv-vec2(0.0,r),0.0,1.0)).rgb;"
+        "c.rgb+=(max(s0-vec3(e.y),vec3(0.0))+max(s1-vec3(e.y),vec3(0.0))+max(s2-vec3(e.y),vec3(0.0))+max(s3-vec3(e.y),vec3(0.0)))*0.25*e.w; }"
+        "else if(k==7){ c.rgb=pow(max(c.rgb*exp2(e.y),vec3(0.0)),vec3(1.0/max(e.z,0.01))); } }"
         "if(uGray>0.5){ float y=dot(c.rgb,vec3(0.299,0.587,0.114)); c.rgb=vec3(y); }"
         "fragColor=vec4(c.rgb*c.a*uAlpha,c.a*uAlpha); }";
     static const char* solidVertex =
@@ -541,20 +580,28 @@ Java_com_kinetic_app_engine_NativeRenderEngine_nativeGlInit(JNIEnv*, jobject) {
     gTextureSampler = glGetUniformLocation(gTextureProgram, "uTexture");
     gTextureAlpha = glGetUniformLocation(gTextureProgram, "uAlpha");
     gTextureGray = glGetUniformLocation(gTextureProgram, "uGray");
+    gTextureEffects = glGetUniformLocation(gTextureProgram, "uEffects[0]");
+    gTextureEffectCount = glGetUniformLocation(gTextureProgram, "uEffectCount");
+    gTextureTime = glGetUniformLocation(gTextureProgram, "uTime");
     gExternalPosition = glGetAttribLocation(gExternalProgram, "aPosition");
     gExternalUv = glGetAttribLocation(gExternalProgram, "aTexCoord");
     gExternalSampler = glGetUniformLocation(gExternalProgram, "uTexture");
     gExternalAlpha = glGetUniformLocation(gExternalProgram, "uAlpha");
     gExternalGray = glGetUniformLocation(gExternalProgram, "uGray");
     gExternalMatrix = glGetUniformLocation(gExternalProgram, "uTexMatrix");
+    gExternalEffects = glGetUniformLocation(gExternalProgram, "uEffects[0]");
+    gExternalEffectCount = glGetUniformLocation(gExternalProgram, "uEffectCount");
+    gExternalTime = glGetUniformLocation(gExternalProgram, "uTime");
     gSolidPosition = glGetAttribLocation(gSolidProgram, "aPosition");
     gSolidColor = glGetUniformLocation(gSolidProgram, "uColor");
 
     const bool locationsValid =
         gTexturePosition >= 0 && gTextureUv >= 0 && gTextureSampler >= 0 &&
-        gTextureAlpha >= 0 && gTextureGray >= 0 &&
+        gTextureAlpha >= 0 && gTextureGray >= 0 && gTextureEffects >= 0 &&
+        gTextureEffectCount >= 0 && gTextureTime >= 0 &&
         gExternalPosition >= 0 && gExternalUv >= 0 && gExternalSampler >= 0 &&
         gExternalAlpha >= 0 && gExternalGray >= 0 && gExternalMatrix >= 0 &&
+        gExternalEffects >= 0 && gExternalEffectCount >= 0 && gExternalTime >= 0 &&
         gSolidPosition >= 0 && gSolidColor >= 0;
     if (!locationsValid) {
         __android_log_print(ANDROID_LOG_ERROR, "KRE", "Required GLES3 shader inputs were not linked");
@@ -566,7 +613,9 @@ Java_com_kinetic_app_engine_NativeRenderEngine_nativeGlInit(JNIEnv*, jobject) {
         gTextureProgram = gExternalProgram = gSolidProgram = 0;
         gVertexBuffer = gVertexArrayObject = 0;
         gTexturePosition = gTextureUv = gTextureSampler = gTextureAlpha = gTextureGray = -1;
+        gTextureEffects = gTextureEffectCount = gTextureTime = -1;
         gExternalPosition = gExternalUv = gExternalSampler = gExternalAlpha = gExternalGray = gExternalMatrix = -1;
+        gExternalEffects = gExternalEffectCount = gExternalTime = -1;
         gSolidPosition = gSolidColor = -1;
         return JNI_FALSE;
     }
@@ -577,32 +626,43 @@ Java_com_kinetic_app_engine_NativeRenderEngine_nativeGlInit(JNIEnv*, jobject) {
 extern "C" JNIEXPORT void JNICALL
 Java_com_kinetic_app_engine_NativeRenderEngine_nativeGlDrawTexture(
         JNIEnv* env, jobject, jint textureId, jfloatArray vertices,
-        jfloat alpha, jfloat gray, jint blendMode) {
+        jfloat alpha, jfloat gray, jint blendMode, jfloatArray effectValues, jfloat time) {
     if (!vertices || env->GetArrayLength(vertices) < 16) return;
     jfloat* data = env->GetFloatArrayElements(vertices, nullptr);
-    if (!data) return;
+    jfloat* effects = effectValues ? env->GetFloatArrayElements(effectValues, nullptr) : nullptr;
+    if (!data) {
+        if (effects) env->ReleaseFloatArrayElements(effectValues, effects, JNI_ABORT);
+        return;
+    }
+    const jint effectCount = effects ? std::min(8, env->GetArrayLength(effectValues) / 4) : 0;
     drawNativeTexture(gTextureProgram, gTexturePosition, gTextureUv,
         gTextureSampler, gTextureAlpha, gTextureGray, GL_TEXTURE_2D,
-        textureId, data, alpha, gray, blendMode);
+        textureId, data, alpha, gray, blendMode, effects, effectCount, time);
     env->ReleaseFloatArrayElements(vertices, data, JNI_ABORT);
+    if (effects) env->ReleaseFloatArrayElements(effectValues, effects, JNI_ABORT);
 }
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_kinetic_app_engine_NativeRenderEngine_nativeGlDrawExternalTexture(
         JNIEnv* env, jobject, jint textureId, jfloatArray vertices,
-        jfloat alpha, jfloat gray, jfloatArray textureMatrix, jint blendMode) {
+        jfloat alpha, jfloat gray, jfloatArray textureMatrix, jint blendMode,
+        jfloatArray effectValues, jfloat time) {
     if (!vertices || env->GetArrayLength(vertices) < 16 ||
         !textureMatrix || env->GetArrayLength(textureMatrix) < 16) return;
     jfloat* data = env->GetFloatArrayElements(vertices, nullptr);
     jfloat* matrix = env->GetFloatArrayElements(textureMatrix, nullptr);
+    jfloat* effects = effectValues ? env->GetFloatArrayElements(effectValues, nullptr) : nullptr;
+    const jint effectCount = effects ? std::min(8, env->GetArrayLength(effectValues) / 4) : 0;
     if (!data || !matrix) {
         if (data) env->ReleaseFloatArrayElements(vertices, data, JNI_ABORT);
         if (matrix) env->ReleaseFloatArrayElements(textureMatrix, matrix, JNI_ABORT);
+        if (effects) env->ReleaseFloatArrayElements(effectValues, effects, JNI_ABORT);
         return;
     }
     if (!gVertexBuffer || !gVertexArrayObject) {
         env->ReleaseFloatArrayElements(vertices, data, JNI_ABORT);
         env->ReleaseFloatArrayElements(textureMatrix, matrix, JNI_ABORT);
+        if (effects) env->ReleaseFloatArrayElements(effectValues, effects, JNI_ABORT);
         return;
     }
     glBindVertexArray(gVertexArrayObject);
@@ -621,6 +681,9 @@ Java_com_kinetic_app_engine_NativeRenderEngine_nativeGlDrawExternalTexture(
     glUniform1f(gExternalAlpha, alpha);
     glUniform1f(gExternalGray, gray);
     glUniformMatrix4fv(gExternalMatrix, 1, GL_FALSE, matrix);
+    glUniform1i(gExternalEffectCount, effectCount);
+    glUniform1f(gExternalTime, time);
+    if (effects && effectCount > 0) glUniform4fv(gExternalEffects, effectCount, effects);
     applyNativeBlend(blendMode);
     glEnable(GL_BLEND);
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
@@ -630,6 +693,7 @@ Java_com_kinetic_app_engine_NativeRenderEngine_nativeGlDrawExternalTexture(
     glBindBuffer(GL_ARRAY_BUFFER, 0);
     env->ReleaseFloatArrayElements(vertices, data, JNI_ABORT);
     env->ReleaseFloatArrayElements(textureMatrix, matrix, JNI_ABORT);
+    if (effects) env->ReleaseFloatArrayElements(effectValues, effects, JNI_ABORT);
 }
 
 extern "C" JNIEXPORT void JNICALL

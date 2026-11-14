@@ -636,6 +636,29 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
         selectedKey = sorted.indexOf(moved)
     }
 
+    fun addEffect(layerId: String, name: String) {
+        val effect = createEffect(name) ?: return
+        updateLayer(layerId) { layer -> layer.copy(effectStack = layer.effectStack + effect) }
+    }
+
+    fun removeEffect(layerId: String, effectId: String) {
+        updateLayer(layerId) { layer -> layer.copy(effectStack = layer.effectStack.filterNot { it.id == effectId }) }
+    }
+
+    fun setEffectEnabled(layerId: String, effectId: String, enabled: Boolean) {
+        updateLayer(layerId) { layer ->
+            layer.copy(effectStack = layer.effectStack.map { if (it.id == effectId) it.copy(enabled = enabled) else it })
+        }
+    }
+
+    fun updateEffectParameter(layerId: String, effectId: String, parameter: String, value: Float) {
+        updateLayer(layerId, push = false) { layer ->
+            layer.copy(effectStack = layer.effectStack.map { effect ->
+                if (effect.id == effectId) effect.copy(parameters = effect.parameters + (parameter to value)) else effect
+            })
+        }
+    }
+
     fun setExpression(layerId: String, id: PropId, expression: String?) {
         updateLayer(layerId) { l -> l.copy(props = l.props + (id to l.p(id).copy(expression = expression))) }
     }

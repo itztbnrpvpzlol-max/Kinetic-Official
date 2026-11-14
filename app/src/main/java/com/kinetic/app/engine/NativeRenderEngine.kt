@@ -33,7 +33,8 @@ object NativeRenderEngine {
         backgroundArgb: Int, width: Int, height: Int, useCompositionCache: Boolean
     )
     external fun nativeGlDrawTexture(
-        textureId: Int, vertices: FloatArray, alpha: Float, gray: Float, blendMode: Int
+        textureId: Int, vertices: FloatArray, alpha: Float, gray: Float, blendMode: Int,
+        effects: FloatArray, time: Float
     )
     /** Draws a complete ordered scene in one JNI call on the current GLES3 context. */
     external fun nativeGlDrawComposition(
@@ -47,7 +48,7 @@ object NativeRenderEngine {
     )
     external fun nativeGlDrawExternalTexture(
         textureId: Int, vertices: FloatArray, alpha: Float, gray: Float,
-        textureMatrix: FloatArray, blendMode: Int
+        textureMatrix: FloatArray, blendMode: Int, effects: FloatArray, time: Float
     )
     external fun nativeGlDrawSelection(vertices: FloatArray)
     external fun nativeGlRelease()

@@ -393,7 +393,16 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
         }
         }
         if (showEffectsScreen) {
-            EffectsBrowserScreen(onClose = { showEffectsScreen = false })
+            EffectsBrowserScreen(
+                onClose = { showEffectsScreen = false },
+                onAddEffect = { name ->
+                    editor.selected?.let { editor.addEffect(it.id, name) }
+                    showEffectsScreen = false
+                    showPropertiesPanel = false
+                    showToolPanel = true
+                    dockTool = "Effects"
+                }
+            )
         }
     }
 
@@ -665,11 +674,7 @@ private fun ToolPanelControls(tool: String, editor: EditorState, layer: Layer, d
                 MaskingPanel(editor, layer, maskTool, onMaskToolChange, rotoForeground, onRotoForegroundChange)
             }
             "Effects" -> {
-                Box(Modifier.fillMaxWidth().height(38.dp).clip(RoundedCornerShape(7.dp))
-                    .background(KColors.Accent).clickable { onOpenEffects() },
-                    contentAlignment = Alignment.Center) {
-                    Text("Add Effect", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                }
+                EffectControlsPanel(editor, layer, onOpenEffects)
             }
             "Blend modes" -> {
                 Text("BLEND MODE", color = KColors.Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold)
