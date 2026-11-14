@@ -125,6 +125,14 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
     fun seek(t: Float) { val target = t.coerceAtLeast(0f); if (target > duration) baseDuration = target; time = target }
 
 
+    /** Frame-accurate seek without magnetic alignment; safe to call continuously while scrubbing. */
+    fun seekFrame(t: Float) {
+        val raw = t.coerceAtLeast(0f)
+        if (raw > duration) baseDuration = raw
+        time = (raw * fps).roundToInt() / fps.toFloat()
+    }
+
+    /** Optional magnetic alignment for completed gestures and deliberate snap operations. */
     fun seekSnap(t: Float, windowSec: Float) {
         val raw = t.coerceAtLeast(0f)
         if (raw > duration) baseDuration = raw

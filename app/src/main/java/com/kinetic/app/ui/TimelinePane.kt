@@ -183,23 +183,35 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
                             change.consume()
                             if (editor.playing) editor.playing = false
                             hScroll.dispatchRawDelta(-overSlop)
-                            editor.seekSnap(((hScroll.value.toFloat() - leadingPadPx) / (pps * dens).coerceAtLeast(0.001f)).coerceAtLeast(0f), 8f / pps)
+                            editor.seekFrame(((hScroll.value.toFloat() - leadingPadPx) / (pps * dens).coerceAtLeast(0.001f)).coerceAtLeast(0f))
                             dragStarted = true
                         }
                     }
 
                     if (dragStarted) {
+                        var releasedNormally = false
                         while (true) {
                             val event = awaitPointerEvent(PointerEventPass.Initial)
                             val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                            if (!change.pressed) break
+                            if (!change.pressed) {
+                                releasedNormally = true
+                                break
+                            }
                             val dx = change.position.x - lastX
                             lastX = change.position.x
                             if (dx != 0f) {
                                 change.consume()
                                 hScroll.dispatchRawDelta(-dx)
-                                editor.seekSnap(((hScroll.value.toFloat() - leadingPadPx) / (pps * dens).coerceAtLeast(0.001f)).coerceAtLeast(0f), 8f / pps)
+                                editor.seekFrame(((hScroll.value.toFloat() - leadingPadPx) / (pps * dens).coerceAtLeast(0.001f)).coerceAtLeast(0f))
                             }
+                        }
+                        // Magnetic alignment is a release-time operation only. During
+                        // the drag, the playhead stays free to traverse every frame.
+                        if (releasedNormally) {
+                            editor.seekSnap(
+                                ((hScroll.value.toFloat() - leadingPadPx) / (pps * dens).coerceAtLeast(0.001f)).coerceAtLeast(0f),
+                                8f / pps
+                            )
                         }
                     }
                 }
