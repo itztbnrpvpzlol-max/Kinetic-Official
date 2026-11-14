@@ -393,13 +393,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
         }
         }
         if (showEffectsScreen) {
-            Box(Modifier.fillMaxSize().background(KColors.Bg)) {
-                Box(Modifier.align(Alignment.TopEnd).padding(top = 10.dp, end = 12.dp)
-                    .size(42.dp).clip(CircleShape).background(KColors.Surface2)
-                    .clickable { showEffectsScreen = false }, contentAlignment = Alignment.Center) {
-                    Text("×", color = KColors.Text, fontSize = 27.sp, fontWeight = FontWeight.Light)
-                }
-            }
+            EffectsBrowserScreen(onClose = { showEffectsScreen = false })
         }
     }
 
