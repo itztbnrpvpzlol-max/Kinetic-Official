@@ -183,7 +183,7 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
                             change.consume()
                             if (editor.playing) editor.playing = false
                             hScroll.dispatchRawDelta(-overSlop)
-                            editor.seek(hScroll.value.toFloat() / (pps * dens).coerceAtLeast(0.001f))
+                            editor.seekSnap(((hScroll.value.toFloat() - leadingPadPx) / (pps * dens).coerceAtLeast(0.001f)).coerceAtLeast(0f), 8f / pps)
                             dragStarted = true
                         }
                     }
@@ -198,7 +198,7 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
                             if (dx != 0f) {
                                 change.consume()
                                 hScroll.dispatchRawDelta(-dx)
-                                editor.seek(hScroll.value.toFloat() / (pps * dens).coerceAtLeast(0.001f))
+                                editor.seekSnap(((hScroll.value.toFloat() - leadingPadPx) / (pps * dens).coerceAtLeast(0.001f)).coerceAtLeast(0f), 8f / pps)
                             }
                         }
                     }
