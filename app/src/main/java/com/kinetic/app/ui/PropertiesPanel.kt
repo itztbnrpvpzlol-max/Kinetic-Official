@@ -156,7 +156,8 @@ private fun VectorPointLine(editor: EditorState, layer: Layer, index: Int, point
 @Composable
 fun ScrubValueBar(
     label: String, value: Float, modifier: Modifier = Modifier, step: Float = 0.5f,
-    selected: Boolean = false, onSelect: () -> Unit = {}, minValue: Float = 0f, maxValue: Float = 1f, valueFormat: String? = null, onValueChange: (Float) -> Unit
+    selected: Boolean = false, onSelect: () -> Unit = {}, minValue: Float = 0f, maxValue: Float = 1f,
+    valueFormat: String? = null, onScrubStart: () -> Unit = {}, onValueChange: (Float) -> Unit
 ) {
     val density = LocalDensity.current.density
     val latestValue by rememberUpdatedState(value)
@@ -168,7 +169,7 @@ fun ScrubValueBar(
             .clickable(onClick = onSelect)
             .pointerInput(step) {
                 var scrubValue = latestValue
-                detectHorizontalDragGestures(onDragStart = { scrubValue = latestValue }) { change, drag ->
+                detectHorizontalDragGestures(onDragStart = { scrubValue = latestValue; onScrubStart() }) { change, drag ->
                     change.consume()
                     scrubValue = (scrubValue + drag / density * step).coerceIn(minValue, maxValue)
                     latestChange(scrubValue)
