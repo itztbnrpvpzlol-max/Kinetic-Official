@@ -161,20 +161,19 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
             .pointerInput(Unit) { detectPinch { z -> pps = (pps * z).coerceIn(18f, 400f) } }
             .pointerInput(paneW, leftPx, pps) {
                 awaitEachGesture {
-                    // Observe before child clip gestures in the Initial pass. A normal
-                    // horizontal swipe over a clip must scrub the timeline just like
-                    // a swipe over empty track space; long-press clip editing remains
-                    // owned by the clip recognizer.
-                    val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                    // Let child gestures (especially long-press keyframe dragging) receive
+                    // Main-pass events first. Ordinary horizontal movement remains a scrub;
+                    // a child that consumes a drag owns that gesture instead.
+                    val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Main)
                     if (down.position.x <= leftPx + 12f * dens) return@awaitEachGesture
                     var lastX = down.position.x
                     var accumulatedX = 0f
                     var dragStarted = false
                     val touchSlop = viewConfiguration.touchSlop
                     while (!dragStarted) {
-                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                        val event = awaitPointerEvent(PointerEventPass.Main)
                         val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                        if (!change.pressed) break
+                        if (!change.pressed || change.isConsumed) break
                         val dx = change.position.x - lastX
                         lastX = change.position.x
                         accumulatedX += dx
@@ -191,12 +190,15 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
                     if (dragStarted) {
                         var releasedNormally = false
                         while (true) {
-                            val event = awaitPointerEvent(PointerEventPass.Initial)
+                            val event = awaitPointerEvent(PointerEventPass.Main)
                             val change = event.changes.firstOrNull { it.id == down.id } ?: break
                             if (!change.pressed) {
                                 releasedNormally = true
                                 break
                             }
+                            // A child drag can take ownership after its long-press
+                            // threshold; stop scrubbing immediately if it consumes input.
+                            if (change.isConsumed) break
                             val dx = change.position.x - lastX
                             lastX = change.position.x
                             if (dx != 0f) {
