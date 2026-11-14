@@ -1,8 +1,6 @@
 package com.kinetic.app.ui
 
-import com.kinetic.app.R
-
-import androidx.compose.foundation.Image
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -31,27 +29,33 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-private data class EffectCategory(val title: String, val image: Int, val accent: Color)
+private data class EffectCategory(
+    val title: String,
+    val accent: Color,
+    val deep: Color,
+    val glow: Color
+)
 
 private val effectCategories = listOf(
-    EffectCategory("COLOR & LIGHT", R.drawable.effect_category_color_light, Color(0xFFFF6C9D)),
-    EffectCategory("STYLIZE", R.drawable.effect_category_stylize, Color(0xFF9D8BFF)),
-    EffectCategory("DRAWING & EDGE", R.drawable.effect_category_drawing, Color(0xFFFFB86B)),
-    EffectCategory("DISTORTION & WARP", R.drawable.effect_category_distortion, Color(0xFF65D9D1)),
-    EffectCategory("PROCEDURAL", R.drawable.effect_category_procedural, Color(0xFFB2A0FF)),
-    EffectCategory("BLUR", R.drawable.effect_category_blur, Color(0xFF77B9FF)),
-    EffectCategory("3D", R.drawable.effect_category_3d, Color(0xFFFF8D70)),
-    EffectCategory("TEXT", R.drawable.effect_category_text, Color(0xFFFFD16D)),
-    EffectCategory("AUDIO", R.drawable.effect_category_audio, Color(0xFF71D8A5)),
-    EffectCategory("OTHER / MISCELLANEOUS", R.drawable.effect_category_other, Color(0xFF9DA8BC))
+    EffectCategory("COLOR & LIGHT", Color(0xFFFF82B2), Color(0xFF24152F), Color(0xFFFF4F8B)),
+    EffectCategory("STYLIZE", Color(0xFFC0A2FF), Color(0xFF20183D), Color(0xFF8664FF)),
+    EffectCategory("DRAWING & EDGE", Color(0xFFFFC078), Color(0xFF302018), Color(0xFFFF934D)),
+    EffectCategory("DISTORTION & WARP", Color(0xFF70E4DC), Color(0xFF102B34), Color(0xFF29BFC7)),
+    EffectCategory("PROCEDURAL", Color(0xFFB5A4FF), Color(0xFF201C3A), Color(0xFF806CFF)),
+    EffectCategory("BLUR", Color(0xFF8BC8FF), Color(0xFF14283B), Color(0xFF4C9DFF)),
+    EffectCategory("3D", Color(0xFFFF987C), Color(0xFF321D24), Color(0xFFFF694F)),
+    EffectCategory("TEXT", Color(0xFFFFD77A), Color(0xFF332719), Color(0xFFFFB642)),
+    EffectCategory("AUDIO", Color(0xFF79E0AE), Color(0xFF132F2A), Color(0xFF38C98A)),
+    EffectCategory("OTHER / MISCELLANEOUS", Color(0xFFB2C0D6), Color(0xFF1B2637), Color(0xFF718EBA))
 )
 
 @Composable
@@ -267,6 +271,114 @@ private fun ShelfCard(
 }
 
 @Composable
+private fun CategoryArtwork(category: EffectCategory, modifier: Modifier = Modifier) {
+    val index = effectCategories.indexOf(category)
+    Canvas(modifier) {
+        val w = size.width
+        val h = size.height
+        val short = minOf(w, h)
+        drawRect(
+            Brush.linearGradient(
+                colors = listOf(category.deep, Color(0xFF111522), category.deep),
+                start = androidx.compose.ui.geometry.Offset(0f, 0f),
+                end = androidx.compose.ui.geometry.Offset(w, h)
+            )
+        )
+        drawCircle(
+            brush = Brush.radialGradient(
+                listOf(category.glow.copy(alpha = 0.68f), category.glow.copy(alpha = 0.18f), Color.Transparent),
+                center = androidx.compose.ui.geometry.Offset(w * 0.76f, h * 0.24f),
+                radius = short * 0.9f
+            ),
+            radius = short * 0.9f,
+            center = androidx.compose.ui.geometry.Offset(w * 0.76f, h * 0.24f)
+        )
+        val faint = Color.White.copy(alpha = 0.13f)
+        when (index) {
+            0 -> {
+                drawCircle(category.accent.copy(alpha = 0.30f), short * 0.34f, androidx.compose.ui.geometry.Offset(w * 0.72f, h * 0.62f))
+                drawCircle(category.glow.copy(alpha = 0.34f), short * 0.23f, androidx.compose.ui.geometry.Offset(w * 0.54f, h * 0.34f))
+                drawCircle(Color(0xFFFFD78A).copy(alpha = 0.72f), short * 0.075f, androidx.compose.ui.geometry.Offset(w * 0.54f, h * 0.34f))
+                for (i in 0..5) {
+                    val x = w * (0.10f + i * 0.12f)
+                    drawLine(category.accent.copy(alpha = 0.22f), androidx.compose.ui.geometry.Offset(x, h * 0.12f), androidx.compose.ui.geometry.Offset(x + short * 0.18f, h * 0.02f), short * 0.012f)
+                }
+            }
+            1 -> {
+                rotate(-18f, androidx.compose.ui.geometry.Offset(w * 0.7f, h * 0.46f)) {
+                    drawRoundRect(category.accent.copy(alpha = 0.20f), androidx.compose.ui.geometry.Offset(w * 0.42f, h * 0.12f), androidx.compose.ui.geometry.Size(w * 0.5f, h * 0.58f), androidx.compose.ui.geometry.CornerRadius(short * 0.12f))
+                    drawRoundRect(category.accent.copy(alpha = 0.50f), androidx.compose.ui.geometry.Offset(w * 0.53f, h * 0.23f), androidx.compose.ui.geometry.Size(w * 0.28f, h * 0.36f), androidx.compose.ui.geometry.CornerRadius(short * 0.08f), style = Stroke(short * 0.018f))
+                }
+                drawCircle(category.accent.copy(alpha = 0.8f), short * 0.045f, androidx.compose.ui.geometry.Offset(w * 0.25f, h * 0.28f))
+                drawCircle(faint, short * 0.018f, androidx.compose.ui.geometry.Offset(w * 0.34f, h * 0.18f))
+            }
+            2 -> {
+                val p = Path().apply {
+                    moveTo(w * 0.46f, h * 0.08f); lineTo(w * 0.46f, h * 0.88f)
+                    moveTo(w * 0.22f, h * 0.48f); lineTo(w * 0.76f, h * 0.48f)
+                    moveTo(w * 0.30f, h * 0.20f); lineTo(w * 0.70f, h * 0.76f)
+                    moveTo(w * 0.70f, h * 0.20f); lineTo(w * 0.30f, h * 0.76f)
+                }
+                drawPath(p, category.accent.copy(alpha = 0.58f), style = Stroke(short * 0.014f))
+                drawCircle(category.accent.copy(alpha = 0.24f), short * 0.18f, androidx.compose.ui.geometry.Offset(w * 0.52f, h * 0.48f))
+                drawCircle(category.accent, short * 0.035f, androidx.compose.ui.geometry.Offset(w * 0.52f, h * 0.48f))
+            }
+            3 -> {
+                for (i in 0..4) {
+                    val path = Path()
+                    val y = h * (0.20f + i * 0.14f)
+                    path.moveTo(w * 0.12f, y)
+                    path.cubicTo(w * 0.34f, y - h * 0.24f, w * 0.58f, y + h * 0.24f, w * 0.88f, y - h * 0.02f)
+                    drawPath(path, category.accent.copy(alpha = 0.18f + i * 0.09f), style = Stroke(short * 0.018f))
+                }
+                drawCircle(category.accent.copy(alpha = 0.52f), short * 0.10f, androidx.compose.ui.geometry.Offset(w * 0.74f, h * 0.48f))
+            }
+            4 -> {
+                for (row in 0..4) for (col in 0..7) {
+                    val radius = if ((row + col) % 3 == 0) short * 0.025f else short * 0.012f
+                    drawCircle(category.accent.copy(alpha = if ((row + col) % 3 == 0) 0.78f else 0.30f), radius, androidx.compose.ui.geometry.Offset(w * (0.12f + col * 0.105f), h * (0.20f + row * 0.15f)))
+                }
+                drawCircle(category.glow.copy(alpha = 0.32f), short * 0.20f, androidx.compose.ui.geometry.Offset(w * 0.72f, h * 0.50f), style = Stroke(short * 0.018f))
+            }
+            5 -> {
+                for (i in 1..4) drawCircle(category.accent.copy(alpha = 0.10f + i * 0.055f), short * (0.10f + i * 0.085f), androidx.compose.ui.geometry.Offset(w * 0.70f, h * 0.46f), style = Stroke(short * 0.026f))
+                drawCircle(category.accent.copy(alpha = 0.34f), short * 0.12f, androidx.compose.ui.geometry.Offset(w * 0.70f, h * 0.46f))
+            }
+            6 -> {
+                val cube = Path().apply {
+                    moveTo(w * 0.66f, h * 0.16f); lineTo(w * 0.88f, h * 0.29f); lineTo(w * 0.66f, h * 0.42f); lineTo(w * 0.44f, h * 0.29f); close()
+                    moveTo(w * 0.44f, h * 0.29f); lineTo(w * 0.44f, h * 0.58f); lineTo(w * 0.66f, h * 0.72f); lineTo(w * 0.66f, h * 0.42f)
+                    moveTo(w * 0.66f, h * 0.42f); lineTo(w * 0.88f, h * 0.29f); lineTo(w * 0.88f, h * 0.58f); lineTo(w * 0.66f, h * 0.72f)
+                }
+                drawPath(cube, category.accent.copy(alpha = 0.72f), style = Stroke(short * 0.018f))
+                drawPath(Path().apply { moveTo(w * 0.66f, h * 0.16f); lineTo(w * 0.66f, h * 0.42f) }, faint, style = Stroke(short * 0.012f))
+            }
+            7 -> {
+                rotate(-9f, androidx.compose.ui.geometry.Offset(w * 0.65f, h * 0.48f)) {
+                    for (i in 0..2) drawRoundRect(category.accent.copy(alpha = 0.16f + i * 0.12f), androidx.compose.ui.geometry.Offset(w * (0.40f + i * 0.07f), h * (0.22f + i * 0.08f)), androidx.compose.ui.geometry.Size(w * 0.43f, h * 0.12f), androidx.compose.ui.geometry.CornerRadius(short * 0.035f), style = Stroke(short * 0.014f))
+                }
+                drawLine(category.accent.copy(alpha = 0.75f), androidx.compose.ui.geometry.Offset(w * 0.20f, h * 0.72f), androidx.compose.ui.geometry.Offset(w * 0.48f, h * 0.72f), short * 0.018f)
+            }
+            8 -> {
+                for (i in 0..10) {
+                    val x = w * (0.12f + i * 0.075f)
+                    val height = h * (0.12f + ((i * 7) % 5) * 0.085f)
+                    drawRoundRect(category.accent.copy(alpha = 0.45f + (i % 3) * 0.15f), androidx.compose.ui.geometry.Offset(x, h * 0.52f - height / 2f), androidx.compose.ui.geometry.Size(short * 0.025f, height), androidx.compose.ui.geometry.CornerRadius(short * 0.02f))
+                }
+                drawLine(category.accent.copy(alpha = 0.30f), androidx.compose.ui.geometry.Offset(w * 0.12f, h * 0.52f), androidx.compose.ui.geometry.Offset(w * 0.90f, h * 0.52f), short * 0.008f)
+            }
+            else -> {
+                drawCircle(category.accent.copy(alpha = 0.48f), short * 0.26f, androidx.compose.ui.geometry.Offset(w * 0.68f, h * 0.44f), style = Stroke(short * 0.016f))
+                drawCircle(category.accent.copy(alpha = 0.25f), short * 0.16f, androidx.compose.ui.geometry.Offset(w * 0.68f, h * 0.44f), style = Stroke(short * 0.016f))
+                drawCircle(category.accent.copy(alpha = 0.80f), short * 0.035f, androidx.compose.ui.geometry.Offset(w * 0.68f, h * 0.44f))
+                drawLine(faint, androidx.compose.ui.geometry.Offset(w * 0.18f, h * 0.22f), androidx.compose.ui.geometry.Offset(w * 0.38f, h * 0.22f), short * 0.012f)
+                drawLine(faint, androidx.compose.ui.geometry.Offset(w * 0.18f, h * 0.30f), androidx.compose.ui.geometry.Offset(w * 0.31f, h * 0.30f), short * 0.012f)
+            }
+        }
+    }
+}
+
+@Composable
 private fun CategoryTile(category: EffectCategory, modifier: Modifier = Modifier) {
     Box(
         modifier.height(124.dp)
@@ -274,12 +386,7 @@ private fun CategoryTile(category: EffectCategory, modifier: Modifier = Modifier
             .background(KColors.Surface)
             .border(1.dp, KColors.Line, RoundedCornerShape(17.dp))
     ) {
-        Image(
-            painter = painterResource(category.image),
-            contentDescription = null,
-            modifier = Modifier.fillMaxSize(),
-            contentScale = ContentScale.Crop
-        )
+        CategoryArtwork(category, Modifier.fillMaxSize())
         Box(
             Modifier.fillMaxSize().background(
                 Brush.verticalGradient(
