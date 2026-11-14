@@ -180,8 +180,8 @@ fun MediaImportSheet(
             player.pause()
         }
     }
-    val visibleEntries = entries.filter { folder == null || it.folder == folder }
-    val folders = entries.map { it.folder }.distinct().sorted()
+    val visibleEntries = remember(entries, folder) { entries.filter { folder == null || it.folder == folder } }
+    val folders = remember(entries) { entries.map { it.folder }.distinct().sorted() }
 
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(
         usePlatformDefaultWidth = false,
@@ -304,7 +304,7 @@ fun MediaImportSheet(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    items(visibleEntries, key = { it.uri.toString() }) { item ->
+                    items(visibleEntries, key = { it.uri.toString() }, contentType = { it.type }) { item ->
                         Box(Modifier.aspectRatio(1f).clip(RoundedCornerShape(8.dp))
                             .background(if (selected?.uri == item.uri) KColors.Accent.copy(alpha = .28f) else KColors.Surface2)
                             .clickable {
@@ -483,9 +483,8 @@ private fun ImportPreviewImage(item: ImportMediaEntry) {
 @Composable
 private fun ImportGridThumb(item: ImportMediaEntry) {
     val context = LocalContext.current
-    val bitmap by produceState<android.graphics.Bitmap?>(null, item.uri) {
-        value = MediaLoader.bitmapFor(context, item.uri, item.type, 0f,
-            sampleFps = 3, maxEdge = 360, persistToDisk = false, lowPriorityRequest = true)
+    val bitmap by produceState<android.graphics.Bitmap?>(null, item.uri, item.type) {
+        value = ImportThumbnailLoader.load(context, item)
     }
     if (bitmap != null) {
         Image(bitmap!!.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
