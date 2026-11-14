@@ -1,5 +1,7 @@
 package com.kinetic.app.ui
 
+import android.content.Intent
+import android.provider.Settings
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -30,12 +32,13 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kinetic.app.data.AppSettings
 import com.kinetic.app.data.MediaLoader
-import androidx.compose.ui.platform.LocalContext
+import com.kinetic.app.testing.KineticTestAccessibilityService
 import kotlinx.coroutines.launch
 
 @Composable
@@ -44,6 +47,9 @@ fun SettingsScreen(settings: AppSettings, onBack: () -> Unit, onOpenMpvTest: () 
     val scope = rememberCoroutineScope()
     var showClearCacheDialog by remember { mutableStateOf(false) }
     var cacheCleared by remember { mutableStateOf(false) }
+    var showTestBridgeDialog by remember { mutableStateOf(false) }
+    var bridgeSnapshot by remember { mutableStateOf(KineticTestAccessibilityService.refreshSnapshot()) }
+    var screenshotMessage by remember { mutableStateOf("No screenshot captured yet") }
     Column(Modifier.fillMaxSize().background(KColors.Bg).statusBarsPadding().navigationBarsPadding()) {
         Row(Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) { KIcon(IconKind.BACK, KColors.Text) }
@@ -74,6 +80,34 @@ fun SettingsScreen(settings: AppSettings, onBack: () -> Unit, onOpenMpvTest: () 
                 }
                 Text("Open", color = KColors.Accent, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
             }
+
+            Section("Developer testing")
+            Row(
+                Modifier.fillMaxWidth().clickable {
+                    context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                }.padding(vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("Enable on-device test bridge", color = KColors.Text, fontSize = 15.sp)
+                    Text("Optional access to Kinetic's own screen and test gestures", color = KColors.Dim, fontSize = 12.sp)
+                }
+                Text(if (KineticTestAccessibilityService.isConnected()) "Enabled" else "Set up", color = KColors.Accent, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            }
+            Row(
+                Modifier.fillMaxWidth().clickable {
+                    bridgeSnapshot = KineticTestAccessibilityService.refreshSnapshot()
+                    showTestBridgeDialog = true
+                }.padding(vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("Test bridge status", color = KColors.Text, fontSize = 15.sp)
+                    Text("Inspect the current Kinetic view hierarchy and capture a screenshot", color = KColors.Dim, fontSize = 12.sp)
+                }
+                Text("Inspect", color = KColors.Accent, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            }
+
             Row(
                 Modifier.fillMaxWidth().clickable { showClearCacheDialog = true }.padding(vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically
@@ -88,6 +122,35 @@ fun SettingsScreen(settings: AppSettings, onBack: () -> Unit, onOpenMpvTest: () 
             Spacer(Modifier.height(24.dp))
             Text("Kinetic 0.2", color = KColors.Dim, fontSize = 12.sp)
         }
+    }
+    if (showTestBridgeDialog) {
+        AlertDialog(
+            onDismissRequest = { showTestBridgeDialog = false },
+            title = { Text("On-device test bridge") },
+            text = {
+                Column {
+                    Text(if (KineticTestAccessibilityService.isConnected()) "Accessibility: connected" else "Accessibility: not enabled")
+                    Spacer(Modifier.height(8.dp))
+                    Text(screenshotMessage, color = KColors.Dim, fontSize = 12.sp)
+                    Spacer(Modifier.height(8.dp))
+                    Text(bridgeSnapshot.take(2600), color = KColors.Text, fontSize = 11.sp)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    KineticTestAccessibilityService.captureCurrentScreen { path ->
+                        screenshotMessage = if (path != null) "Screenshot saved inside app cache: $path" else "Screenshot unavailable. Enable the test bridge first (Android 11+ required)."
+                        bridgeSnapshot = KineticTestAccessibilityService.refreshSnapshot()
+                    }
+                }) { Text("Capture screen") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    bridgeSnapshot = KineticTestAccessibilityService.refreshSnapshot()
+                    showTestBridgeDialog = false
+                }) { Text("Close") }
+            }
+        )
     }
     if (showClearCacheDialog) {
         AlertDialog(
