@@ -345,7 +345,8 @@ private fun GpuCompositionPreviewCanvas(
             LayerType.TEXT, LayerType.SHAPE -> {
                 val signature = if (layer.type == LayerType.TEXT)
                     layer.text.hashCode() * 31 + layer.color
-                else layer.color * 31 + layer.width.toInt() * 7 + layer.height.toInt()
+                else (((layer.color * 31 + layer.width.toInt() * 7 + layer.height.toInt()) * 31 +
+                    layer.shapeKind.hashCode()) * 31 + layer.vectorPoints.hashCode())
                 val cached = textTextures[layer.id]
                 if (cached == null || cached.first != signature || cached.second.isRecycled) {
                     val w = layer.width.toInt().coerceIn(1, 4096)
@@ -359,7 +360,22 @@ private fun GpuCompositionPreviewCanvas(
                         paint.typeface = Typeface.DEFAULT_BOLD
                         canvas.drawText(layer.text, w / 2f, h / 2f + 40f, paint)
                     } else {
-                        canvas.drawRoundRect(RectF(0f, 0f, w.toFloat(), h.toFloat()), 24f, 24f, paint)
+                        val points = if (layer.vectorPoints.isEmpty()) {
+                            listOf(
+                                com.kinetic.app.model.VectorPoint(0f, 0f),
+                                com.kinetic.app.model.VectorPoint(1f, 0f),
+                                com.kinetic.app.model.VectorPoint(1f, 1f),
+                                com.kinetic.app.model.VectorPoint(0f, 1f)
+                            )
+                        } else layer.vectorPointsAt(editor.time)
+                        val path = android.graphics.Path()
+                        points.forEachIndexed { index, point ->
+                            val x = point.x.coerceIn(0f, 1f) * w
+                            val y = point.y.coerceIn(0f, 1f) * h
+                            if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
+                        }
+                        path.close()
+                        canvas.drawPath(path, paint)
                     }
                     textTextures[layer.id] = signature to generated
                     generated
