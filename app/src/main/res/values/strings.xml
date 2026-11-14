@@ -1,3 +1,0 @@
-<resources>
-    <string name="kinetic_test_accessibility_description">Allows Kinetic's optional test bridge to inspect Kinetic screens and perform test gestures only when enabled by you.</string>
-</resources>
