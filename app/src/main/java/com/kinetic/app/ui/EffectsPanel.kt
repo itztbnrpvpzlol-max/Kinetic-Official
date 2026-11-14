@@ -126,25 +126,29 @@ fun EffectControlsPanel(editor: EditorState, layer: Layer, onBrowseEffects: () -
             val expanded = expandedEffectId == effect.id
             Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(9.dp)).background(KColors.Bg)
                 .border(1.dp, KColors.Line, RoundedCornerShape(9.dp)).padding(horizontal = 9.dp, vertical = 7.dp)) {
-                Row(Modifier.fillMaxWidth().height(34.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.weight(1f).clickable { expandedEffectId = if (expanded) null else effect.id }) {
+                Row(Modifier.fillMaxWidth().height(36.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.weight(1f).fillMaxHeight().clickable {
+                        expandedEffectId = if (expanded) null else effect.id
+                    }, contentAlignment = Alignment.CenterStart) {
                         Text(effect.name, color = if (effect.enabled) KColors.Text else KColors.Dim,
                             fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                     }
-                    Switch(checked = effect.enabled, onCheckedChange = {
-                        editor.setEffectEnabled(layer.id, effect.id, it)
-                    }, modifier = Modifier.size(width = 42.dp, height = 28.dp))
-                    Spacer(Modifier.size(7.dp))
-                    Box(Modifier.size(25.dp).clip(RoundedCornerShape(5.dp)).clickable {
+                    Box(Modifier.size(28.dp).clip(RoundedCornerShape(5.dp)).clickable {
+                        expandedEffectId = if (expanded) null else effect.id
+                    }, contentAlignment = Alignment.Center) {
+                        Text(if (expanded) "⌃" else "⌄", color = KColors.Muted, fontSize = 17.sp)
+                    }
+                    Box(Modifier.size(28.dp).clip(RoundedCornerShape(5.dp)).clickable {
+                        editor.setEffectEnabled(layer.id, effect.id, !effect.enabled)
+                    }, contentAlignment = Alignment.Center) {
+                        KIcon(if (effect.enabled) IconKind.EYE else IconKind.EYE_OFF,
+                            if (effect.enabled) KColors.Accent else KColors.Dim, Modifier.size(15.dp))
+                    }
+                    Box(Modifier.size(28.dp).clip(RoundedCornerShape(5.dp)).clickable {
                         editor.removeEffect(layer.id, effect.id)
                         if (expandedEffectId == effect.id) expandedEffectId = null
                     }, contentAlignment = Alignment.Center) {
                         KIcon(IconKind.DELETE, KColors.Muted, Modifier.size(14.dp))
-                    }
-                    Box(Modifier.size(24.dp).clickable {
-                        expandedEffectId = if (expanded) null else effect.id
-                    }, contentAlignment = Alignment.Center) {
-                        Text(if (expanded) "⌄" else "›", color = KColors.Muted, fontSize = 17.sp)
                     }
                 }
                 if (expanded) {
@@ -196,21 +200,13 @@ private fun EffectParameterLine(editor: EditorState, layer: Layer, effect: Effec
                 }
             }
             else -> {
-                val formatted = ("%." + spec.decimals + "f").format(java.util.Locale.US, current) + spec.suffix
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Box(Modifier.size(28.dp).clip(RoundedCornerShape(5.dp)).background(KColors.Surface2).clickable {
-                        editor.beginEdit()
-                        editor.updateEffectParameter(layer.id, effect.id, spec.key, (current - spec.step).coerceIn(spec.min, spec.max))
-                    }, contentAlignment = Alignment.Center) { Text("−", color = KColors.Text, fontSize = 15.sp) }
-                    Box(Modifier.clip(RoundedCornerShape(5.dp)).background(KColors.Surface2)
-                        .border(1.dp, KColors.Line, RoundedCornerShape(5.dp)).padding(horizontal = 8.dp, vertical = 6.dp),
-                        contentAlignment = Alignment.Center) {
-                        Text(formatted, color = KColors.Accent, fontSize = 9.sp, fontWeight = FontWeight.SemiBold)
-                    }
-                    Box(Modifier.size(28.dp).clip(RoundedCornerShape(5.dp)).background(KColors.Surface2).clickable {
-                        editor.beginEdit()
-                        editor.updateEffectParameter(layer.id, effect.id, spec.key, (current + spec.step).coerceIn(spec.min, spec.max))
-                    }, contentAlignment = Alignment.Center) { Text("+", color = KColors.Text, fontSize = 14.sp) }
+                val valueFormat = "%." + spec.decimals + "f" + spec.suffix
+                ScrubValueBar(
+                    spec.label, current, Modifier.width(132.dp), step = spec.step,
+                    minValue = spec.min, maxValue = spec.max, valueFormat = valueFormat,
+                    onScrubStart = { editor.beginEdit() }
+                ) { value ->
+                    editor.updateEffectParameter(layer.id, effect.id, spec.key, value.coerceIn(spec.min, spec.max))
                 }
             }
         }
