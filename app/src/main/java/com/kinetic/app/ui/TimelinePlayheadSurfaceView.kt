@@ -67,24 +67,31 @@ internal class TimelinePlayheadSurfaceView(
     }
 
     fun updateGeometry(leftPx: Float, leadingPx: Float, pxPerSecond: Float) {
+        val safePps = pxPerSecond.coerceAtLeast(0.001f)
+        if (leftColumnPx == leftPx && leadingPadPx == leadingPx && pixelsPerSecond == safePps) return
         leftColumnPx = leftPx
         leadingPadPx = leadingPx
-        pixelsPerSecond = pxPerSecond.coerceAtLeast(0.001f)
+        pixelsPerSecond = safePps
         requestRender()
     }
 
     fun updateScrollOffset(scrollPx: Float) {
+        if (kotlin.math.abs(scrollOffsetPx - scrollPx) < 0.25f) return
         scrollOffsetPx = scrollPx
         requestRender()
     }
 
     fun updateTransport(playing: Boolean, time: Float) {
+        val wasPlaying = transportPlaying
+        val nextTime = time.coerceAtLeast(0f)
         transportPlaying = playing
-        fallbackTime = time.coerceAtLeast(0f)
-        renderHandler.removeCallbacks(renderFrame)
-        requestRender()
-        if (playing && surfaceReady && !disposed) {
-            renderHandler.post(renderFrame)
+        fallbackTime = nextTime
+        if (playing) {
+            if (!wasPlaying) requestRender()
+        } else if (wasPlaying || kotlin.math.abs(fallbackTime - nextTime) > 0.0001f) {
+            requestRender()
+        } else if (!wasPlaying) {
+            requestRender()
         }
     }
 
