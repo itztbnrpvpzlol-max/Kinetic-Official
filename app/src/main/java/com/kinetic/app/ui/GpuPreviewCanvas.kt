@@ -306,8 +306,7 @@ private fun GpuCompositionPreviewCanvas(
                                 val currentBucket = (currentSourceTime * compositionFps).toInt()
                                 val acceptableLag = maxOf(3, compositionFps / 4)
                                 if (frame != null &&
-                                    currentBucket >= requestedBucket &&
-                                    currentBucket - requestedBucket <= acceptableLag
+                                    kotlin.math.abs(currentBucket - requestedBucket) <= acceptableLag
                                 ) {
                                     frames[layer.id] = frame
                                     recentVideoFrames[uri] = RecentVideoPreviewFrame(sourceTime, frame)
@@ -315,8 +314,14 @@ private fun GpuCompositionPreviewCanvas(
                                         val oldest = recentVideoFrames.keys.firstOrNull { it != uri } ?: break
                                         recentVideoFrames.remove(oldest)
                                     }
+                                    // Mark a bucket complete only after a usable frame was
+                                    // accepted. A transient null/stale decode must be retried
+                                    // while paused, otherwise an effected clip can stay black
+                                    // until the playhead moves to another frame.
+                                    lastBucket = requestedBucket
+                                } else {
+                                    kotlinx.coroutines.delay(120L)
                                 }
-                                lastBucket = requestedBucket
                             }
                             kotlinx.coroutines.delay(maxOf(1L, 1000L / compositionFps))
                         }
