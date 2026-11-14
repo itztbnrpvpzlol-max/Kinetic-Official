@@ -269,10 +269,10 @@ private fun ShelfCard(
 @Composable
 private fun CategoryTile(category: EffectCategory, modifier: Modifier = Modifier) {
     Box(
-        modifier.height(106.dp)
-            .clip(RoundedCornerShape(15.dp))
+        modifier.height(124.dp)
+            .clip(RoundedCornerShape(17.dp))
             .background(KColors.Surface)
-            .border(1.dp, KColors.Line, RoundedCornerShape(15.dp))
+            .border(1.dp, KColors.Line, RoundedCornerShape(17.dp))
     ) {
         Image(
             painter = painterResource(category.image),
@@ -283,27 +283,49 @@ private fun CategoryTile(category: EffectCategory, modifier: Modifier = Modifier
         Box(
             Modifier.fillMaxSize().background(
                 Brush.verticalGradient(
-                    0f to Color(0x16070A12),
-                    0.28f to Color(0x35070A12),
-                    1f to Color(0xE8070A12)
+                    0f to Color(0x22070A12),
+                    0.34f to Color(0x3D070A12),
+                    0.68f to Color(0x99070A12),
+                    1f to Color(0xF2070A12)
                 )
             )
         )
+        Row(
+            Modifier.align(Alignment.TopStart).padding(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Box(
+                Modifier.size(7.dp).clip(CircleShape).background(category.accent)
+            )
+            Text(
+                "COLLECTION",
+                color = Color.White.copy(alpha = 0.88f),
+                fontSize = 7.sp,
+                fontWeight = FontWeight.ExtraBold,
+                letterSpacing = 1.sp
+            )
+        }
         Box(
-            Modifier.align(Alignment.TopStart)
+            Modifier.align(Alignment.BottomEnd)
                 .padding(10.dp)
-                .size(5.dp)
+                .size(24.dp)
                 .clip(CircleShape)
-                .background(category.accent)
-        )
+                .background(Color(0x55070A12))
+                .border(1.dp, Color.White.copy(alpha = 0.20f), CircleShape),
+            contentAlignment = Alignment.Center
+        ) {
+            Text("↗", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+        }
         Text(
             category.title,
-            Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(horizontal = 11.dp, vertical = 10.dp),
+            Modifier.align(Alignment.BottomStart).fillMaxWidth(0.84f)
+                .padding(start = 11.dp, end = 4.dp, bottom = 12.dp),
             color = Color.White,
             fontSize = 10.sp,
             lineHeight = 12.sp,
             fontWeight = FontWeight.ExtraBold,
-            letterSpacing = 0.5.sp,
+            letterSpacing = 0.55.sp,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis
         )
