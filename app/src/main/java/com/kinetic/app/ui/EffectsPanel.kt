@@ -109,16 +109,8 @@ private fun controlsFor(effect: EffectInstance): List<EffectControlSpec> = when 
     )
     else -> emptyList()
 }
-private val effectGroups = listOf(
-    "Distortion" to listOf("Motion Tile", "Wave Warp", "Warp Shake", "RGB Split"),
-    "Motion" to listOf("Oscillate"),
-    "Drawing & Edge" to listOf("Deep Glow"),
-    "Color & Light" to listOf("Exposure And Gamma")
-)
-
 @Composable
 fun EffectControlsPanel(editor: EditorState, layer: Layer, onBrowseEffects: () -> Unit) {
-    var addMenuOpen by remember(layer.id) { mutableStateOf(false) }
     var expandedEffectId by remember(layer.id, layer.effectStack.lastOrNull()?.id) {
         mutableStateOf(layer.effectStack.lastOrNull()?.id)
     }
@@ -155,40 +147,19 @@ fun EffectControlsPanel(editor: EditorState, layer: Layer, onBrowseEffects: () -
                         Text(if (expanded) "⌄" else "›", color = KColors.Muted, fontSize = 17.sp)
                     }
                 }
-                if (expanded && effect.enabled) {
+                if (expanded) {
                     Spacer(Modifier.height(5.dp))
                     controlsFor(effect).forEach { EffectParameterLine(editor, layer, effect, it) }
-                } else if (expanded) {
-                    Text("Effect disabled", color = KColors.Dim, fontSize = 9.sp)
                 }
             }
         }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-            Box {
-                Box(Modifier.height(36.dp).clip(RoundedCornerShape(7.dp)).background(KColors.Accent)
-                    .clickable { addMenuOpen = true }.padding(horizontal = 14.dp), contentAlignment = Alignment.Center) {
-                    Text("Add Effect  +", color = androidx.compose.ui.graphics.Color.White,
-                        fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                }
-                DropdownMenu(expanded = addMenuOpen, onDismissRequest = { addMenuOpen = false }) {
-                    effectGroups.forEach { (group, names) ->
-                        DropdownMenuItem(text = { Text(group.uppercase(), color = KColors.Muted,
-                            fontSize = 9.sp, fontWeight = FontWeight.Bold) }, onClick = { addMenuOpen = false }, enabled = false)
-                        names.forEach { name ->
-                            DropdownMenuItem(text = { Text(name, color = KColors.Text, fontSize = 11.sp) }, onClick = {
-                                editor.addEffect(layer.id, name)
-                                expandedEffectId = editor.layers.firstOrNull { it.id == layer.id }?.effectStack?.lastOrNull()?.id
-                                addMenuOpen = false
-                            })
-                        }
-                    }
-                }
-            }
-            Box(Modifier.weight(1f).height(36.dp).clip(RoundedCornerShape(7.dp)).background(KColors.Surface2)
-                .border(1.dp, KColors.Line, RoundedCornerShape(7.dp)).clickable(onClick = onBrowseEffects),
-                contentAlignment = Alignment.Center) {
-                Text("Browse Effects", color = KColors.Text, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
-            }
+        Box(
+            Modifier.fillMaxWidth().height(38.dp).clip(RoundedCornerShape(7.dp))
+                .background(KColors.Accent).clickable(onClick = onBrowseEffects),
+            contentAlignment = Alignment.Center
+        ) {
+            Text("Add Effect  +", color = androidx.compose.ui.graphics.Color.White,
+                fontSize = 10.sp, fontWeight = FontWeight.Bold)
         }
     }
 }
