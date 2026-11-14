@@ -165,24 +165,52 @@ private fun ShelfSection(title: String, emptyMessage: String, icon: IconKind, ac
 
 @Composable
 private fun EffectChoice(name: String, accent: Color, modifier: Modifier = Modifier, onClick: () -> Unit) {
-    Box(modifier.aspectRatio(1f).clip(RoundedCornerShape(14.dp)).background(KColors.Surface)
-        .border(1.dp, KColors.Line, RoundedCornerShape(14.dp)).clickable(onClick = onClick)) {
+    Box(
+        modifier.aspectRatio(1f).clip(RoundedCornerShape(15.dp))
+            .background(KColors.Bg)
+            .border(1.dp, KColors.Line, RoundedCornerShape(15.dp))
+            .clickable(onClick = onClick)
+    ) {
         Canvas(Modifier.fillMaxSize()) {
-            drawCircle(Brush.radialGradient(listOf(accent.copy(alpha = 0.20f), Color.Transparent)),
-                radius = size.minDimension * 0.72f, center = Offset(size.width * 0.82f, size.height * 0.18f))
-            drawRoundRect(accent.copy(alpha = 0.10f), Offset(size.width * 0.12f, size.height * 0.12f),
-                androidx.compose.ui.geometry.Size(size.width * 0.76f, size.height * 0.76f),
-                androidx.compose.ui.geometry.CornerRadius(size.minDimension * 0.12f),
-                style = Stroke(size.minDimension * 0.012f))
+            val side = size.minDimension
+            drawCircle(
+                Brush.radialGradient(
+                    listOf(accent.copy(alpha = 0.22f), Color.Transparent),
+                    center = Offset(size.width * 0.82f, size.height * 0.16f),
+                    radius = side * 0.78f
+                ),
+                radius = side * 0.78f,
+                center = Offset(size.width * 0.82f, size.height * 0.16f)
+            )
+            drawRoundRect(
+                accent.copy(alpha = 0.10f),
+                Offset(size.width * 0.12f, size.height * 0.14f),
+                androidx.compose.ui.geometry.Size(size.width * 0.76f, size.height * 0.72f),
+                androidx.compose.ui.geometry.CornerRadius(side * 0.10f),
+                style = Stroke(side * 0.014f)
+            )
         }
-        Column(Modifier.fillMaxSize().padding(10.dp), horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center) {
-            KIcon(IconKind.EFFECTS, accent, Modifier.size(29.dp))
-            Spacer(Modifier.height(12.dp))
-            Text(name, color = KColors.Text, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
-                maxLines = 2, overflow = TextOverflow.Ellipsis)
-            Spacer(Modifier.height(7.dp))
-            KIcon(IconKind.PLUS, KColors.Muted, Modifier.size(15.dp))
+        Column(
+            Modifier.fillMaxSize().padding(11.dp),
+            verticalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                KIcon(IconKind.EFFECTS, accent, Modifier.size(21.dp))
+                Spacer(Modifier.weight(1f))
+                Box(
+                    Modifier.size(25.dp).clip(RoundedCornerShape(8.dp))
+                        .background(accent.copy(alpha = 0.16f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    KIcon(IconKind.PLUS, accent, Modifier.size(13.dp))
+                }
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(name, color = KColors.Text, fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text("ADD TO LAYER", color = KColors.Muted, fontSize = 7.sp,
+                    fontWeight = FontWeight.Bold, letterSpacing = 0.65.sp)
+            }
         }
     }
 }
