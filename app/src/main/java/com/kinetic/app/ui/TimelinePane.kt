@@ -2,6 +2,7 @@ package com.kinetic.app.ui
 
 import android.graphics.Bitmap
 import android.graphics.Paint
+import android.graphics.RectF
 import androidx.compose.ui.viewinterop.AndroidView
 import com.kinetic.app.engine.NativePlaybackEngine
 import kotlinx.coroutines.delay
@@ -70,6 +71,8 @@ import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextAlign
@@ -165,6 +168,7 @@ fun TimelinePane(editor: EditorState, playback: NativePlaybackEngine, modifier: 
     }
 
     val playheadSurface = remember { mutableStateOf<TimelinePlayheadSurfaceView?>(null) }
+    val laneSurfaceState = remember { TimelineLaneSurfaceState() }
     LaunchedEffect(hScroll) {
         snapshotFlow { hScroll.value }.collect { scroll ->
             playheadSurface.value?.updateScrollOffset(scroll.toFloat())
@@ -248,7 +252,7 @@ fun TimelinePane(editor: EditorState, playback: NativePlaybackEngine, modifier: 
                     }
                 }
                 items(editor.layers, key = { it.id }) { layer ->
-                    LayerRow(editor, layer, pps, hScroll, contentW, leftW, leadingPad)
+                    LayerRow(editor, layer, pps, hScroll, contentW, leftW, leadingPad, laneSurfaceState)
                 }
             }
         }
@@ -283,6 +287,15 @@ fun TimelinePane(editor: EditorState, playback: NativePlaybackEngine, modifier: 
                 Box(Modifier.width(4.dp).height(34.dp).clip(RoundedCornerShape(4.dp)).background(KColors.Muted))
             }
         }
+        // Clip artwork, thumbnail strips, audio waveforms and keyframe diamonds
+        // are composited by one shared SurfaceView. Compose retains touch handling.
+        AndroidView(
+            factory = { context -> TimelineLaneSurfaceView(context, laneSurfaceState) },
+            update = { view -> view.updateGeometry(leadingPadPx, pps * dens) },
+            modifier = Modifier
+                .offset(x = leftW, y = 30.dp)
+                .size(viewportW, (paneH / dens - 30f).coerceAtLeast(0f).dp)
+        )
         // The needle is drawn by its own transparent Android SurfaceView.
         // It samples NativePlaybackEngine directly, independently of Compose's
         // 30 Hz editor.time publication, so it remains locked to video playback.
@@ -336,7 +349,8 @@ private fun Ruler(editor: EditorState, pps: Float, contentW: Dp, leadingPad: Dp)
 
 @Composable
 private fun LayerRow(
-    editor: EditorState, layer: Layer, pps: Float, hScroll: ScrollState, contentW: Dp, leftW: Dp, leadingPad: Dp
+    editor: EditorState, layer: Layer, pps: Float, hScroll: ScrollState, contentW: Dp, leftW: Dp, leadingPad: Dp,
+    laneSurface: TimelineLaneSurfaceState
 ) {
     val selected = editor.selectedId == layer.id
     val positionPropId = if (layer.p(PropId.POS_X).keys.isNotEmpty()) PropId.POS_X else PropId.POS_Y
@@ -413,21 +427,21 @@ private fun LayerRow(
                 }
             }
             Box(Modifier.weight(1f).fillMaxHeight().horizontalScroll(hScroll)) {
-                Box(Modifier.width(contentW).fillMaxHeight()) { Clip(editor, layer, pps, selected, leadingPad) }
+                Box(Modifier.width(contentW).fillMaxHeight()) { Clip(editor, layer, pps, selected, leadingPad, laneSurface) }
             }
         }
         if (selected && hasLayerKeyframes) {
             if (hasPositionKeyframes) {
                 KeyframeTrackRow(editor, layer, positionPropId, layer.p(positionPropId).keys,
-                    pps, hScroll, contentW, leftW, leadingPad, "Position")
+                    pps, hScroll, contentW, leftW, leadingPad, laneSurface, "Position")
             }
             if (hasLinkedScaleKeyframes) {
                 KeyframeTrackRow(editor, layer, scalePropId, layer.p(scalePropId).keys,
-                    pps, hScroll, contentW, leftW, leadingPad, "Scale")
+                    pps, hScroll, contentW, leftW, leadingPad, laneSurface, "Scale")
             }
             visibleKeyframeProps.sortedBy { it.key.ordinal }
                 .forEach { (propId, prop) ->
-                    KeyframeTrackRow(editor, layer, propId, prop.keys, pps, hScroll, contentW, leftW, leadingPad)
+                    KeyframeTrackRow(editor, layer, propId, prop.keys, pps, hScroll, contentW, leftW, leadingPad, laneSurface)
                 }
         }
         val parentName = layer.parentId?.let { id -> editor.layers.firstOrNull { it.id == id }?.name }
@@ -451,12 +465,31 @@ private fun KeyframeTrackRow(
     contentW: Dp,
     leftW: Dp,
     leadingPad: Dp,
+    laneSurface: TimelineLaneSurfaceState,
     trackLabel: String = propId.label
 ) {
     val dens = LocalDensity.current.density
     val latestKeys by rememberUpdatedState(keys)
     var dragPreviewIndex by remember(layer.id, propId) { mutableIntStateOf(-1) }
     var dragPreviewTime by remember(layer.id, propId) { mutableFloatStateOf(0f) }
+    var keyBounds by remember(layer.id, propId) { mutableStateOf<RectF?>(null) }
+    LaunchedEffect(keys, editor.time, editor.frame, dragPreviewIndex, dragPreviewTime, keyBounds) {
+        val bounds = keyBounds ?: return@LaunchedEffect
+        laneSurface.updateKeyframes(
+            TimelineKeyframeVisual(
+                id = "${layer.id}:${propId.name}",
+                bounds = bounds,
+                keyTimes = keys.map { it.t },
+                currentTime = editor.time,
+                frameDuration = editor.frame,
+                previewIndex = dragPreviewIndex,
+                previewTime = dragPreviewTime
+            )
+        )
+    }
+    DisposableEffect(layer.id, propId, laneSurface) {
+        onDispose { laneSurface.removeKeyframes("${layer.id}:${propId.name}") }
+    }
     Row(
         Modifier.fillMaxWidth().height(28.dp).background(KColors.Bg),
         verticalAlignment = Alignment.CenterVertically
@@ -474,8 +507,12 @@ private fun KeyframeTrackRow(
             )
         }
         Box(Modifier.weight(1f).fillMaxHeight().horizontalScroll(hScroll)) {
-            Canvas(
+            Box(
                 Modifier.width(contentW).fillMaxHeight()
+                    .onGloballyPositioned { coordinates ->
+                        val pos = coordinates.positionInWindow()
+                        keyBounds = RectF(pos.x, pos.y, pos.x + coordinates.size.width, pos.y + coordinates.size.height)
+                    }
                     .pointerInput(layer.id, propId, pps, leadingPad) {
                         var draggingIndex = -1
                         detectDragGesturesAfterLongPress(
@@ -527,28 +564,16 @@ private fun KeyframeTrackRow(
                             }
                         }
                     }
-            ) {
-                val centerY = size.height / 2f
-                keys.forEachIndexed { index, key ->
-                    val keyTime = if (index == dragPreviewIndex) dragPreviewTime else key.t
-                    val x = leadingPad.value * dens + keyTime * pps * dens
-                    val r = 5.dp.toPx()
-                    val diamond = Path().apply {
-                        moveTo(x, centerY - r)
-                        lineTo(x + r, centerY)
-                        lineTo(x, centerY + r)
-                        lineTo(x - r, centerY)
-                        close()
-                    }
-                    drawPath(diamond, if (kotlin.math.abs(editor.time - key.t) <= editor.frame / 2f) KColors.Accent else KColors.ClipText)
-                }
-            }
+            )
         }
     }
 }
 
 @Composable
-private fun Clip(editor: EditorState, layer: Layer, pps: Float, selected: Boolean, leadingPad: Dp) {
+private fun Clip(
+    editor: EditorState, layer: Layer, pps: Float, selected: Boolean, leadingPad: Dp,
+    laneSurface: TimelineLaneSurfaceState
+) {
     val ctx = LocalContext.current
     val dens = LocalDensity.current.density
     val shape = RoundedCornerShape(8.dp)
@@ -557,6 +582,8 @@ private fun Clip(editor: EditorState, layer: Layer, pps: Float, selected: Boolea
     var thumbnails by remember(
         layer.uri, layer.type, layer.duration, layer.srcOffset, layer.speed
     ) { mutableStateOf<List<Bitmap>>(emptyList()) }
+    var clipBounds by remember(layer.id) { mutableStateOf<RectF?>(null) }
+    var audioPeaks by remember(layer.id, layer.uri) { mutableStateOf<FloatArray?>(null) }
     LaunchedEffect(
         layer.uri, layer.type, layer.duration, layer.srcOffset, layer.speed, editor.playing
     ) {
@@ -581,6 +608,31 @@ private fun Clip(editor: EditorState, layer: Layer, pps: Float, selected: Boolea
             }
         }
     }
+    LaunchedEffect(layer.uri, layer.type, editor.playing) {
+        if (layer.type != LayerType.AUDIO || layer.uri == null || editor.playing) return@LaunchedEffect
+        audioPeaks = MediaLoader.waveform(ctx, Uri.parse(layer.uri), 240)
+    }
+    LaunchedEffect(
+        layer.id, layer.type, layer.name, layer.visible, selected, previewStart, previewDuration,
+        thumbnails, audioPeaks, clipBounds
+    ) {
+        val bounds = clipBounds ?: return@LaunchedEffect
+        laneSurface.updateClip(
+            TimelineClipVisual(
+                id = layer.id,
+                bounds = bounds,
+                type = layer.type,
+                name = layer.name,
+                visible = layer.visible,
+                selected = selected,
+                thumbnails = thumbnails,
+                waveform = audioPeaks
+            )
+        )
+    }
+    DisposableEffect(layer.id, laneSurface) {
+        onDispose { laneSurface.removeClip(layer.id) }
+    }
     val dashed = layer.type == LayerType.ADJUSTMENT || layer.type == LayerType.NULL
     Box(
         Modifier
@@ -590,16 +642,11 @@ private fun Clip(editor: EditorState, layer: Layer, pps: Float, selected: Boolea
             .padding(vertical = 3.dp)
             .alpha(if (layer.visible) 1f else 0.4f)
             .clip(shape)
-            .background(clipColor(layer.type))
-            .then(
-                if (dashed) Modifier.drawBehind {
-                    drawRoundRect(
-                        KColors.Muted, cornerRadius = CornerRadius(8.dp.toPx()),
-                        style = Stroke(1.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(14f, 10f)))
-                    )
-                } else Modifier
-            )
-            .then(if (selected) Modifier.border(1.5.dp, KColors.Accent, shape) else Modifier)
+            .background(Color.Transparent)
+            .onGloballyPositioned { coordinates ->
+                val pos = coordinates.positionInWindow()
+                clipBounds = RectF(pos.x, pos.y, pos.x + coordinates.size.width, pos.y + coordinates.size.height)
+            }
             .pointerInput(layer.id, editor.selectedId) {
                 detectTapGestures {
                     // Tapping the already-selected clip exits layer selection.
@@ -631,28 +678,9 @@ private fun Clip(editor: EditorState, layer: Layer, pps: Float, selected: Boolea
                 )
             }
     ) {
-        if (thumbnails.isNotEmpty()) {
-            Row(Modifier.fillMaxSize()) {
-                thumbnails.forEach { bitmap ->
-                    Image(
-                        bitmap = bitmap.asImageBitmap(),
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        alpha = 0.45f,
-                        modifier = Modifier.weight(1f).fillMaxHeight()
-                    )
-                }
-            }
-        }
-        if (layer.type == LayerType.AUDIO) Waveform(layer.id, layer.uri, editor.playing)
-        Row(
-            Modifier.align(Alignment.CenterStart).padding(start = 12.dp, end = 8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            KIcon(typeIcon(layer.type), KColors.ClipText, Modifier.size(16.dp))
-            Spacer(Modifier.width(6.dp))
-            Text(layer.name, color = KColors.ClipText, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Clip)
-        }
+        // Lane artwork and labels are rendered by TimelineLaneSurfaceView.
+        // Compose retains the hit targets below for selection and editing.
+        // Clip labels are drawn by the shared timeline surface renderer.
         if (selected) {
             Box(
                 Modifier
