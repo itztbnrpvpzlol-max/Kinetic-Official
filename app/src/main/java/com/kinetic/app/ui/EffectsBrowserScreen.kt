@@ -1,5 +1,7 @@
 package com.kinetic.app.ui
 
+import com.kinetic.app.R
+
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
