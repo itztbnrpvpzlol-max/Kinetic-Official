@@ -6,9 +6,6 @@ import java.util.UUID
 import com.kinetic.app.engine.NativeRenderEngine
 import kotlin.math.abs
 import kotlin.math.pow
-import kotlin.math.sin
-import kotlin.math.floor
-import kotlin.math.PI
 
 const val COMP_W = 1920f
 const val COMP_H = 1080f
@@ -317,7 +314,7 @@ fun createEffect(name: String): EffectInstance? {
 
 /** Packs up to eight enabled effects into two vec4 GLES uniforms per effect. */
 fun effectUniforms(effects: List<EffectInstance>): FloatArray {
-    val active = effects.filter { it.enabled && it.name != "Oscillate" }.take(8)
+    val active = effects.filter { it.enabled }.take(8)
     val output = FloatArray(active.size * 8)
     active.forEachIndexed { index, effect ->
         val p = effect.parameters
@@ -428,30 +425,6 @@ fun newLayer(
 }
 
 
-/** Oscillate is a layer-position behavior, not a texture-space warp. */
-private fun Layer.oscillateOffset(t: Float): Pair<Float, Float> {
-    var dx = 0f
-    var dy = 0f
-    effectStack.filter { it.enabled && it.name == "Oscillate" }.forEach { effect ->
-        val p = effect.parameters
-        val frequency = (p["Frequency"] ?: 1f).coerceAtLeast(0f)
-        val phase = (p["Phase"] ?: 0f) / 360f
-        val cycles = (t - start).coerceAtLeast(0f) * frequency + phase
-        val cycle = cycles - floor(cycles)
-        val angle = cycles * 2.0 * PI
-        val wave = when ((p["Wave Shape"] ?: 0f).toInt()) {
-            1 -> 1f - 4f * abs(cycle - 0.5f)
-            2 -> if (sin(angle) >= 0.0) 1f else -1f
-            3 -> cycle * 2f - 1f
-            else -> sin(angle).toFloat()
-        }
-        val value = if ((p["Half Range"] ?: 0f) >= 0.5f) (wave + 1f) * 0.5f else wave
-        dx += value * (p["X Amplitude"] ?: 0.02f) * COMP_W
-        dy += value * (p["Y Amplitude"] ?: 0.02f) * COMP_H
-    }
-    return dx to dy
-}
-
 /**
  * Reuses caller-owned Matrix instances for the CPU preview draw loop.
  * This avoids allocating a Matrix for every layer and parent on every frame.
@@ -468,8 +441,7 @@ fun layerMatrixInto(
     out.postTranslate(-layer.p(PropId.ANCHOR_X).valueAt(t), -layer.p(PropId.ANCHOR_Y).valueAt(t))
     out.postScale(layer.p(PropId.SCALE_X).valueAt(t) / 100f, layer.p(PropId.SCALE_Y).valueAt(t) / 100f)
     out.postRotate(layer.p(PropId.ROTATION).valueAt(t))
-    val (oscX, oscY) = layer.oscillateOffset(t)
-    out.postTranslate(layer.p(PropId.POS_X).valueAt(t) + oscX, layer.p(PropId.POS_Y).valueAt(t) + oscY)
+    out.postTranslate(layer.p(PropId.POS_X).valueAt(t), layer.p(PropId.POS_Y).valueAt(t))
     val parent = layer.parentId?.let { byId[it] }
     if (parent != null && parent.id != layer.id && depth < 16) {
         val parentMatrix = scratch.getOrPut(depth + 1) { Matrix() }
@@ -485,8 +457,7 @@ fun layerMatrix(layer: Layer, t: Float, byId: Map<String, Layer>, depth: Int = 0
     m.postTranslate(-layer.p(PropId.ANCHOR_X).valueAt(t), -layer.p(PropId.ANCHOR_Y).valueAt(t))
     m.postScale(layer.p(PropId.SCALE_X).valueAt(t) / 100f, layer.p(PropId.SCALE_Y).valueAt(t) / 100f)
     m.postRotate(layer.p(PropId.ROTATION).valueAt(t))
-    val (oscX, oscY) = layer.oscillateOffset(t)
-    m.postTranslate(layer.p(PropId.POS_X).valueAt(t) + oscX, layer.p(PropId.POS_Y).valueAt(t) + oscY)
+    m.postTranslate(layer.p(PropId.POS_X).valueAt(t), layer.p(PropId.POS_Y).valueAt(t))
     val parent = layer.parentId?.let { byId[it] }
     if (parent != null && depth < 16) {
         val pm = layerMatrix(parent, t, byId, depth + 1)

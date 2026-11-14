@@ -885,12 +885,12 @@ private fun PreviewToolsBar(
             }
             PreviewTool(IconKind.FRAME_BACK, canStepBack) {
                 editor.playing = false
-                editor.seekSnap((editor.time - editor.frame).coerceAtLeast(0f), 0f)
+                editor.seek((editor.time - editor.frame).coerceAtLeast(0f), 0f)
             }
             PreviewTool(if (editor.playing) IconKind.PAUSE else IconKind.PLAY, onClick = onPlay)
             PreviewTool(IconKind.FRAME_FORWARD, canStepForward) {
                 editor.playing = false
-                editor.seekSnap((editor.time + editor.frame).coerceAtMost(editor.duration), 0f)
+                editor.seek((editor.time + editor.frame).coerceAtMost(editor.duration), 0f)
             }
             PreviewTool(IconKind.SKIP_END, canSkipNext) {
                 editor.playing = false
