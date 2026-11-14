@@ -108,8 +108,19 @@ class ProjectStore(context: Context) {
                 l.effectStack.forEach { effect ->
                     val parameters = JSONObject()
                     effect.parameters.forEach { (key, value) -> parameters.put(key, value.toDouble()) }
+                    val parameterKeys = JSONObject()
+                    effect.parameterKeys.forEach { (parameter, keys) ->
+                        parameterKeys.put(parameter, JSONArray().also { keyArray ->
+                            keys.forEach { key ->
+                                keyArray.put(JSONObject().put("t", key.t.toDouble()).put("v", key.v.toDouble())
+                                    .put("type", key.type.name).put("x1", key.x1.toDouble()).put("y1", key.y1.toDouble())
+                                    .put("x2", key.x2.toDouble()).put("y2", key.y2.toDouble()))
+                            }
+                        })
+                    }
                     array.put(JSONObject().put("id", effect.id).put("name", effect.name)
-                        .put("enabled", effect.enabled).put("parameters", parameters))
+                        .put("enabled", effect.enabled).put("parameters", parameters)
+                        .put("parameterKeys", parameterKeys))
                 }
             })
             .put("speed", l.p(PropId.SPEED).base.toDouble()).put("volume", l.p(PropId.VOLUME).base.toDouble())
@@ -198,8 +209,23 @@ class ProjectStore(context: Context) {
                         val key = iterator.next()
                         parameters[key] = jsonParameters.optDouble(key, parameters[key]?.toDouble() ?: 0.0).toFloat()
                     }
+                    val keyJson = item.optJSONObject("parameterKeys") ?: JSONObject()
+                    val parameterKeys = mutableMapOf<String, List<Keyframe>>()
+                    val keyNames = keyJson.keys()
+                    while (keyNames.hasNext()) {
+                        val parameter = keyNames.next()
+                        val keyArray = keyJson.optJSONArray(parameter) ?: JSONArray()
+                        val keys = (0 until keyArray.length()).mapNotNull { keyIndex ->
+                            val key = keyArray.optJSONObject(keyIndex) ?: return@mapNotNull null
+                            Keyframe(key.optDouble("t").toFloat(), key.optDouble("v").toFloat(),
+                                runCatching { KeyType.valueOf(key.optString("type", "LINEAR")) }.getOrDefault(KeyType.LINEAR),
+                                key.optDouble("x1", 0.42).toFloat(), key.optDouble("y1", 0.0).toFloat(),
+                                key.optDouble("x2", 0.58).toFloat(), key.optDouble("y2", 1.0).toFloat())
+                        }.sortedBy { it.t }
+                        if (keys.isNotEmpty()) parameterKeys[parameter] = keys
+                    }
                     EffectInstance(item.optString("id", UUID.randomUUID().toString()), name,
-                        item.optBoolean("enabled", true), parameters)
+                        item.optBoolean("enabled", true), parameters, parameterKeys)
                 }
             },
             speed = j.optDouble("speed", 1.0).toFloat().coerceIn(0.1f, 4f),
