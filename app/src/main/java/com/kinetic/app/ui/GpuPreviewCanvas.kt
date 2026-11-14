@@ -351,7 +351,7 @@ private fun GpuCompositionPreviewCanvas(
                 val signature = if (layer.type == LayerType.TEXT)
                     layer.text.hashCode() * 31 + layer.color
                 else (((layer.color * 31 + layer.width.toInt() * 7 + layer.height.toInt()) * 31 +
-                    layer.shapeKind.hashCode()) * 31 + layer.vectorPoints.hashCode())
+                    layer.shapeKind.hashCode()) * 31 + layer.vectorPointsAt(editor.time).hashCode())
                 val cached = textTextures[layer.id]
                 if (cached == null || cached.first != signature || cached.second.isRecycled) {
                     val w = layer.width.toInt().coerceIn(1, 4096)
