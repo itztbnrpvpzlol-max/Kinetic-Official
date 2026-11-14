@@ -634,9 +634,61 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
     }
 
     fun updateEffectParameter(layerId: String, effectId: String, parameter: String, value: Float) {
+        val t = time
         updateLayer(layerId, push = false) { layer ->
             layer.copy(effectStack = layer.effectStack.map { effect ->
-                if (effect.id == effectId) effect.copy(parameters = effect.parameters + (parameter to value)) else effect
+                if (effect.id != effectId) effect else {
+                    val base = effect.parameters[parameter] ?: 0f
+                    val prop = Prop(base, effect.parameterKeys[parameter].orEmpty())
+                    val updated = prop.withValueAt(t, value, frame / 2f)
+                    effect.copy(
+                        parameters = effect.parameters + (parameter to updated.base),
+                        parameterKeys = if (updated.keys.isEmpty()) effect.parameterKeys - parameter
+                            else effect.parameterKeys + (parameter to updated.keys)
+                    )
+                }
+            })
+        }
+    }
+
+    fun toggleEffectParameterKey(layerId: String, effectId: String, parameter: String) {
+        val t = time
+        updateLayer(layerId) { layer ->
+            layer.copy(effectStack = layer.effectStack.map { effect ->
+                if (effect.id != effectId) effect else {
+                    val base = effect.parameters[parameter] ?: 0f
+                    val keys = effect.parameterKeys[parameter].orEmpty()
+                    val index = keys.indexOfFirst { abs(it.t - t) <= frame / 2f }
+                    if (index >= 0) {
+                        val removed = keys[index]
+                        val remaining = keys.filterIndexed { i, _ -> i != index }
+                        effect.copy(
+                            parameters = if (remaining.isEmpty()) effect.parameters + (parameter to removed.v) else effect.parameters,
+                            parameterKeys = if (remaining.isEmpty()) effect.parameterKeys - parameter
+                                else effect.parameterKeys + (parameter to remaining)
+                        )
+                    } else {
+                        val current = Prop(base, keys).valueAt(t)
+                        effect.copy(parameterKeys = effect.parameterKeys +
+                            (parameter to (keys + Keyframe(t, current)).sortedBy { it.t }))
+                    }
+                }
+            })
+        }
+    }
+
+    fun replaceEffectParameterKey(
+        layerId: String, effectId: String, parameter: String, index: Int, key: Keyframe
+    ) {
+        updateLayer(layerId, push = false) { layer ->
+            layer.copy(effectStack = layer.effectStack.map { effect ->
+                if (effect.id != effectId) effect else {
+                    val keys = effect.parameterKeys[parameter].orEmpty()
+                    if (index !in keys.indices) effect else effect.copy(
+                        parameterKeys = effect.parameterKeys + (parameter to keys.toMutableList().also { it[index] = key }
+                            .sortedBy { it.t })
+                    )
+                }
             })
         }
     }
