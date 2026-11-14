@@ -315,7 +315,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
             onPlay = { togglePlayback() }
         )
         if (!previewExpanded) {
-            TimelinePane(editor, playback, Modifier.weight(1f))
+            TimelinePane(editor, Modifier.weight(1f))
             val activeLayer = editor.selected
             if (activeLayer != null) {
                 AlightCutBar(editor, activeLayer)
