@@ -182,18 +182,16 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
                             change.consume()
                             if (editor.playing) editor.playing = false
                             hScroll.dispatchRawDelta(-overSlop)
-                            editor.seekFrame(((hScroll.value.toFloat() - leadingPadPx) / (pps * dens).coerceAtLeast(0.001f)).coerceAtLeast(0f))
+                            editor.seek(((hScroll.value.toFloat() - leadingPadPx) / (pps * dens).coerceAtLeast(0.001f)).coerceAtLeast(0f))
                             dragStarted = true
                         }
                     }
 
                     if (dragStarted) {
-                        var releasedNormally = false
                         while (true) {
                             val event = awaitPointerEvent(PointerEventPass.Main)
                             val change = event.changes.firstOrNull { it.id == down.id } ?: break
                             if (!change.pressed) {
-                                releasedNormally = true
                                 break
                             }
                             // A child drag can take ownership after its long-press
@@ -204,7 +202,7 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
                             if (dx != 0f) {
                                 change.consume()
                                 hScroll.dispatchRawDelta(-dx)
-                                editor.seekFrame(((hScroll.value.toFloat() - leadingPadPx) / (pps * dens).coerceAtLeast(0.001f)).coerceAtLeast(0f))
+                                editor.seek(((hScroll.value.toFloat() - leadingPadPx) / (pps * dens).coerceAtLeast(0.001f)).coerceAtLeast(0f))
                             }
                         }
                         // No magnetic snapping on release; keep the current frame position.
@@ -303,7 +301,7 @@ private fun Ruler(editor: EditorState, pps: Float, contentW: Dp, leadingPad: Dp)
         Modifier
             .width(contentW)
             .fillMaxHeight()
-            .pointerInput(pps, leadingPad) { detectTapGestures { o -> editor.seekFrame(((o.x / dens - leadingPad.value) / pps).coerceAtLeast(0f)) } }
+            .pointerInput(pps, leadingPad) { detectTapGestures { o -> editor.seek(((o.x / dens - leadingPad.value) / pps).coerceAtLeast(0f)) } }
 
     ) {
         textPaint.textSize = 11.sp.toPx()
