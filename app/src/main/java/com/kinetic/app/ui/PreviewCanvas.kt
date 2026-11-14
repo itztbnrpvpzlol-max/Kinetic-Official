@@ -87,8 +87,10 @@ fun CpuPreviewCanvas(
             for (layer in mediaLayers) {
                 val rawUri = layer.uri ?: continue
                 if (!layer.visible || !layer.activeAt(timelineTime)) {
+                    // Keep the most recently decoded frame warm while this clip
+                    // is outside the playhead. On re-entry it can cover decoder
+                    // startup latency instead of flashing the missing-frame fill.
                     lastRequests.remove(layer.id)
-                    bitmaps.remove(layer.id)
                     continue
                 }
                 hadActiveMedia = true
@@ -231,10 +233,10 @@ fun CpuPreviewCanvas(
                         if (bmp != null) {
                             paint.color = android.graphics.Color.WHITE
                             nc.drawBitmap(bmp, null, destinationRects[l.id] ?: RectF(0f, 0f, l.width, l.height), paint)
-                        } else {
-                            paint.color = 0xFF24242F.toInt(); paint.alpha = alpha
-                            nc.drawRect(0f, 0f, l.width, l.height, paint)
                         }
+                        // A missing decode is transparent to the composition.
+                        // Never paint a gray placeholder over the clip: it can
+                        // persist through animated transforms and transitions.
                     }
                     LayerType.SHAPE -> {
                         paint.color = l.color; paint.alpha = alpha

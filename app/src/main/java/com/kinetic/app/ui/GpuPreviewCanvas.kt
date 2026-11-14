@@ -128,7 +128,10 @@ fun PreviewCanvas(
             CpuPreviewCanvas(editor, Modifier.fillMaxSize(), directVideoLayerId = directVideo.id)
         }
     } else if (editor.layers.any { it.visible && it.maskEnabled && it.maskPath != null } ||
-        !supportsGles3(context) || MediaWorkers.isConstrainedDevice) {
+        !supportsGles3(context)) {
+        // Keep the CPU renderer for unsupported GLES devices and mask paths.
+        // Low-RAM devices with GLES3 use the scaled GPU/surface pipeline too;
+        // resolvePreviewScale() already limits their preview resolution.
         CpuPreviewCanvas(editor, modifier)
     } else {
         val visualLayers = editor.layers.filter {
@@ -248,7 +251,9 @@ private fun GpuCompositionPreviewCanvas(
                         while (true) {
                             val timelineTime = latestTimelineTime.value
                             if (!layer.activeAt(timelineTime)) {
-                                if (wasActive) frames.remove(layer.id)
+                                // Preserve the latest frame for the next active
+                                // interval; this avoids a blank/gray-looking
+                                // handoff while the decoder catches up.
                                 wasActive = false
                                 lastBucket = Int.MIN_VALUE
                                 kotlinx.coroutines.delay(16L)
