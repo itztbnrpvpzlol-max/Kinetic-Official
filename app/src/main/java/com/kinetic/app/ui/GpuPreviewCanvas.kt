@@ -222,12 +222,12 @@ private fun GpuCompositionPreviewCanvas(
     val activeVideoLayers = editor.layers.filter {
         it.visible && it.activeAt(editor.time) && it.type == LayerType.VIDEO && it.uri != null
     }
-    // Effect-bearing clips use the bitmap upload path into the same GPU shader
-    // compositor. The external SurfaceTexture route is not reliable on every
-    // GLES driver and can render an otherwise valid clip black once effects
-    // disable the direct TextureView preview.
+    // Keep effect-bearing footage on the SurfaceTexture / external-OES path.
+    // The external fragment shader receives the same packed effect uniforms as
+    // bitmap textures, so effects must not force a decoder-to-bitmap detour.
+    // Only a decoder that actually failed is moved to the bounded bitmap fallback.
     val videoLayers = activeVideoLayers
-        .filter { failedVideoSources[it.id] != it.uri && it.effectStack.none { effect -> effect.enabled } }
+        .filter { failedVideoSources[it.id] != it.uri }
         .take(decoderLimit)
     val textureVideoIds = videoLayers.mapTo(HashSet<String>()) { it.id }
 
@@ -341,7 +341,7 @@ private fun GpuCompositionPreviewCanvas(
             renderLayers += GpuLayer(
                 layer.id, null, Matrix(layerMatrix(layer, editor.time, byId)),
                 layer.width, layer.height, opacity, layer.maskEnabled,
-                "Grayscale" in layer.effects, layer.blendMode, true, effectUniforms(layer.effectStack)
+                "Grayscale" in layer.effects, layer.blendMode, true, effectUniforms(layer.effectStack, editor.time)
             )
             continue
         }
