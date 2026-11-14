@@ -31,16 +31,16 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 private val effectCategories = listOf(
-    "Color & Light" to "CL",
-    "Stylize" to "ST",
-    "Drawing & Edge" to "DE",
-    "Distortion & Warp" to "DW",
-    "Procedural" to "PR",
-    "Blur" to "BL",
-    "3D" to "3D",
-    "Text" to "TX",
-    "Audio" to "AU",
-    "Other / Miscellaneous" to "OT"
+    "Color & Light",
+    "Stylize",
+    "Drawing & Edge",
+    "Distortion & Warp",
+    "Procedural",
+    "Blur",
+    "3D",
+    "Text",
+    "Audio",
+    "Other / Miscellaneous"
 )
 
 @Composable
@@ -104,8 +104,8 @@ fun EffectsBrowserScreen(onClose: () -> Unit) {
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                row.forEach { (name, monogram) ->
-                    CategoryTile(name, monogram, Modifier.weight(1f))
+                row.forEach { name ->
+                    CategoryTile(name, Modifier.weight(1f))
                 }
                 if (row.size == 1) Spacer(Modifier.weight(1f))
             }
@@ -129,12 +129,8 @@ private fun SectionHeading(title: String) {
 @Composable
 private fun EmptyEffectShelf(message: String) {
     Box(
-        Modifier.fillMaxWidth().height(82.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .background(KColors.Surface)
-            .border(1.dp, KColors.Line, RoundedCornerShape(12.dp))
-            .padding(12.dp),
-        contentAlignment = Alignment.Center
+        Modifier.fillMaxWidth().height(48.dp),
+        contentAlignment = Alignment.CenterStart
     ) {
         Text(message, color = KColors.Dim, fontSize = 10.sp)
     }
@@ -145,11 +141,8 @@ private fun EmptySwipeShelf(title: String, subtitle: String, modifier: Modifier 
     Column(modifier) {
         SectionHeading(title)
         Box(
-            Modifier.fillMaxWidth().height(82.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(KColors.Surface)
-                .border(1.dp, KColors.Line, RoundedCornerShape(12.dp)),
-            contentAlignment = Alignment.Center
+            Modifier.fillMaxWidth().height(48.dp),
+            contentAlignment = Alignment.CenterStart
         ) {
             Text(subtitle, color = KColors.Dim, fontSize = 10.sp)
         }
@@ -157,22 +150,15 @@ private fun EmptySwipeShelf(title: String, subtitle: String, modifier: Modifier 
 }
 
 @Composable
-private fun CategoryTile(name: String, monogram: String, modifier: Modifier = Modifier) {
+private fun CategoryTile(name: String, modifier: Modifier = Modifier) {
     Row(
         modifier.height(76.dp)
             .clip(RoundedCornerShape(12.dp))
             .background(KColors.Surface)
             .border(1.dp, KColors.Line, RoundedCornerShape(12.dp))
             .padding(horizontal = 11.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(
-            Modifier.size(34.dp).clip(RoundedCornerShape(9.dp)).background(KColors.Surface2),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(monogram, color = KColors.Accent, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-        }
         Text(
             name,
             color = KColors.Text,
