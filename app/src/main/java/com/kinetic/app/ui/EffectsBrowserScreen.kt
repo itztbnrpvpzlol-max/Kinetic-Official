@@ -6,6 +6,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -129,9 +130,14 @@ fun EffectsBrowserScreen(onClose: () -> Unit, onAddEffect: (String) -> Unit) {
                 Text("No effects in this category yet.", color = KColors.Dim, fontSize = 12.sp,
                     modifier = Modifier.padding(vertical = 20.dp))
             } else {
-                category.effects.forEach { effect ->
-                    EffectChoice(effect, category.accent) { onAddEffect(effect) }
-                    Spacer(Modifier.height(8.dp))
+                category.effects.chunked(2).forEach { row ->
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        row.forEach { effect ->
+                            EffectChoice(effect, category.accent, Modifier.weight(1f)) { onAddEffect(effect) }
+                        }
+                        if (row.size == 1) Spacer(Modifier.weight(1f))
+                    }
+                    Spacer(Modifier.height(10.dp))
                 }
             }
         }
@@ -158,17 +164,28 @@ private fun ShelfSection(title: String, emptyMessage: String, icon: IconKind, ac
 }
 
 @Composable
-private fun EffectChoice(name: String, accent: Color, onClick: () -> Unit) {
-    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(KColors.Surface)
-        .border(1.dp, KColors.Line, RoundedCornerShape(10.dp)).clickable(onClick = onClick)
-        .padding(horizontal = 12.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-        KIcon(IconKind.EFFECTS, accent, Modifier.size(19.dp))
-        Spacer(Modifier.size(10.dp))
-        Text(name, color = KColors.Text, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-        KIcon(IconKind.PLUS, KColors.Muted, Modifier.size(17.dp))
+private fun EffectChoice(name: String, accent: Color, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Box(modifier.aspectRatio(1f).clip(RoundedCornerShape(14.dp)).background(KColors.Surface)
+        .border(1.dp, KColors.Line, RoundedCornerShape(14.dp)).clickable(onClick = onClick)) {
+        Canvas(Modifier.fillMaxSize()) {
+            drawCircle(Brush.radialGradient(listOf(accent.copy(alpha = 0.20f), Color.Transparent)),
+                radius = size.minDimension * 0.72f, center = Offset(size.width * 0.82f, size.height * 0.18f))
+            drawRoundRect(accent.copy(alpha = 0.10f), Offset(size.width * 0.12f, size.height * 0.12f),
+                androidx.compose.ui.geometry.Size(size.width * 0.76f, size.height * 0.76f),
+                androidx.compose.ui.geometry.CornerRadius(size.minDimension * 0.12f),
+                style = Stroke(size.minDimension * 0.012f))
+        }
+        Column(Modifier.fillMaxSize().padding(10.dp), horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center) {
+            KIcon(IconKind.EFFECTS, accent, Modifier.size(29.dp))
+            Spacer(Modifier.height(12.dp))
+            Text(name, color = KColors.Text, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+                maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Spacer(Modifier.height(7.dp))
+            KIcon(IconKind.PLUS, KColors.Muted, Modifier.size(15.dp))
+        }
     }
 }
-
 @Composable
 private fun CategoryTile(category: EffectCategory, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Box(modifier.height(116.dp).clip(RoundedCornerShape(15.dp)).background(category.background)

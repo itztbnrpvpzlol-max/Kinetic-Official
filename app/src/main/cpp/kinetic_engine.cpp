@@ -360,7 +360,7 @@ void drawNativeTexture(GLuint program, GLint positionHandle, GLint uvHandle,
     if (program == gTextureProgram) {
         glUniform1i(gTextureEffectCount, effectCount);
         glUniform1f(gTextureTime, time);
-        if (effects && effectCount > 0) glUniform4fv(gTextureEffects, effectCount, effects);
+        if (effects && effectCount > 0) glUniform4fv(gTextureEffects, effectCount * 2, effects);
     }
     applyNativeBlend(blendMode);
     glEnable(GL_BLEND);
@@ -508,48 +508,78 @@ Java_com_kinetic_app_engine_NativeRenderEngine_nativeGlInit(JNIEnv*, jobject) {
     static const char* textureFragment =
         "#version 300 es\n"
         "precision mediump float; uniform sampler2D uTexture; uniform float uAlpha;"
-        "uniform float uGray; uniform vec4 uEffects[8]; uniform int uEffectCount; uniform float uTime;"
+        "uniform float uGray; uniform vec4 uEffects[16]; uniform int uEffectCount; uniform float uTime;"
         "in vec2 vTexCoord; out vec4 fragColor;"
-        "vec2 warpUv(vec2 uv){ for(int i=0;i<8;i++){ if(i>=uEffectCount) break; vec4 e=uEffects[i]; int k=int(e.x+0.5);"
-        "if(k==1){ float s=max(1.0,e.y); vec2 q=uv*s; vec2 cell=floor(q); vec2 f=fract(q);"
-        "if(e.z>0.5) f=mix(f,1.0-f,mod(cell,2.0)); uv=f; }"
-        "else if(k==2){ uv.x+=sin((uv.y*e.z+uTime*e.w)*6.28318)*e.y; }"
-        "else if(k==3){ uv+=vec2(sin(uTime*e.z*6.28318),cos(uTime*e.z*5.13))*e.y; }"
-        "else if(k==5){ uv+=vec2(sin(uTime*e.w*6.28318)*e.y,cos(uTime*e.w*6.28318)*e.z); } } return clamp(uv,0.0,1.0); }"
+        "vec2 waveDir(float a){ return vec2(cos(radians(a)),sin(radians(a))); }"
+        "float waveShape(float t,float shape){ float s=sin(t); if(shape<0.5) return s; if(shape<1.5) return sign(s); float c=fract(t/6.28318); if(shape<2.5) return 1.0-4.0*abs(c-0.5); return c*2.0-1.0; }"
+        "vec2 warpUv(vec2 uv){ for(int i=0;i<8;i++){ if(i>=uEffectCount) break; vec4 e=uEffects[i*2]; vec4 f=uEffects[i*2+1]; int k=int(e.x+0.5);"
+        "if(k==1){ vec2 outSize=max(vec2(e.w,f.x)/100.0,vec2(1.0)); vec2 tile=max(vec2(e.y,e.z)/100.0,vec2(0.01));"
+        "vec2 q=((uv-0.5)*outSize)/tile+0.5+vec2(f.z,f.w); vec2 cell=floor(q); vec2 p=fract(q);"
+        "if(f.y>0.5) p=mix(p,1.0-p,mod(abs(cell),2.0)); uv=p; }"
+        "else if(k==2){ vec2 axis=waveDir(f.y); vec2 perp=vec2(-axis.y,axis.x); float t=dot(uv-0.5,axis)*max(e.z,1.0)*6.28318-uTime*e.w*6.28318+radians(f.z);"
+        "float w=waveShape(t,f.x); float edge=1.0; if(f.w==1.0||f.w==3.0) edge*=smoothstep(0.0,0.08,uv.y)*smoothstep(0.0,0.08,1.0-uv.y);"
+        "if(f.w==2.0||f.w==3.0) edge*=smoothstep(0.0,0.08,uv.x)*smoothstep(0.0,0.08,1.0-uv.x); uv+=perp*w*e.y*edge; }"
+        "else if(k==3){ float t=uTime*e.w+f.y*17.17; float sx; float sy; if(f.x>0.5){ sx=fract(sin(floor(t)*12.9898+f.y*78.233)*43758.5453)*2.0-1.0; sy=fract(sin(floor(t+0.37)*39.346+f.y*11.135)*24634.6345)*2.0-1.0; }"
+        "else { sx=sin(t*6.28318); sy=sin(t*6.28318+2.17); } vec2 d=waveDir(f.z); vec2 p=vec2(-d.y,d.x); uv+=d*(sx*e.y)+p*(sy*e.z); }"
+        "else if(k==5){ float t=uTime*e.w*6.28318+radians(f.y); float w=waveShape(t,f.x); if(f.z>0.5) w=(w+1.0)*0.5;"
+        "uv+=vec2(w*e.y,sin(t+1.5708)*e.z); } } return clamp(uv,0.0,1.0); }"
         "void main(){ vec2 uv=warpUv(vTexCoord); vec4 c=texture(uTexture,uv);"
-        "for(int i=0;i<8;i++){ if(i>=uEffectCount) break; vec4 e=uEffects[i]; int k=int(e.x+0.5);"
-        "if(k==4){ float a=radians(e.z); vec2 d=vec2(cos(a),sin(a))*e.y;"
-        "c.r=texture(uTexture,clamp(uv+d,0.0,1.0)).r; c.b=texture(uTexture,clamp(uv-d,0.0,1.0)).b; }"
-        "else if(k==6){ float r=max(e.z,0.0005); vec3 s0=texture(uTexture,clamp(uv+vec2(r,0.0),0.0,1.0)).rgb;"
-        "vec3 s1=texture(uTexture,clamp(uv-vec2(r,0.0),0.0,1.0)).rgb;"
-        "vec3 s2=texture(uTexture,clamp(uv+vec2(0.0,r),0.0,1.0)).rgb;"
-        "vec3 s3=texture(uTexture,clamp(uv-vec2(0.0,r),0.0,1.0)).rgb;"
-        "c.rgb+=(max(s0-vec3(e.y),vec3(0.0))+max(s1-vec3(e.y),vec3(0.0))+max(s2-vec3(e.y),vec3(0.0))+max(s3-vec3(e.y),vec3(0.0)))*0.25*e.w; }"
-        "else if(k==7){ c.rgb=pow(max(c.rgb*exp2(e.y),vec3(0.0)),vec3(1.0/max(e.z,0.01))); } }"
+        "for(int i=0;i<8;i++){ if(i>=uEffectCount) break; vec4 e=uEffects[i*2]; vec4 f=uEffects[i*2+1]; int k=int(e.x+0.5);"
+        "if(k==4){ vec2 dir=waveDir(f.x); if(f.y>0.5){ vec2 radial=normalize(uv-vec2(f.z,f.w)+vec2(0.00001)); dir=radial; }"
+        "vec2 dr=dir*e.y; vec2 dg=dir*e.z; vec2 db=dir*e.w; c.r=texture(uTexture,clamp(uv+dr,0.0,1.0)).r;"
+        "c.g=texture(uTexture,clamp(uv+dg,0.0,1.0)).g; c.b=texture(uTexture,clamp(uv+db,0.0,1.0)).b; }"
+        "else if(k==6){ float r=max(e.z*f.y,0.0005); vec3 glow=vec3(0.0);"
+        "glow+=max(texture(uTexture,clamp(uv+vec2(r,0.0),0.0,1.0)).rgb-vec3(e.y),vec3(0.0));"
+        "glow+=max(texture(uTexture,clamp(uv-vec2(r,0.0),0.0,1.0)).rgb-vec3(e.y),vec3(0.0));"
+        "glow+=max(texture(uTexture,clamp(uv+vec2(0.0,r),0.0,1.0)).rgb-vec3(e.y),vec3(0.0));"
+        "glow+=max(texture(uTexture,clamp(uv-vec2(0.0,r),0.0,1.0)).rgb-vec3(e.y),vec3(0.0));"
+        "if(f.x>0.5){ glow+=max(texture(uTexture,clamp(uv+vec2(r*0.7071,r*0.7071),0.0,1.0)).rgb-vec3(e.y),vec3(0.0));"
+        "glow+=max(texture(uTexture,clamp(uv+vec2(-r*0.7071,r*0.7071),0.0,1.0)).rgb-vec3(e.y),vec3(0.0));"
+        "glow+=max(texture(uTexture,clamp(uv+vec2(r*0.7071,-r*0.7071),0.0,1.0)).rgb-vec3(e.y),vec3(0.0));"
+        "glow+=max(texture(uTexture,clamp(uv-vec2(r*0.7071,r*0.7071),0.0,1.0)).rgb-vec3(e.y),vec3(0.0)); glow*=0.125; } else { glow*=0.25; }"
+        "float lum=dot(glow,vec3(0.299,0.587,0.114)); glow=mix(vec3(lum),glow,f.z);"
+        "c.rgb=f.w>0.5?glow*e.w:c.rgb+glow*e.w; }"
+        "else if(k==7){ vec3 v=max(c.rgb+vec3(e.w),vec3(0.0))*exp2(e.y); v=pow(v,vec3(1.0/max(e.z,0.01)));"
+        "if(f.x<0.5) c.rgb=v; else if(f.x<1.5) c.r=v.r; else if(f.x<2.5) c.g=v.g; else c.b=v.b; } }"
         "if(uGray>0.5){ float y=dot(c.rgb,vec3(0.299,0.587,0.114)); c.rgb=vec3(y); }"
         "fragColor=vec4(c.rgb*c.a*uAlpha,c.a*uAlpha); }";
     static const char* externalFragment =
         "#version 300 es\n"
         "#extension GL_OES_EGL_image_external_essl3 : require\n"
         "precision mediump float; uniform samplerExternalOES uTexture; uniform float uAlpha;"
-        "uniform float uGray; uniform mat4 uTexMatrix; uniform vec4 uEffects[8];"
+        "uniform float uGray; uniform mat4 uTexMatrix; uniform vec4 uEffects[16];"
         "uniform int uEffectCount; uniform float uTime; in vec2 vTexCoord; out vec4 fragColor;"
-        "vec2 warpUv(vec2 uv){ for(int i=0;i<8;i++){ if(i>=uEffectCount) break; vec4 e=uEffects[i]; int k=int(e.x+0.5);"
-        "if(k==1){ float s=max(1.0,e.y); vec2 q=uv*s; vec2 cell=floor(q); vec2 f=fract(q);"
-        "if(e.z>0.5) f=mix(f,1.0-f,mod(cell,2.0)); uv=f; }"
-        "else if(k==2){ uv.x+=sin((uv.y*e.z+uTime*e.w)*6.28318)*e.y; }"
-        "else if(k==3){ uv+=vec2(sin(uTime*e.z*6.28318),cos(uTime*e.z*5.13))*e.y; }"
-        "else if(k==5){ uv+=vec2(sin(uTime*e.w*6.28318)*e.y,cos(uTime*e.w*6.28318)*e.z); } } return clamp(uv,0.0,1.0); }"
+        "vec2 waveDir(float a){ return vec2(cos(radians(a)),sin(radians(a))); }"
+        "float waveShape(float t,float shape){ float s=sin(t); if(shape<0.5) return s; if(shape<1.5) return sign(s); float c=fract(t/6.28318); if(shape<2.5) return 1.0-4.0*abs(c-0.5); return c*2.0-1.0; }"
+        "vec2 warpUv(vec2 uv){ for(int i=0;i<8;i++){ if(i>=uEffectCount) break; vec4 e=uEffects[i*2]; vec4 f=uEffects[i*2+1]; int k=int(e.x+0.5);"
+        "if(k==1){ vec2 outSize=max(vec2(e.w,f.x)/100.0,vec2(1.0)); vec2 tile=max(vec2(e.y,e.z)/100.0,vec2(0.01));"
+        "vec2 q=((uv-0.5)*outSize)/tile+0.5+vec2(f.z,f.w); vec2 cell=floor(q); vec2 p=fract(q);"
+        "if(f.y>0.5) p=mix(p,1.0-p,mod(abs(cell),2.0)); uv=p; }"
+        "else if(k==2){ vec2 axis=waveDir(f.y); vec2 perp=vec2(-axis.y,axis.x); float t=dot(uv-0.5,axis)*max(e.z,1.0)*6.28318-uTime*e.w*6.28318+radians(f.z);"
+        "float w=waveShape(t,f.x); float edge=1.0; if(f.w==1.0||f.w==3.0) edge*=smoothstep(0.0,0.08,uv.y)*smoothstep(0.0,0.08,1.0-uv.y);"
+        "if(f.w==2.0||f.w==3.0) edge*=smoothstep(0.0,0.08,uv.x)*smoothstep(0.0,0.08,1.0-uv.x); uv+=perp*w*e.y*edge; }"
+        "else if(k==3){ float t=uTime*e.w+f.y*17.17; float sx; float sy; if(f.x>0.5){ sx=fract(sin(floor(t)*12.9898+f.y*78.233)*43758.5453)*2.0-1.0; sy=fract(sin(floor(t+0.37)*39.346+f.y*11.135)*24634.6345)*2.0-1.0; }"
+        "else { sx=sin(t*6.28318); sy=sin(t*6.28318+2.17); } vec2 d=waveDir(f.z); vec2 p=vec2(-d.y,d.x); uv+=d*(sx*e.y)+p*(sy*e.z); }"
+        "else if(k==5){ float t=uTime*e.w*6.28318+radians(f.y); float w=waveShape(t,f.x); if(f.z>0.5) w=(w+1.0)*0.5;"
+        "uv+=vec2(w*e.y,sin(t+1.5708)*e.z); } } return clamp(uv,0.0,1.0); }"
         "void main(){ vec2 uv=warpUv((uTexMatrix*vec4(vTexCoord,0.0,1.0)).xy); vec4 c=texture(uTexture,uv);"
-        "for(int i=0;i<8;i++){ if(i>=uEffectCount) break; vec4 e=uEffects[i]; int k=int(e.x+0.5);"
-        "if(k==4){ float a=radians(e.z); vec2 d=vec2(cos(a),sin(a))*e.y;"
-        "c.r=texture(uTexture,clamp(uv+d,0.0,1.0)).r; c.b=texture(uTexture,clamp(uv-d,0.0,1.0)).b; }"
-        "else if(k==6){ float r=max(e.z,0.0005); vec3 s0=texture(uTexture,clamp(uv+vec2(r,0.0),0.0,1.0)).rgb;"
-        "vec3 s1=texture(uTexture,clamp(uv-vec2(r,0.0),0.0,1.0)).rgb;"
-        "vec3 s2=texture(uTexture,clamp(uv+vec2(0.0,r),0.0,1.0)).rgb;"
-        "vec3 s3=texture(uTexture,clamp(uv-vec2(0.0,r),0.0,1.0)).rgb;"
-        "c.rgb+=(max(s0-vec3(e.y),vec3(0.0))+max(s1-vec3(e.y),vec3(0.0))+max(s2-vec3(e.y),vec3(0.0))+max(s3-vec3(e.y),vec3(0.0)))*0.25*e.w; }"
-        "else if(k==7){ c.rgb=pow(max(c.rgb*exp2(e.y),vec3(0.0)),vec3(1.0/max(e.z,0.01))); } }"
+        "for(int i=0;i<8;i++){ if(i>=uEffectCount) break; vec4 e=uEffects[i*2]; vec4 f=uEffects[i*2+1]; int k=int(e.x+0.5);"
+        "if(k==4){ vec2 dir=waveDir(f.x); if(f.y>0.5){ vec2 radial=normalize(uv-vec2(f.z,f.w)+vec2(0.00001)); dir=radial; }"
+        "vec2 dr=dir*e.y; vec2 dg=dir*e.z; vec2 db=dir*e.w; c.r=texture(uTexture,clamp(uv+dr,0.0,1.0)).r;"
+        "c.g=texture(uTexture,clamp(uv+dg,0.0,1.0)).g; c.b=texture(uTexture,clamp(uv+db,0.0,1.0)).b; }"
+        "else if(k==6){ float r=max(e.z*f.y,0.0005); vec3 glow=vec3(0.0);"
+        "glow+=max(texture(uTexture,clamp(uv+vec2(r,0.0),0.0,1.0)).rgb-vec3(e.y),vec3(0.0));"
+        "glow+=max(texture(uTexture,clamp(uv-vec2(r,0.0),0.0,1.0)).rgb-vec3(e.y),vec3(0.0));"
+        "glow+=max(texture(uTexture,clamp(uv+vec2(0.0,r),0.0,1.0)).rgb-vec3(e.y),vec3(0.0));"
+        "glow+=max(texture(uTexture,clamp(uv-vec2(0.0,r),0.0,1.0)).rgb-vec3(e.y),vec3(0.0));"
+        "if(f.x>0.5){ glow+=max(texture(uTexture,clamp(uv+vec2(r*0.7071,r*0.7071),0.0,1.0)).rgb-vec3(e.y),vec3(0.0));"
+        "glow+=max(texture(uTexture,clamp(uv+vec2(-r*0.7071,r*0.7071),0.0,1.0)).rgb-vec3(e.y),vec3(0.0));"
+        "glow+=max(texture(uTexture,clamp(uv+vec2(r*0.7071,-r*0.7071),0.0,1.0)).rgb-vec3(e.y),vec3(0.0));"
+        "glow+=max(texture(uTexture,clamp(uv-vec2(r*0.7071,r*0.7071),0.0,1.0)).rgb-vec3(e.y),vec3(0.0)); glow*=0.125; } else { glow*=0.25; }"
+        "float lum=dot(glow,vec3(0.299,0.587,0.114)); glow=mix(vec3(lum),glow,f.z);"
+        "c.rgb=f.w>0.5?glow*e.w:c.rgb+glow*e.w; }"
+        "else if(k==7){ vec3 v=max(c.rgb+vec3(e.w),vec3(0.0))*exp2(e.y); v=pow(v,vec3(1.0/max(e.z,0.01)));"
+        "if(f.x<0.5) c.rgb=v; else if(f.x<1.5) c.r=v.r; else if(f.x<2.5) c.g=v.g; else c.b=v.b; } }"
         "if(uGray>0.5){ float y=dot(c.rgb,vec3(0.299,0.587,0.114)); c.rgb=vec3(y); }"
         "fragColor=vec4(c.rgb*c.a*uAlpha,c.a*uAlpha); }";
     static const char* solidVertex =
@@ -634,7 +664,7 @@ Java_com_kinetic_app_engine_NativeRenderEngine_nativeGlDrawTexture(
         if (effects) env->ReleaseFloatArrayElements(effectValues, effects, JNI_ABORT);
         return;
     }
-    const jint effectCount = effects ? std::min(8, env->GetArrayLength(effectValues) / 4) : 0;
+    const jint effectCount = effects ? std::min(8, env->GetArrayLength(effectValues) / 8) : 0;
     drawNativeTexture(gTextureProgram, gTexturePosition, gTextureUv,
         gTextureSampler, gTextureAlpha, gTextureGray, GL_TEXTURE_2D,
         textureId, data, alpha, gray, blendMode, effects, effectCount, time);
@@ -652,7 +682,7 @@ Java_com_kinetic_app_engine_NativeRenderEngine_nativeGlDrawExternalTexture(
     jfloat* data = env->GetFloatArrayElements(vertices, nullptr);
     jfloat* matrix = env->GetFloatArrayElements(textureMatrix, nullptr);
     jfloat* effects = effectValues ? env->GetFloatArrayElements(effectValues, nullptr) : nullptr;
-    const jint effectCount = effects ? std::min(8, env->GetArrayLength(effectValues) / 4) : 0;
+    const jint effectCount = effects ? std::min(8, env->GetArrayLength(effectValues) / 8) : 0;
     if (!data || !matrix) {
         if (data) env->ReleaseFloatArrayElements(vertices, data, JNI_ABORT);
         if (matrix) env->ReleaseFloatArrayElements(textureMatrix, matrix, JNI_ABORT);
@@ -683,7 +713,7 @@ Java_com_kinetic_app_engine_NativeRenderEngine_nativeGlDrawExternalTexture(
     glUniformMatrix4fv(gExternalMatrix, 1, GL_FALSE, matrix);
     glUniform1i(gExternalEffectCount, effectCount);
     glUniform1f(gExternalTime, time);
-    if (effects && effectCount > 0) glUniform4fv(gExternalEffects, effectCount, effects);
+    if (effects && effectCount > 0) glUniform4fv(gExternalEffects, effectCount * 2, effects);
     applyNativeBlend(blendMode);
     glEnable(GL_BLEND);
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);

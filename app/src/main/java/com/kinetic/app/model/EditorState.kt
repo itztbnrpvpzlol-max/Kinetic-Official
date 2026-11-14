@@ -132,17 +132,7 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
         time = (raw * fps).roundToInt() / fps.toFloat()
     }
 
-    /** Optional magnetic alignment for completed gestures and deliberate snap operations. */
-    fun seekSnap(t: Float, windowSec: Float) {
-        val raw = t.coerceAtLeast(0f)
-        if (raw > duration) baseDuration = raw
-        if (settings.snap) {
-            val times = selected?.props?.values?.flatMap { p -> p.keys.map { it.t } } ?: emptyList()
-            val near = times.minByOrNull { abs(it - raw) }
-            if (near != null && abs(near - raw) <= windowSec) { time = near; return }
-        }
-        time = (raw * fps).roundToInt() / fps.toFloat()
-    }
+
 
     // ---------- layers ----------
     private fun remaining(): Float = (duration - time).coerceAtLeast(1f)

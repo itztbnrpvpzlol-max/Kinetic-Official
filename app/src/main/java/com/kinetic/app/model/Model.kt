@@ -294,36 +294,68 @@ data class EffectInstance(
 
 fun createEffect(name: String): EffectInstance? {
     val parameters = when (name) {
-        "Motion Tile" -> mapOf("Scale" to 2f, "Mirror Edges" to 1f)
-        "Wave Warp" -> mapOf("Amount" to 0.012f, "Frequency" to 4f, "Speed" to 1f)
-        "Warp Shake" -> mapOf("Amount" to 0.008f, "Frequency" to 8f)
-        "RGB Split" -> mapOf("Amount" to 0.006f, "Angle" to 0f)
-        "Oscillate" -> mapOf("X Amount" to 0.02f, "Y Amount" to 0.02f, "Frequency" to 1f)
-        "Deep Glow" -> mapOf("Threshold" to 0.65f, "Radius" to 0.012f, "Intensity" to 1.2f)
-        "Exposure And Gamma" -> mapOf("Exposure" to 0f, "Gamma" to 1f)
+        "Motion Tile" -> mapOf("Tile Width" to 100f, "Tile Height" to 100f, "Output Width" to 200f,
+            "Output Height" to 200f, "Mirror Edges" to 1f, "Phase X" to 0f, "Phase Y" to 0f)
+        "Wave Warp" -> mapOf("Wave Height" to 0.012f, "Wave Width" to 4f, "Wave Speed" to 1f,
+            "Wave Type" to 0f, "Direction" to 0f, "Phase" to 0f, "Pinning" to 0f)
+        "Warp Shake" -> mapOf("X Amount" to 0.008f, "Y Amount" to 0.008f, "Frequency" to 8f,
+            "Motion" to 0f, "Seed" to 0f, "Direction" to 0f)
+        "RGB Split" -> mapOf("Red Offset" to 0.006f, "Green Offset" to 0f, "Blue Offset" to -0.006f,
+            "Angle" to 0f, "Radial Split" to 0f, "Center X" to 0.5f, "Center Y" to 0.5f)
+        "Oscillate" -> mapOf("X Amplitude" to 0.02f, "Y Amplitude" to 0.02f, "Frequency" to 1f,
+            "Wave Shape" to 0f, "Phase" to 0f, "Half Range" to 0f)
+        "Deep Glow" -> mapOf("Threshold" to 0.65f, "Radius" to 0.012f, "Intensity" to 1.2f,
+            "Quality" to 0f, "Spread" to 1f, "Saturation" to 1f, "Glow Only" to 0f)
+        "Exposure And Gamma" -> mapOf("Exposure" to 0f, "Gamma" to 1f, "Offset" to 0f, "Channel" to 0f)
         else -> return null
     }
     return EffectInstance(name = name, parameters = parameters)
 }
 
-/** Packs enabled effects into four-float GLES uniforms, preserving stack order. */
+/** Packs up to eight enabled effects into two vec4 GLES uniforms per effect. */
 fun effectUniforms(effects: List<EffectInstance>): FloatArray {
     val active = effects.filter { it.enabled }.take(8)
-    val output = FloatArray(active.size * 4)
+    val output = FloatArray(active.size * 8)
     active.forEachIndexed { index, effect ->
-        val offset = index * 4
         val p = effect.parameters
-        val tuple = when (effect.name) {
-            "Motion Tile" -> floatArrayOf(1f, p["Scale"] ?: 2f, p["Mirror Edges"] ?: 1f, 0f)
-            "Wave Warp" -> floatArrayOf(2f, p["Amount"] ?: 0.012f, p["Frequency"] ?: 4f, p["Speed"] ?: 1f)
-            "Warp Shake" -> floatArrayOf(3f, p["Amount"] ?: 0.008f, p["Frequency"] ?: 8f, 0f)
-            "RGB Split" -> floatArrayOf(4f, p["Amount"] ?: 0.006f, p["Angle"] ?: 0f, 0f)
-            "Oscillate" -> floatArrayOf(5f, p["X Amount"] ?: 0.02f, p["Y Amount"] ?: 0.02f, p["Frequency"] ?: 1f)
-            "Deep Glow" -> floatArrayOf(6f, p["Threshold"] ?: 0.65f, p["Radius"] ?: 0.012f, p["Intensity"] ?: 1.2f)
-            "Exposure And Gamma" -> floatArrayOf(7f, p["Exposure"] ?: 0f, p["Gamma"] ?: 1f, 0f)
-            else -> floatArrayOf(0f, 0f, 0f, 0f)
+        val first: FloatArray
+        val second: FloatArray
+        when (effect.name) {
+            "Motion Tile" -> {
+                first = floatArrayOf(1f, p["Tile Width"] ?: 100f, p["Tile Height"] ?: 100f, p["Output Width"] ?: 200f)
+                second = floatArrayOf(p["Output Height"] ?: 200f, p["Mirror Edges"] ?: 1f, p["Phase X"] ?: 0f, p["Phase Y"] ?: 0f)
+            }
+            "Wave Warp" -> {
+                first = floatArrayOf(2f, p["Wave Height"] ?: 0.012f, p["Wave Width"] ?: 4f, p["Wave Speed"] ?: 1f)
+                second = floatArrayOf(p["Wave Type"] ?: 0f, p["Direction"] ?: 0f, p["Phase"] ?: 0f, p["Pinning"] ?: 0f)
+            }
+            "Warp Shake" -> {
+                first = floatArrayOf(3f, p["X Amount"] ?: 0.008f, p["Y Amount"] ?: 0.008f, p["Frequency"] ?: 8f)
+                second = floatArrayOf(p["Motion"] ?: 0f, p["Seed"] ?: 0f, p["Direction"] ?: 0f, 0f)
+            }
+            "RGB Split" -> {
+                first = floatArrayOf(4f, p["Red Offset"] ?: 0.006f, p["Green Offset"] ?: 0f, p["Blue Offset"] ?: -0.006f)
+                second = floatArrayOf(p["Angle"] ?: 0f, p["Radial Split"] ?: 0f, p["Center X"] ?: 0.5f, p["Center Y"] ?: 0.5f)
+            }
+            "Oscillate" -> {
+                first = floatArrayOf(5f, p["X Amplitude"] ?: 0.02f, p["Y Amplitude"] ?: 0.02f, p["Frequency"] ?: 1f)
+                second = floatArrayOf(p["Wave Shape"] ?: 0f, p["Phase"] ?: 0f, p["Half Range"] ?: 0f, 0f)
+            }
+            "Deep Glow" -> {
+                first = floatArrayOf(6f, p["Threshold"] ?: 0.65f, p["Radius"] ?: 0.012f, p["Intensity"] ?: 1.2f)
+                second = floatArrayOf(p["Quality"] ?: 0f, p["Spread"] ?: 1f, p["Saturation"] ?: 1f, p["Glow Only"] ?: 0f)
+            }
+            "Exposure And Gamma" -> {
+                first = floatArrayOf(7f, p["Exposure"] ?: 0f, p["Gamma"] ?: 1f, p["Offset"] ?: 0f)
+                second = floatArrayOf(p["Channel"] ?: 0f, 0f, 0f, 0f)
+            }
+            else -> {
+                first = floatArrayOf(0f, 0f, 0f, 0f)
+                second = floatArrayOf(0f, 0f, 0f, 0f)
+            }
         }
-        tuple.copyInto(output, offset)
+        first.copyInto(output, index * 8)
+        second.copyInto(output, index * 8 + 4)
     }
     return output
 }

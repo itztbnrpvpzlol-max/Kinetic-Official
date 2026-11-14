@@ -207,14 +207,7 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
                                 editor.seekFrame(((hScroll.value.toFloat() - leadingPadPx) / (pps * dens).coerceAtLeast(0.001f)).coerceAtLeast(0f))
                             }
                         }
-                        // Magnetic alignment is a release-time operation only. During
-                        // the drag, the playhead stays free to traverse every frame.
-                        if (releasedNormally) {
-                            editor.seekSnap(
-                                ((hScroll.value.toFloat() - leadingPadPx) / (pps * dens).coerceAtLeast(0.001f)).coerceAtLeast(0f),
-                                8f / pps
-                            )
-                        }
+                        // No magnetic snapping on release; keep the current frame position.
                     }
                 }
             }
@@ -310,7 +303,7 @@ private fun Ruler(editor: EditorState, pps: Float, contentW: Dp, leadingPad: Dp)
         Modifier
             .width(contentW)
             .fillMaxHeight()
-            .pointerInput(pps, leadingPad) { detectTapGestures { o -> editor.seekSnap(((o.x / dens - leadingPad.value) / pps).coerceAtLeast(0f), 8f / pps) } }
+            .pointerInput(pps, leadingPad) { detectTapGestures { o -> editor.seekFrame(((o.x / dens - leadingPad.value) / pps).coerceAtLeast(0f)) } }
 
     ) {
         textPaint.textSize = 11.sp.toPx()
