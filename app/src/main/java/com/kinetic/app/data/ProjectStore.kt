@@ -2,6 +2,8 @@ package com.kinetic.app.data
 
 import android.content.Context
 import com.kinetic.app.model.EditorState
+import com.kinetic.app.model.EffectInstance
+import com.kinetic.app.model.createEffect
 import com.kinetic.app.model.KeyType
 import com.kinetic.app.model.Keyframe
 import com.kinetic.app.model.Layer
