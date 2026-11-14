@@ -598,6 +598,7 @@ private fun ToolEditPanel(
     onMaskToolChange: (String) -> Unit,
     rotoForeground: Boolean,
     onRotoForegroundChange: (Boolean) -> Unit,
+    onOpenEffects: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val displayTime = rememberEditorDisplayTime(editor)
@@ -638,7 +639,7 @@ private fun ToolEditPanel(
                 }
             }
             Box(Modifier.weight(1f).fillMaxHeight()) {
-                if (showGraph) GraphPanel(editor, layer) else ToolPanelControls(tool, editor, layer, displayTime, onExtractAudio, maskTool, onMaskToolChange, rotoForeground, onRotoForegroundChange)
+                if (showGraph) GraphPanel(editor, layer) else ToolPanelControls(tool, editor, layer, displayTime, onExtractAudio, maskTool, onMaskToolChange, rotoForeground, onRotoForegroundChange, onOpenEffects)
             }
         }
     }
