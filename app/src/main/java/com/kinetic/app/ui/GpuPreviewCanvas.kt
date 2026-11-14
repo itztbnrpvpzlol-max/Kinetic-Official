@@ -392,7 +392,7 @@ private fun GpuCompositionPreviewCanvas(
         renderLayers += GpuLayer(
             layer.id, bitmap, Matrix(layerMatrix(layer, editor.time, byId)),
             layer.width, layer.height, opacity, layer.maskEnabled,
-            "Grayscale" in layer.effects, layer.blendMode, false, effectUniforms(layer.effectStack)
+            "Grayscale" in layer.effects, layer.blendMode, false, effectUniforms(layer.effectStack, editor.time)
         )
     }
     val selectedLayer = editor.layers.firstOrNull {
