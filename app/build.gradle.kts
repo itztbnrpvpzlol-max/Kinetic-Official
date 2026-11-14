@@ -1,8 +1,13 @@
+import java.net.URL
+
 plugins {
     id("com.android.application") version "8.9.1"
     id("org.jetbrains.kotlin.android") version "2.2.10"
     id("org.jetbrains.kotlin.plugin.compose") version "2.2.10"
 }
+
+val manropeGeneratedRes = layout.buildDirectory.dir("generated/res/manrope")
+val manropeGeneratedAssets = layout.buildDirectory.dir("generated/assets/manrope")
 
 android {
     namespace = "com.kinetic.app"
@@ -40,6 +45,45 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
+
+    sourceSets.getByName("main").res.srcDir(manropeGeneratedRes)
+    sourceSets.getByName("main").assets.srcDir(manropeGeneratedAssets)
+}
+
+val downloadManropeAssets by tasks.registering {
+    val fontFile = manropeGeneratedRes.map { it.file("font/manrope_variable.ttf") }
+    val licenseFile = manropeGeneratedAssets.map { it.file("fonts/Manrope-OFL.txt") }
+    outputs.files(fontFile, licenseFile)
+
+    doLast {
+        val font = fontFile.get().asFile
+        font.parentFile.mkdirs()
+        URL("https://raw.githubusercontent.com/google/fonts/main/ofl/manrope/Manrope%5Bwght%5D.ttf")
+            .openConnection()
+            .apply {
+                connectTimeout = 20_000
+                readTimeout = 30_000
+            }
+            .getInputStream()
+            .use { input -> font.outputStream().use { output -> input.copyTo(output) } }
+        require(font.length() > 100_000L) { "Manrope font download was incomplete." }
+
+        val license = licenseFile.get().asFile
+        license.parentFile.mkdirs()
+        URL("https://raw.githubusercontent.com/google/fonts/main/ofl/manrope/OFL.txt")
+            .openConnection()
+            .apply {
+                connectTimeout = 20_000
+                readTimeout = 30_000
+            }
+            .getInputStream()
+            .use { input -> license.outputStream().use { output -> input.copyTo(output) } }
+        require(license.length() > 1_000L) { "Manrope OFL license download was incomplete." }
+    }
+}
+
+tasks.named("preBuild").configure {
+    dependsOn(downloadManropeAssets)
 }
 
 dependencies {

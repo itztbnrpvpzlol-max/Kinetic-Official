@@ -31,16 +31,16 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 private val effectCategories = listOf(
-    "Color & Light",
-    "Stylize",
-    "Drawing & Edge",
-    "Distortion & Warp",
-    "Procedural",
-    "Blur",
+    "COLOR & LIGHT",
+    "STYLIZE",
+    "DRAWING & EDGE",
+    "DISTORTION & WARP",
+    "PROCEDURAL",
+    "BLUR",
     "3D",
-    "Text",
-    "Audio",
-    "Other / Miscellaneous"
+    "TEXT",
+    "AUDIO",
+    "OTHER / MISCELLANEOUS"
 )
 
 @Composable
@@ -162,9 +162,10 @@ private fun CategoryTile(name: String, modifier: Modifier = Modifier) {
         Text(
             name,
             color = KColors.Text,
-            fontSize = 10.sp,
+            fontSize = 10.5.sp,
             lineHeight = 13.sp,
-            fontWeight = FontWeight.SemiBold,
+            fontWeight = FontWeight.ExtraBold,
+            letterSpacing = 0.45.sp,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis
         )
