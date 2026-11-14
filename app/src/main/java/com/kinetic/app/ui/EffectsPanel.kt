@@ -371,12 +371,15 @@ private fun EffectParameterGraph(
                         var activeIndex = -1
                         detectDragGestures(
                             onDragStart = { offset ->
+                                val graphKeys = editor.layers.firstOrNull { it.id == layer.id }
+                                    ?.effectStack?.firstOrNull { it.id == effect.id }
+                                    ?.parameterKeys?.get(spec.key).orEmpty()
                                 val minX = 10f
                                 val maxX = (size.width - 10f).coerceAtLeast(11f)
                                 val minY = 10f
                                 val maxY = (size.height - 10f).coerceAtLeast(11f)
-                                activeIndex = keys.indices.minByOrNull { index ->
-                                    val key = keys[index]
+                                activeIndex = graphKeys.indices.minByOrNull { index ->
+                                    val key = graphKeys[index]
                                     val x = minX + ((key.t - layer.start) / layer.duration.coerceAtLeast(0.001f)).coerceIn(0f, 1f) * (maxX - minX)
                                     val y = maxY - ((key.v - spec.min) / (spec.max - spec.min).coerceAtLeast(0.0001f)).coerceIn(0f, 1f) * (maxY - minY)
                                     val dx = offset.x - x
@@ -384,7 +387,7 @@ private fun EffectParameterGraph(
                                     dx * dx + dy * dy
                                 } ?: -1
                                 val nearest = activeIndex.takeIf { it >= 0 }?.let { index ->
-                                    val key = keys[index]
+                                    val key = graphKeys[index]
                                     val x = minX + ((key.t - layer.start) / layer.duration.coerceAtLeast(0.001f)).coerceIn(0f, 1f) * (maxX - minX)
                                     val y = maxY - ((key.v - spec.min) / (spec.max - spec.min).coerceAtLeast(0.0001f)).coerceIn(0f, 1f) * (maxY - minY)
                                     sqrt((offset.x - x) * (offset.x - x) + (offset.y - y) * (offset.y - y))
