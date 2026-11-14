@@ -15,6 +15,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -58,10 +60,11 @@ internal fun canUseDirectSurfaceVideo(layer: Layer): Boolean {
         PropId.ROTATION to 0f,
         PropId.OPACITY to 100f
     )
+    // Transform and opacity keyframes are applied to the TextureView itself;
+    // they must not force a decoder handoff to the libmpv/OpenGL video path.
     return defaults.all { (id, expected) ->
         val prop = layer.p(id)
-        prop.keys.isEmpty() && prop.expression == null &&
-            kotlin.math.abs(prop.base - expected) < 0.01f
+        prop.expression == null && kotlin.math.abs(prop.base - expected) < 0.01f
     }
 }
 
@@ -127,7 +130,20 @@ internal fun DirectSurfaceVideoPreview(
             modifier = Modifier.size(
                 (layer.width * fitScale).dp,
                 (layer.height * fitScale).dp
-            )
+            ).graphicsLayer {
+                val anchorX = layer.p(PropId.ANCHOR_X).valueAt(editor.time)
+                val anchorY = layer.p(PropId.ANCHOR_Y).valueAt(editor.time)
+                transformOrigin = TransformOrigin(
+                    (anchorX / layer.width.coerceAtLeast(1f)).coerceIn(0f, 1f),
+                    (anchorY / layer.height.coerceAtLeast(1f)).coerceIn(0f, 1f)
+                )
+                scaleX = layer.p(PropId.SCALE_X).valueAt(editor.time) / 100f
+                scaleY = layer.p(PropId.SCALE_Y).valueAt(editor.time) / 100f
+                rotationZ = layer.p(PropId.ROTATION).valueAt(editor.time)
+                alpha = (layer.p(PropId.OPACITY).valueAt(editor.time) / 100f).coerceIn(0f, 1f)
+                translationX = (layer.p(PropId.POS_X).valueAt(editor.time) - COMP_W / 2f) * fitScale * density
+                translationY = (layer.p(PropId.POS_Y).valueAt(editor.time) - COMP_H / 2f) * fitScale * density
+            }
         )
     }
 

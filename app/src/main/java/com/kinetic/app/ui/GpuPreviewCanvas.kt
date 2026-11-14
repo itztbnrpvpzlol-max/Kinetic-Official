@@ -127,11 +127,14 @@ fun PreviewCanvas(
             DirectSurfaceVideoPreview(editor, directVideo, Modifier.fillMaxSize(), playback)
             CpuPreviewCanvas(editor, Modifier.fillMaxSize(), directVideoLayerId = directVideo.id)
         }
-    } else if (editor.layers.any { it.visible && it.maskEnabled && it.maskPath != null } ||
+    } else if (videoLayers.isNotEmpty() ||
+        editor.layers.any { it.visible && it.maskEnabled && it.maskPath != null } ||
         !supportsGles3(context)) {
-        // Keep the CPU renderer for unsupported GLES devices and mask paths.
-        // Low-RAM devices with GLES3 use the scaled GPU/surface pipeline too;
-        // resolvePreviewScale() already limits their preview resolution.
+        // Keep video that needs transforms, overlaps, masks or compositing on
+        // the established MediaExtractor/MediaCodec bitmap path. The libmpv
+        // external-texture path is not reliable on every GLES driver and could
+        // turn an otherwise valid clip black as soon as keyframes disabled the
+        // simple direct-surface path. Preview frames stay resolution-capped.
         CpuPreviewCanvas(editor, modifier)
     } else {
         val visualLayers = editor.layers.filter {
