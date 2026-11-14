@@ -397,7 +397,8 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                 onClose = { showEffectsScreen = false },
                 onAddEffect = { name ->
                     editor.selected?.let { editor.addEffect(it.id, name) }
-                    showEffectsScreen = false                    showPropertiesPanel = false
+                    showEffectsScreen = false
+                    showPropertiesPanel = false
                     showToolPanel = true
                     dockTool = "Effects"
                 }
