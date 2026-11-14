@@ -581,7 +581,7 @@ Java_com_kinetic_app_engine_NativeRenderEngine_nativeGlInit(JNIEnv*, jobject) {
         "else if(k==7){ vec3 v=max(c.rgb+vec3(e.w),vec3(0.0))*exp2(e.y); v=pow(v,vec3(1.0/max(e.z,0.01)));"
         "if(f.x<0.5) c.rgb=v; else if(f.x<1.5) c.r=v.r; else if(f.x<2.5) c.g=v.g; else c.b=v.b; } }"
         "if(uGray>0.5){ float y=dot(c.rgb,vec3(0.299,0.587,0.114)); c.rgb=vec3(y); }"
-        "fragColor=vec4(c.rgb*c.a*uAlpha,c.a*uAlpha); }";
+        "fragColor=vec4(c.rgb*uAlpha,uAlpha); }";
     static const char* solidVertex =
         "#version 300 es\n"
         "in vec2 aPosition; void main(){ gl_Position=vec4(aPosition,0.0,1.0); }";
