@@ -1,13 +1,12 @@
 package com.kinetic.app.ui
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -18,21 +17,20 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -40,26 +38,29 @@ import androidx.compose.ui.unit.sp
 
 private data class EffectCategory(
     val title: String,
+    val icon: IconKind,
     val accent: Color,
-    val deep: Color,
-    val glow: Color
+    val background: Color
 )
 
 private val effectCategories = listOf(
-    EffectCategory("COLOR & LIGHT", Color(0xFFFF82B2), Color(0xFF24152F), Color(0xFFFF4F8B)),
-    EffectCategory("STYLIZE", Color(0xFFC0A2FF), Color(0xFF20183D), Color(0xFF8664FF)),
-    EffectCategory("DRAWING & EDGE", Color(0xFFFFC078), Color(0xFF302018), Color(0xFFFF934D)),
-    EffectCategory("DISTORTION & WARP", Color(0xFF70E4DC), Color(0xFF102B34), Color(0xFF29BFC7)),
-    EffectCategory("PROCEDURAL", Color(0xFFB5A4FF), Color(0xFF201C3A), Color(0xFF806CFF)),
-    EffectCategory("BLUR", Color(0xFF8BC8FF), Color(0xFF14283B), Color(0xFF4C9DFF)),
-    EffectCategory("3D", Color(0xFFFF987C), Color(0xFF321D24), Color(0xFFFF694F)),
-    EffectCategory("TEXT", Color(0xFFFFD77A), Color(0xFF332719), Color(0xFFFFB642)),
-    EffectCategory("AUDIO", Color(0xFF79E0AE), Color(0xFF132F2A), Color(0xFF38C98A)),
-    EffectCategory("OTHER / MISCELLANEOUS", Color(0xFFB2C0D6), Color(0xFF1B2637), Color(0xFF718EBA))
+    EffectCategory("COLOR & LIGHT", IconKind.ADJ, Color(0xFFFF82B2), Color(0xFF281C2A)),
+    EffectCategory("STYLIZE", IconKind.EFFECTS, Color(0xFFC0A2FF), Color(0xFF241E35)),
+    EffectCategory("DRAWING & EDGE", IconKind.GRAPH, Color(0xFFFFC078), Color(0xFF30251D)),
+    EffectCategory("DISTORTION & WARP", IconKind.BLEND, Color(0xFF70DAD4), Color(0xFF1A2D32)),
+    EffectCategory("PROCEDURAL", IconKind.GRID, Color(0xFFB5A4FF), Color(0xFF252238)),
+    EffectCategory("BLUR", IconKind.FILTER, Color(0xFF8BC8FF), Color(0xFF1D2B39)),
+    EffectCategory("3D", IconKind.SHAPES, Color(0xFFFF987C), Color(0xFF332326)),
+    EffectCategory("TEXT", IconKind.TEXT, Color(0xFFFFD77A), Color(0xFF332B1F)),
+    EffectCategory("AUDIO", IconKind.WAVEFORM, Color(0xFF79D8A7), Color(0xFF1B302A)),
+    EffectCategory("OTHER", IconKind.MORE, Color(0xFFB2C0D6), Color(0xFF242B37))
 )
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun EffectsBrowserScreen(onClose: () -> Unit) {
+    val shelfPager = rememberPagerState(pageCount = { 2 })
+
     Column(
         Modifier.fillMaxSize()
             .background(KColors.Bg)
@@ -72,24 +73,20 @@ fun EffectsBrowserScreen(onClose: () -> Unit) {
             Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 22.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column(Modifier.weight(1f)) {
-                Text("Effects", color = KColors.Text, fontSize = 27.sp, fontWeight = FontWeight.ExtraBold)
-                Text(
-                    "Shape the look. Set the mood.",
-                    color = KColors.Muted,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Medium
-                )
-            }
+            Text(
+                "Effects",
+                Modifier.weight(1f),
+                color = KColors.Text,
+                fontSize = 25.sp,
+                fontWeight = FontWeight.Bold
+            )
             Box(
-                Modifier.size(42.dp)
+                Modifier.size(38.dp)
                     .clip(CircleShape)
-                    .background(KColors.Surface2)
-                    .border(1.dp, KColors.Line, CircleShape)
                     .clickable(onClick = onClose),
                 contentAlignment = Alignment.Center
             ) {
-                Text("×", color = KColors.Text, fontSize = 26.sp, fontWeight = FontWeight.Light)
+                KIcon(IconKind.CLOSE, KColors.Muted, Modifier.size(20.dp))
             }
         }
 
@@ -97,47 +94,56 @@ fun EffectsBrowserScreen(onClose: () -> Unit) {
             Modifier.fillMaxWidth().padding(bottom = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            SectionHeading("Suggested for you")
+            SectionHeading("Suggested")
             Spacer(Modifier.weight(1f))
-            Eyebrow("COMING INTO FOCUS")
+            KIcon(IconKind.EFFECTS, KColors.Dim, Modifier.size(17.dp))
         }
-        SuggestedPanel()
+        Text(
+            "Suggestions will appear as you use effects.",
+            color = KColors.Muted,
+            fontSize = 11.sp
+        )
 
         Spacer(Modifier.height(22.dp))
-        BoxWithConstraints(Modifier.fillMaxWidth()) {
-            val shelfWidth = (maxWidth - 10.dp) / 2
-            Row(
-                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                ShelfCard(
-                    title = "Recently used",
-                    eyebrow = "YOUR HISTORY",
-                    description = "Your recent effects will show up here.",
-                    symbol = "↻",
-                    accent = Color(0xFF79B9FF),
-                    modifier = Modifier.width(shelfWidth)
+
+        HorizontalPager(
+            state = shelfPager,
+            modifier = Modifier.fillMaxWidth().height(88.dp),
+            pageSpacing = 24.dp
+        ) { page ->
+            if (page == 0) {
+                ShelfSection(
+                    title = "Recent",
+                    emptyMessage = "Your recently used effects will appear here.",
+                    icon = IconKind.STOPWATCH,
+                    accent = Color(0xFF79B9FF)
                 )
-                ShelfCard(
+            } else {
+                ShelfSection(
                     title = "Favourites",
-                    eyebrow = "SAVED BY YOU",
-                    description = "Keep your go-to looks close.",
-                    symbol = "☆",
-                    accent = Color(0xFFFFC36B),
-                    modifier = Modifier.width(shelfWidth)
+                    emptyMessage = "Your saved effects will appear here.",
+                    icon = IconKind.STAR,
+                    accent = Color(0xFFFFC36B)
+                )
+            }
+        }
+        Row(
+            Modifier.fillMaxWidth().padding(top = 7.dp, bottom = 22.dp),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            repeat(2) { page ->
+                Box(
+                    Modifier.padding(horizontal = 3.dp)
+                        .size(if (shelfPager.currentPage == page) 15.dp else 5.dp, 5.dp)
+                        .clip(CircleShape)
+                        .background(if (shelfPager.currentPage == page) KColors.Text else KColors.Dim.copy(alpha = 0.55f))
                 )
             }
         }
 
-        Spacer(Modifier.height(26.dp))
-        Row(
-            Modifier.fillMaxWidth().padding(bottom = 12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            SectionHeading("Explore categories")
-            Spacer(Modifier.weight(1f))
-            Eyebrow("10 COLLECTIONS")
-        }
+        SectionHeading("Categories")
+        Spacer(Modifier.height(12.dp))
         effectCategories.chunked(2).forEach { row ->
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 row.forEach { category -> CategoryTile(category, Modifier.weight(1f)) }
@@ -151,290 +157,116 @@ fun EffectsBrowserScreen(onClose: () -> Unit) {
 
 @Composable
 private fun SectionHeading(title: String) {
-    Text(title, color = KColors.Text, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+    Text(title, color = KColors.Text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
 }
 
 @Composable
-private fun Eyebrow(text: String) {
-    Text(
-        text,
-        color = KColors.Dim,
-        fontSize = 8.sp,
-        fontWeight = FontWeight.ExtraBold,
-        letterSpacing = 0.8.sp
-    )
-}
-
-@Composable
-private fun SuggestedPanel() {
-    Box(
-        Modifier.fillMaxWidth()
-            .height(142.dp)
-            .clip(RoundedCornerShape(18.dp))
-            .background(
-                Brush.linearGradient(
-                    listOf(Color(0xFF24213C), Color(0xFF171B2A), Color(0xFF202B38))
-                )
-            )
-            .border(1.dp, Color(0xFF3B3A55), RoundedCornerShape(18.dp))
-            .padding(17.dp)
-    ) {
-        Box(
-            Modifier.align(Alignment.CenterEnd)
-                .size(116.dp)
-                .clip(CircleShape)
-                .background(
-                    Brush.radialGradient(
-                        listOf(Color(0x557C78FF), Color(0x227C78FF), Color.Transparent)
-                    )
-                )
-        )
-        Column(Modifier.align(Alignment.CenterStart).fillMaxWidth(0.76f)) {
-            Text(
-                "A LITTLE CREATIVE SPARK",
-                color = Color(0xFFB7B2FF),
-                fontSize = 8.sp,
-                fontWeight = FontWeight.ExtraBold,
-                letterSpacing = 1.1.sp
-            )
-            Spacer(Modifier.height(7.dp))
-            Text(
-                "Your next look starts here.",
-                color = Color.White,
-                fontSize = 17.sp,
-                fontWeight = FontWeight.ExtraBold,
-                lineHeight = 21.sp
-            )
-            Spacer(Modifier.height(5.dp))
-            Text(
-                "Suggested effects will appear as your library grows.",
-                color = Color(0xFFB4B8C8),
-                fontSize = 10.sp,
-                lineHeight = 14.sp
-            )
-        }
-        Text(
-            "✦",
-            Modifier.align(Alignment.CenterEnd).padding(end = 15.dp),
-            color = Color(0xFFD0C7FF),
-            fontSize = 43.sp,
-            fontWeight = FontWeight.Light
-        )
-    }
-}
-
-@Composable
-private fun ShelfCard(
+private fun ShelfSection(
     title: String,
-    eyebrow: String,
-    description: String,
-    symbol: String,
-    accent: Color,
-    modifier: Modifier = Modifier
+    emptyMessage: String,
+    icon: IconKind,
+    accent: Color
 ) {
-    Column(
-        modifier.height(126.dp)
-            .clip(RoundedCornerShape(16.dp))
-            .background(KColors.Surface)
-            .border(1.dp, KColors.Line, RoundedCornerShape(16.dp))
-            .padding(12.dp)
-    ) {
+    Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                Modifier.size(28.dp).clip(RoundedCornerShape(9.dp))
-                    .background(accent.copy(alpha = 0.14f)),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(symbol, color = accent, fontSize = 17.sp, fontWeight = FontWeight.Bold)
-            }
-            Spacer(Modifier.weight(1f))
-            Text(
-                eyebrow,
-                color = KColors.Dim,
-                fontSize = 7.sp,
-                fontWeight = FontWeight.ExtraBold,
-                letterSpacing = 0.45.sp
-            )
+            KIcon(icon, accent, Modifier.size(18.dp))
+            Spacer(Modifier.size(8.dp))
+            Text(title, color = KColors.Text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
         }
-        Spacer(Modifier.height(10.dp))
-        Text(title, color = KColors.Text, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(3.dp))
-        Text(
-            description,
-            color = KColors.Muted,
-            fontSize = 9.sp,
-            lineHeight = 12.sp,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis
-        )
-    }
-}
-
-@Composable
-private fun CategoryArtwork(category: EffectCategory, modifier: Modifier = Modifier) {
-    val index = effectCategories.indexOf(category)
-    Canvas(modifier) {
-        val w = size.width
-        val h = size.height
-        val short = minOf(w, h)
-        drawRect(
-            Brush.linearGradient(
-                colors = listOf(category.deep, Color(0xFF111522), category.deep),
-                start = androidx.compose.ui.geometry.Offset(0f, 0f),
-                end = androidx.compose.ui.geometry.Offset(w, h)
-            )
-        )
-        drawCircle(
-            brush = Brush.radialGradient(
-                listOf(category.glow.copy(alpha = 0.68f), category.glow.copy(alpha = 0.18f), Color.Transparent),
-                center = androidx.compose.ui.geometry.Offset(w * 0.76f, h * 0.24f),
-                radius = short * 0.9f
-            ),
-            radius = short * 0.9f,
-            center = androidx.compose.ui.geometry.Offset(w * 0.76f, h * 0.24f)
-        )
-        val faint = Color.White.copy(alpha = 0.13f)
-        when (index) {
-            0 -> {
-                drawCircle(category.accent.copy(alpha = 0.30f), short * 0.34f, androidx.compose.ui.geometry.Offset(w * 0.72f, h * 0.62f))
-                drawCircle(category.glow.copy(alpha = 0.34f), short * 0.23f, androidx.compose.ui.geometry.Offset(w * 0.54f, h * 0.34f))
-                drawCircle(Color(0xFFFFD78A).copy(alpha = 0.72f), short * 0.075f, androidx.compose.ui.geometry.Offset(w * 0.54f, h * 0.34f))
-                for (i in 0..5) {
-                    val x = w * (0.10f + i * 0.12f)
-                    drawLine(category.accent.copy(alpha = 0.22f), androidx.compose.ui.geometry.Offset(x, h * 0.12f), androidx.compose.ui.geometry.Offset(x + short * 0.18f, h * 0.02f), short * 0.012f)
-                }
-            }
-            1 -> {
-                rotate(-18f, androidx.compose.ui.geometry.Offset(w * 0.7f, h * 0.46f)) {
-                    drawRoundRect(category.accent.copy(alpha = 0.20f), androidx.compose.ui.geometry.Offset(w * 0.42f, h * 0.12f), androidx.compose.ui.geometry.Size(w * 0.5f, h * 0.58f), androidx.compose.ui.geometry.CornerRadius(short * 0.12f))
-                    drawRoundRect(category.accent.copy(alpha = 0.50f), androidx.compose.ui.geometry.Offset(w * 0.53f, h * 0.23f), androidx.compose.ui.geometry.Size(w * 0.28f, h * 0.36f), androidx.compose.ui.geometry.CornerRadius(short * 0.08f), style = Stroke(short * 0.018f))
-                }
-                drawCircle(category.accent.copy(alpha = 0.8f), short * 0.045f, androidx.compose.ui.geometry.Offset(w * 0.25f, h * 0.28f))
-                drawCircle(faint, short * 0.018f, androidx.compose.ui.geometry.Offset(w * 0.34f, h * 0.18f))
-            }
-            2 -> {
-                val p = Path().apply {
-                    moveTo(w * 0.46f, h * 0.08f); lineTo(w * 0.46f, h * 0.88f)
-                    moveTo(w * 0.22f, h * 0.48f); lineTo(w * 0.76f, h * 0.48f)
-                    moveTo(w * 0.30f, h * 0.20f); lineTo(w * 0.70f, h * 0.76f)
-                    moveTo(w * 0.70f, h * 0.20f); lineTo(w * 0.30f, h * 0.76f)
-                }
-                drawPath(p, category.accent.copy(alpha = 0.58f), style = Stroke(short * 0.014f))
-                drawCircle(category.accent.copy(alpha = 0.24f), short * 0.18f, androidx.compose.ui.geometry.Offset(w * 0.52f, h * 0.48f))
-                drawCircle(category.accent, short * 0.035f, androidx.compose.ui.geometry.Offset(w * 0.52f, h * 0.48f))
-            }
-            3 -> {
-                for (i in 0..4) {
-                    val path = Path()
-                    val y = h * (0.20f + i * 0.14f)
-                    path.moveTo(w * 0.12f, y)
-                    path.cubicTo(w * 0.34f, y - h * 0.24f, w * 0.58f, y + h * 0.24f, w * 0.88f, y - h * 0.02f)
-                    drawPath(path, category.accent.copy(alpha = 0.18f + i * 0.09f), style = Stroke(short * 0.018f))
-                }
-                drawCircle(category.accent.copy(alpha = 0.52f), short * 0.10f, androidx.compose.ui.geometry.Offset(w * 0.74f, h * 0.48f))
-            }
-            4 -> {
-                for (row in 0..4) for (col in 0..7) {
-                    val radius = if ((row + col) % 3 == 0) short * 0.025f else short * 0.012f
-                    drawCircle(category.accent.copy(alpha = if ((row + col) % 3 == 0) 0.78f else 0.30f), radius, androidx.compose.ui.geometry.Offset(w * (0.12f + col * 0.105f), h * (0.20f + row * 0.15f)))
-                }
-                drawCircle(category.glow.copy(alpha = 0.32f), short * 0.20f, androidx.compose.ui.geometry.Offset(w * 0.72f, h * 0.50f), style = Stroke(short * 0.018f))
-            }
-            5 -> {
-                for (i in 1..4) drawCircle(category.accent.copy(alpha = 0.10f + i * 0.055f), short * (0.10f + i * 0.085f), androidx.compose.ui.geometry.Offset(w * 0.70f, h * 0.46f), style = Stroke(short * 0.026f))
-                drawCircle(category.accent.copy(alpha = 0.34f), short * 0.12f, androidx.compose.ui.geometry.Offset(w * 0.70f, h * 0.46f))
-            }
-            6 -> {
-                val cube = Path().apply {
-                    moveTo(w * 0.66f, h * 0.16f); lineTo(w * 0.88f, h * 0.29f); lineTo(w * 0.66f, h * 0.42f); lineTo(w * 0.44f, h * 0.29f); close()
-                    moveTo(w * 0.44f, h * 0.29f); lineTo(w * 0.44f, h * 0.58f); lineTo(w * 0.66f, h * 0.72f); lineTo(w * 0.66f, h * 0.42f)
-                    moveTo(w * 0.66f, h * 0.42f); lineTo(w * 0.88f, h * 0.29f); lineTo(w * 0.88f, h * 0.58f); lineTo(w * 0.66f, h * 0.72f)
-                }
-                drawPath(cube, category.accent.copy(alpha = 0.72f), style = Stroke(short * 0.018f))
-                drawPath(Path().apply { moveTo(w * 0.66f, h * 0.16f); lineTo(w * 0.66f, h * 0.42f) }, faint, style = Stroke(short * 0.012f))
-            }
-            7 -> {
-                rotate(-9f, androidx.compose.ui.geometry.Offset(w * 0.65f, h * 0.48f)) {
-                    for (i in 0..2) drawRoundRect(category.accent.copy(alpha = 0.16f + i * 0.12f), androidx.compose.ui.geometry.Offset(w * (0.40f + i * 0.07f), h * (0.22f + i * 0.08f)), androidx.compose.ui.geometry.Size(w * 0.43f, h * 0.12f), androidx.compose.ui.geometry.CornerRadius(short * 0.035f), style = Stroke(short * 0.014f))
-                }
-                drawLine(category.accent.copy(alpha = 0.75f), androidx.compose.ui.geometry.Offset(w * 0.20f, h * 0.72f), androidx.compose.ui.geometry.Offset(w * 0.48f, h * 0.72f), short * 0.018f)
-            }
-            8 -> {
-                for (i in 0..10) {
-                    val x = w * (0.12f + i * 0.075f)
-                    val height = h * (0.12f + ((i * 7) % 5) * 0.085f)
-                    drawRoundRect(category.accent.copy(alpha = 0.45f + (i % 3) * 0.15f), androidx.compose.ui.geometry.Offset(x, h * 0.52f - height / 2f), androidx.compose.ui.geometry.Size(short * 0.025f, height), androidx.compose.ui.geometry.CornerRadius(short * 0.02f))
-                }
-                drawLine(category.accent.copy(alpha = 0.30f), androidx.compose.ui.geometry.Offset(w * 0.12f, h * 0.52f), androidx.compose.ui.geometry.Offset(w * 0.90f, h * 0.52f), short * 0.008f)
-            }
-            else -> {
-                drawCircle(category.accent.copy(alpha = 0.48f), short * 0.26f, androidx.compose.ui.geometry.Offset(w * 0.68f, h * 0.44f), style = Stroke(short * 0.016f))
-                drawCircle(category.accent.copy(alpha = 0.25f), short * 0.16f, androidx.compose.ui.geometry.Offset(w * 0.68f, h * 0.44f), style = Stroke(short * 0.016f))
-                drawCircle(category.accent.copy(alpha = 0.80f), short * 0.035f, androidx.compose.ui.geometry.Offset(w * 0.68f, h * 0.44f))
-                drawLine(faint, androidx.compose.ui.geometry.Offset(w * 0.18f, h * 0.22f), androidx.compose.ui.geometry.Offset(w * 0.38f, h * 0.22f), short * 0.012f)
-                drawLine(faint, androidx.compose.ui.geometry.Offset(w * 0.18f, h * 0.30f), androidx.compose.ui.geometry.Offset(w * 0.31f, h * 0.30f), short * 0.012f)
-            }
-        }
+        Spacer(Modifier.height(7.dp))
+        Text(emptyMessage, color = KColors.Muted, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
 @Composable
 private fun CategoryTile(category: EffectCategory, modifier: Modifier = Modifier) {
     Box(
-        modifier.height(124.dp)
-            .clip(RoundedCornerShape(17.dp))
-            .background(KColors.Surface)
-            .border(1.dp, KColors.Line, RoundedCornerShape(17.dp))
+        modifier.height(116.dp)
+            .clip(RoundedCornerShape(15.dp))
+            .background(category.background)
+            .border(1.dp, KColors.Line.copy(alpha = 0.65f), RoundedCornerShape(15.dp))
     ) {
         CategoryArtwork(category, Modifier.fillMaxSize())
-        Box(
-            Modifier.fillMaxSize().background(
-                Brush.verticalGradient(
-                    0f to Color(0x22070A12),
-                    0.34f to Color(0x3D070A12),
-                    0.68f to Color(0x99070A12),
-                    1f to Color(0xF2070A12)
-                )
-            )
-        )
-        Row(
-            Modifier.align(Alignment.TopStart).padding(10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        Column(
+            Modifier.align(Alignment.Center).padding(horizontal = 8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
         ) {
-            Box(
-                Modifier.size(7.dp).clip(CircleShape).background(category.accent)
-            )
+            KIcon(category.icon, category.accent, Modifier.size(27.dp))
+            Spacer(Modifier.height(9.dp))
             Text(
-                "COLLECTION",
-                color = Color.White.copy(alpha = 0.88f),
-                fontSize = 7.sp,
-                fontWeight = FontWeight.ExtraBold,
-                letterSpacing = 1.sp
+                category.title,
+                color = Color.White.copy(alpha = 0.94f),
+                fontSize = 10.sp,
+                lineHeight = 12.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 0.25.sp,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
             )
         }
-        Box(
-            Modifier.align(Alignment.BottomEnd)
-                .padding(10.dp)
-                .size(24.dp)
-                .clip(CircleShape)
-                .background(Color(0x55070A12))
-                .border(1.dp, Color.White.copy(alpha = 0.20f), CircleShape),
-            contentAlignment = Alignment.Center
-        ) {
-            Text("↗", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-        }
-        Text(
-            category.title,
-            Modifier.align(Alignment.BottomStart).fillMaxWidth(0.84f)
-                .padding(start = 11.dp, end = 4.dp, bottom = 12.dp),
-            color = Color.White,
-            fontSize = 10.sp,
-            lineHeight = 12.sp,
-            fontWeight = FontWeight.ExtraBold,
-            letterSpacing = 0.55.sp,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis
+    }
+}
+
+@Composable
+private fun CategoryArtwork(category: EffectCategory, modifier: Modifier = Modifier) {
+    Canvas(modifier) {
+        val w = size.width
+        val h = size.height
+        val side = minOf(w, h)
+        // Keep category surfaces intentionally quiet: one flat base, a soft tint,
+        // and a single restrained geometric motif.
+        drawRect(category.background)
+        drawCircle(
+            Brush.radialGradient(
+                listOf(category.accent.copy(alpha = 0.13f), Color.Transparent),
+                center = androidx.compose.ui.geometry.Offset(w * 0.78f, h * 0.18f),
+                radius = side * 0.88f
+            ),
+            radius = side * 0.88f,
+            center = androidx.compose.ui.geometry.Offset(w * 0.78f, h * 0.18f)
         )
+        when (category.icon) {
+            IconKind.ADJ -> {
+                drawCircle(category.accent.copy(alpha = 0.09f), side * 0.34f, androidx.compose.ui.geometry.Offset(w * 0.82f, h * 0.72f))
+                drawCircle(category.accent.copy(alpha = 0.14f), side * 0.17f, androidx.compose.ui.geometry.Offset(w * 0.82f, h * 0.72f), style = Stroke(side * 0.012f))
+            }
+            IconKind.EFFECTS -> {
+                drawRoundRect(category.accent.copy(alpha = 0.08f), androidx.compose.ui.geometry.Offset(w * 0.70f, h * 0.10f), androidx.compose.ui.geometry.Size(w * 0.25f, h * 0.72f), androidx.compose.ui.geometry.CornerRadius(side * 0.07f))
+            }
+            IconKind.GRAPH -> {
+                drawLine(category.accent.copy(alpha = 0.12f), androidx.compose.ui.geometry.Offset(w * 0.72f, h * 0.2f), androidx.compose.ui.geometry.Offset(w * 0.92f, h * 0.8f), side * 0.018f)
+                drawLine(category.accent.copy(alpha = 0.12f), androidx.compose.ui.geometry.Offset(w * 0.78f, h * 0.8f), androidx.compose.ui.geometry.Offset(w * 0.94f, h * 0.25f), side * 0.018f)
+            }
+            IconKind.BLEND -> {
+                drawCircle(category.accent.copy(alpha = 0.08f), side * 0.27f, androidx.compose.ui.geometry.Offset(w * 0.82f, h * 0.68f))
+                drawCircle(category.accent.copy(alpha = 0.11f), side * 0.18f, androidx.compose.ui.geometry.Offset(w * 0.82f, h * 0.68f), style = Stroke(side * 0.014f))
+            }
+            IconKind.GRID -> {
+                for (x in 0..2) for (y in 0..2) {
+                    drawCircle(category.accent.copy(alpha = 0.12f), side * 0.018f, androidx.compose.ui.geometry.Offset(w * (0.74f + x * 0.075f), h * (0.25f + y * 0.22f)))
+                }
+            }
+            IconKind.FILTER -> {
+                drawCircle(category.accent.copy(alpha = 0.10f), side * 0.27f, androidx.compose.ui.geometry.Offset(w * 0.82f, h * 0.66f), style = Stroke(side * 0.035f))
+            }
+            IconKind.SHAPES -> {
+                drawRoundRect(category.accent.copy(alpha = 0.09f), androidx.compose.ui.geometry.Offset(w * 0.72f, h * 0.18f), androidx.compose.ui.geometry.Size(w * 0.22f, h * 0.58f), androidx.compose.ui.geometry.CornerRadius(side * 0.035f), style = Stroke(side * 0.018f))
+            }
+            IconKind.TEXT -> {
+                drawLine(category.accent.copy(alpha = 0.13f), androidx.compose.ui.geometry.Offset(w * 0.73f, h * 0.34f), androidx.compose.ui.geometry.Offset(w * 0.94f, h * 0.34f), side * 0.025f)
+                drawLine(category.accent.copy(alpha = 0.13f), androidx.compose.ui.geometry.Offset(w * 0.73f, h * 0.52f), androidx.compose.ui.geometry.Offset(w * 0.88f, h * 0.52f), side * 0.025f)
+            }
+            IconKind.WAVEFORM -> {
+                for (i in 0..4) {
+                    val x = w * (0.74f + i * 0.045f)
+                    val half = h * (0.10f + (i % 3) * 0.055f)
+                    drawLine(category.accent.copy(alpha = 0.14f), androidx.compose.ui.geometry.Offset(x, h * 0.5f - half), androidx.compose.ui.geometry.Offset(x, h * 0.5f + half), side * 0.018f)
+                }
+            }
+            else -> {
+                drawCircle(category.accent.copy(alpha = 0.10f), side * 0.24f, androidx.compose.ui.geometry.Offset(w * 0.82f, h * 0.66f), style = Stroke(side * 0.018f))
+            }
+        }
     }
 }
