@@ -2,6 +2,9 @@ package com.kinetic.app.ui
 
 import android.graphics.Bitmap
 import android.graphics.Paint
+import androidx.compose.ui.viewinterop.AndroidView
+import com.kinetic.app.engine.NativePlaybackEngine
+import kotlinx.coroutines.delay
 import android.net.Uri
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
@@ -86,7 +89,6 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.roundToInt
 import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.flow.sample
 import kotlin.random.Random
 
 private val ROW_H = 40.dp
@@ -111,9 +113,8 @@ fun typeIcon(t: LayerType): IconKind = when (t) {
     LayerType.NULL -> IconKind.NULL
 }
 
-@OptIn(kotlinx.coroutines.FlowPreview::class)
 @Composable
-fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
+fun TimelinePane(editor: EditorState, playback: NativePlaybackEngine, modifier: Modifier = Modifier) {
     val density = LocalDensity.current
     val dens = density.density
     var pps by remember { mutableFloatStateOf(56f) } // dp per second
@@ -137,21 +138,37 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
     val trailingPad = (viewportW.value / 2f).dp
     val contentW = viewportW + leadingPad + (contentSec * pps).dp + trailingPad
 
-    // Center the playhead under the preview transport's play control.
-    // During playback, sample auto-scroll at the composition frame cadence.
-    // The native clock remains authoritative; the scroll is only a visual follow.
-    val autoScrollIntervalMs = if (MediaWorkers.isConstrainedDevice) 100L else 50L
-    LaunchedEffect(editor.playing, pps, paneW, leftPx) {
-        snapshotFlow { editor.time }
-            .let { times -> if (editor.playing) times.sample(autoScrollIntervalMs) else times }
-            .collect { time ->
-                if (paneW > leftPx) {
-                    val playheadX = leftPx + leadingPadPx + time * pps * dens
-                    val target = (playheadX - paneW / 2f).coerceAtLeast(0f)
-                    val delta = target - hScroll.value.toFloat()
-                    if (kotlin.math.abs(delta) > 0.5f) hScroll.dispatchRawDelta(delta)
-                }
+    // Follow the authoritative playback clock rather than the lower-rate
+    // Compose-published editor.time value. On constrained devices the timeline
+    // scroll follows at 30 Hz; the playhead surface itself samples at display cadence.
+    val autoScrollIntervalMs = if (MediaWorkers.isConstrainedDevice) 33L else 16L
+    LaunchedEffect(editor.playing, pps, paneW, leftPx, leadingPadPx, playback) {
+        if (paneW <= leftPx) return@LaunchedEffect
+        if (!editor.playing) {
+            val playheadX = leftPx + leadingPadPx + editor.time * pps * dens
+            val target = (playheadX - paneW / 2f).coerceAtLeast(0f)
+            hScroll.dispatchRawDelta(target - hScroll.value.toFloat())
+        } else {
+            while (editor.playing) {
+                val clock = playback.clockSnapshot()
+                val time = if (clock.playing) {
+                    (clock.positionUs / 1_000_000.0 +
+                        (System.nanoTime() - clock.monotonicNs).coerceAtLeast(0L) /
+                            1_000_000_000.0 * clock.speed).toFloat()
+                } else editor.time
+                val playheadX = leftPx + leadingPadPx + time.coerceAtLeast(0f) * pps * dens
+                val target = (playheadX - paneW / 2f).coerceAtLeast(0f)
+                hScroll.dispatchRawDelta(target - hScroll.value.toFloat())
+                delay(autoScrollIntervalMs)
             }
+        }
+    }
+
+    val playheadSurface = remember { mutableStateOf<TimelinePlayheadSurfaceView?>(null) }
+    LaunchedEffect(hScroll) {
+        snapshotFlow { hScroll.value }.collect { scroll ->
+            playheadSurface.value?.updateScrollOffset(scroll.toFloat())
+        }
     }
 
     Box(
@@ -266,23 +283,20 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
                 Box(Modifier.width(4.dp).height(34.dp).clip(RoundedCornerShape(4.dp)).background(KColors.Muted))
             }
         }
-        // playhead
-        Canvas(Modifier.fillMaxSize()) {
-            // Keep the playhead aligned with the center Preview play/pause control,
-            // not the center of the timeline viewport (which excludes the layer column).
-            // The playhead is the fixed center marker, aligned with PreviewToolsBar's centered transport.
-            val x = size.width / 2f
-            if (x >= leftPx - 1f && x <= size.width) {
-                drawLine(Color.White, Offset(x, 14.dp.toPx()), Offset(x, size.height), 2.dp.toPx())
-                val tri = Path().apply {
-                    moveTo(x - 7.dp.toPx(), 4.dp.toPx())
-                    lineTo(x + 7.dp.toPx(), 4.dp.toPx())
-                    lineTo(x, 17.dp.toPx())
-                    close()
-                }
-                drawPath(tri, Color.White)
-            }
-        }
+        // The needle is drawn by its own transparent Android SurfaceView.
+        // It samples NativePlaybackEngine directly, independently of Compose's
+        // 30 Hz editor.time publication, so it remains locked to video playback.
+        AndroidView(
+            factory = { context ->
+                TimelinePlayheadSurfaceView(context, playback).also { playheadSurface.value = it }
+            },
+            update = { view ->
+                view.updateGeometry(leftPx, leadingPadPx, pps * dens)
+                view.updateTransport(editor.playing, editor.time)
+                playheadSurface.value = view
+            },
+            modifier = Modifier.fillMaxSize()
+        )
     }
 }
 
