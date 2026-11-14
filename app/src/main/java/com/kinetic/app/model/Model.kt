@@ -289,8 +289,12 @@ data class EffectInstance(
     val id: String = UUID.randomUUID().toString(),
     val name: String,
     val enabled: Boolean = true,
-    val parameters: Map<String, Float> = emptyMap()
-)
+    val parameters: Map<String, Float> = emptyMap(),
+    val parameterKeys: Map<String, List<Keyframe>> = emptyMap()
+) {
+    fun parameterAt(key: String, time: Float): Float =
+        Prop(parameters[key] ?: 0f, parameterKeys[key].orEmpty()).valueAt(time)
+}
 
 fun createEffect(name: String): EffectInstance? {
     val parameters = when (name) {
@@ -313,11 +317,13 @@ fun createEffect(name: String): EffectInstance? {
 }
 
 /** Packs up to eight enabled effects into two vec4 GLES uniforms per effect. */
-fun effectUniforms(effects: List<EffectInstance>): FloatArray {
+fun effectUniforms(effects: List<EffectInstance>, time: Float = 0f): FloatArray {
     val active = effects.filter { it.enabled }.take(8)
     val output = FloatArray(active.size * 8)
     active.forEachIndexed { index, effect ->
-        val p = effect.parameters
+        val p = effect.parameters.mapValues { (key, base) ->
+            Prop(base, effect.parameterKeys[key].orEmpty()).valueAt(time)
+        }
         val first: FloatArray
         val second: FloatArray
         when (effect.name) {
