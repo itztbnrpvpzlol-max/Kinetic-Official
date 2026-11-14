@@ -192,6 +192,8 @@ private fun GpuCompositionPreviewCanvas(
 
     val context = LocalContext.current
     val frames = remember { mutableStateMapOf<String, Bitmap>() }
+    // Preserve a recent decoded sample across adjacent split segments that share a source URI.
+    val recentVideoFrames = remember { mutableStateMapOf<String, RecentVideoPreviewFrame>() }
     val textTextures = remember { mutableMapOf<String, Pair<Int, Bitmap>>() }
     val failedVideoSources = remember { mutableStateMapOf<String, String>() }
     // Native decoder instances are scarce system resources, not a thread pool.
@@ -257,6 +259,12 @@ private fun GpuCompositionPreviewCanvas(
                                 (timelineTime - layer.start).coerceAtLeast(0f) *
                                     layer.speed + layer.srcOffset
                             ).coerceAtLeast(0f)
+                            if (frames[layer.id] == null) {
+                                val recent = recentVideoFrames[uri]
+                                if (recent != null && kotlin.math.abs(recent.sourceTime - sourceTime) <= 0.75f) {
+                                    frames[layer.id] = recent.bitmap
+                                }
+                            }
                             val requestedBucket = (sourceTime * compositionFps).toInt()
                             if (requestedBucket != lastBucket) {
                                 val frame = MediaLoader.bitmapFor(
@@ -277,6 +285,11 @@ private fun GpuCompositionPreviewCanvas(
                                     currentBucket - requestedBucket <= acceptableLag
                                 ) {
                                     frames[layer.id] = frame
+                                    recentVideoFrames[uri] = RecentVideoPreviewFrame(sourceTime, frame)
+                                    while (recentVideoFrames.size > 8) {
+                                        val oldest = recentVideoFrames.keys.firstOrNull { it != uri } ?: break
+                                        recentVideoFrames.remove(oldest)
+                                    }
                                 }
                                 lastBucket = requestedBucket
                             }
