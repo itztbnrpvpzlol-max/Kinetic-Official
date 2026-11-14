@@ -201,10 +201,10 @@ fun EffectControlsPanel(editor: EditorState, layer: Layer, onBrowseEffects: () -
                     EffectAction(if (expanded) "⌃" else "⌄", expanded) {
                         expandedEffectId = if (expanded) null else effect.id
                     }
-                    EffectAction(if (effect.enabled) "◉" else "○", effect.enabled) {
+                    EffectIconAction(if (effect.enabled) IconKind.EYE else IconKind.EYE_OFF, effect.enabled) {
                         editor.setEffectEnabled(layer.id, effect.id, !effect.enabled)
                     }
-                    EffectAction("×", false) {
+                    EffectIconAction(IconKind.DELETE, false) {
                         editor.removeEffect(layer.id, effect.id)
                         if (expandedEffectId == effect.id) expandedEffectId = null
                     }
@@ -251,6 +251,18 @@ private fun EffectAction(label: String, active: Boolean, onClick: () -> Unit) {
     ) {
         Text(label, color = if (active) KColors.Accent else KColors.Muted,
             fontSize = if (label == "×") 18.sp else 14.sp, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+@Composable
+private fun EffectIconAction(kind: IconKind, active: Boolean, onClick: () -> Unit) {
+    Box(
+        Modifier.padding(start = 4.dp).size(30.dp).clip(RoundedCornerShape(8.dp))
+            .background(if (active) KColors.Accent.copy(alpha = 0.14f) else KColors.Surface)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        KIcon(kind, if (active) KColors.Accent else KColors.Muted, Modifier.size(15.dp))
     }
 }
 
