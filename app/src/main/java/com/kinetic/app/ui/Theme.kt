@@ -1,5 +1,7 @@
 package com.kinetic.app.ui
 
+import com.kinetic.app.R
+
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
@@ -11,6 +13,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontVariation
+import androidx.compose.ui.text.ExperimentalTextApi
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 
@@ -31,6 +34,7 @@ object KColors {
     val Danger = Color(0xFFC98A8A)
 }
 
+@OptIn(ExperimentalTextApi::class)
 private fun manrope(weight: Int) = Font(
     resId = R.font.manrope_variable,
     weight = FontWeight(weight),
