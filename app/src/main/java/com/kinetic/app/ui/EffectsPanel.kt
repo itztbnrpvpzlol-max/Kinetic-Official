@@ -367,7 +367,7 @@ private fun EffectParameterGraph(
         } else {
             Canvas(
                 Modifier.fillMaxWidth().height(112.dp)
-                    .pointerInput(effect.id, spec.key, keys, spec.min, spec.max, layer.start, layer.duration) {
+                    .pointerInput(effect.id, spec.key, spec.min, spec.max, layer.start, layer.duration) {
                         var activeIndex = -1
                         detectDragGestures(
                             onDragStart = { offset ->
@@ -398,7 +398,9 @@ private fun EffectParameterGraph(
                                 val minY = 10f
                                 val maxY = (size.height - 10f).coerceAtLeast(11f)
                                 val normalized = (1f - ((change.position.y - minY) / (maxY - minY))).coerceIn(0f, 1f)
-                                val key = keys[activeIndex]
+                                val key = editor.layers.firstOrNull { it.id == layer.id }
+                                    ?.effectStack?.firstOrNull { it.id == effect.id }
+                                    ?.parameterKeys?.get(spec.key)?.getOrNull(activeIndex) ?: keys[activeIndex]
                                 val value = spec.min + normalized * (spec.max - spec.min)
                                 editor.replaceEffectParameterKey(layer.id, effect.id, spec.key,
                                     activeIndex, key.copy(v = value))
