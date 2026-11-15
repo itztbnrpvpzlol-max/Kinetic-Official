@@ -396,14 +396,15 @@ private fun GpuCompositionPreviewCanvas(
             LayerType.IMAGE, LayerType.VIDEO -> frames[layer.id]
             LayerType.TEXT, LayerType.SHAPE -> {
                 activeTextTextureIds.add(layer.id)
+                val logicalWidth = layer.width.toInt().coerceIn(1, 4096)
+                val logicalHeight = layer.height.toInt().coerceIn(1, 4096)
                 val signature = if (layer.type == LayerType.TEXT)
-                    layer.text.hashCode() * 31 + layer.color
-                else (((layer.color * 31 + layer.width.toInt() * 7 + layer.height.toInt()) * 31 +
+                    ((layer.text.hashCode() * 31 + layer.color) * 31 +
+                        logicalWidth * 7 + logicalHeight)
+                else (((layer.color * 31 + logicalWidth * 7 + logicalHeight) * 31 +
                     layer.shapeKind.hashCode()) * 31 + layer.vectorPointsAt(editor.time).hashCode())
                 val cached = textTextures[layer.id]
                 if (cached == null || cached.first != signature || cached.second.isRecycled) {
-                    val logicalWidth = layer.width.toInt().coerceIn(1, 4096)
-                    val logicalHeight = layer.height.toInt().coerceIn(1, 4096)
                     // Text and vector layers are rasterized at preview scale.
                     // A 4096x4096 ARGB bitmap would otherwise consume 64 MiB
                     // for one layer, before its GPU copy is considered.
@@ -421,7 +422,7 @@ private fun GpuCompositionPreviewCanvas(
                         paint.textAlign = Paint.Align.CENTER
                         paint.textSize = 120f
                         paint.typeface = Typeface.DEFAULT_BOLD
-                        canvas.drawText(layer.text, w / 2f, h / 2f + 40f, paint)
+                        canvas.drawText(layer.text, logicalWidth / 2f, logicalHeight / 2f + 40f, paint)
                     } else {
                         val points = if (layer.vectorPoints.isEmpty()) {
                             listOf(
@@ -433,8 +434,8 @@ private fun GpuCompositionPreviewCanvas(
                         } else layer.vectorPointsAt(editor.time)
                         val path = android.graphics.Path()
                         points.forEachIndexed { index, point ->
-                            val x = point.x.coerceIn(0f, 1f) * w
-                            val y = point.y.coerceIn(0f, 1f) * h
+                            val x = point.x.coerceIn(0f, 1f) * logicalWidth
+                            val y = point.y.coerceIn(0f, 1f) * logicalHeight
                             if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
                         }
                         path.close()
