@@ -142,6 +142,11 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
         selectedEffectParameter = parameter
     }
 
+    fun clearEffectParameterSelection() {
+        selectedEffectId = null
+        selectedEffectParameter = null
+    }
+
 
     fun selectKey(prop: PropId, index: Int, seekTo: Float?) {
         selectedProp = prop; selectedKey = index
