@@ -18,6 +18,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -171,7 +172,9 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
         Column(Modifier.fillMaxSize()) {
             Row(Modifier.fillMaxWidth().height(30.dp)) {
                 Spacer(Modifier.width(leftW))
-                Box(Modifier.weight(1f).fillMaxHeight().horizontalScroll(hScroll)) {
+                TimelineTrackViewport(
+                    hScroll, contentW, Modifier.weight(1f).fillMaxHeight()
+                ) {
                     Ruler(editor, pps, contentW, leadingPad)
                 }
             }
@@ -201,12 +204,11 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
                     // made empty-space drags feel like taps and caused uneven ranges.
                     Row(Modifier.fillMaxWidth().height(72.dp)) {
                         Spacer(Modifier.width(leftW))
-                        // Use the exact same horizontalScroll container as every
-                        // layer row. Empty track space is not a separate gesture
-                        // surface, so drag slop, velocity, fling and scroll state
-                        // are identical everywhere in the timeline.
-                        Box(Modifier.weight(1f).fillMaxHeight().horizontalScroll(hScroll)) {
-                            Spacer(Modifier.width(contentW).fillMaxHeight())
+                        TimelineTrackViewport(
+                            hScroll, contentW, Modifier.weight(1f).fillMaxHeight(),
+                            onEmptyTap = { if (editor.selectedId != null) editor.select(null) }
+                        ) {
+                            Spacer(Modifier.fillMaxSize())
                         }
                     }
                 }
@@ -279,6 +281,37 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
                     }
                 }
         )
+    }
+}
+
+
+/**
+ * The one horizontal timeline viewport used by the ruler, clips, keyframe
+ * tracks and blank track space. Keeping the scroll modifier in one place
+ * prevents different rows from acquiring subtly different gesture handling.
+ * Taps on uncovered track area deselect; drags are consumed by horizontalScroll.
+ */
+@Composable
+private fun TimelineTrackViewport(
+    state: ScrollState,
+    contentWidth: Dp,
+    modifier: Modifier = Modifier,
+    onEmptyTap: (() -> Unit)? = null,
+    content: @Composable BoxScope.() -> Unit
+) {
+    Box(modifier.horizontalScroll(state)) {
+        Box(Modifier.width(contentWidth).fillMaxHeight()) {
+            if (onEmptyTap != null) {
+                Box(
+                    Modifier.fillMaxSize().clickable(
+                        indication = null,
+                        interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                        onClick = onEmptyTap
+                    )
+                )
+            }
+            content()
+        }
     }
 }
 
@@ -394,8 +427,11 @@ private fun LayerRow(
                     }
                 }
             }
-            Box(Modifier.weight(1f).fillMaxHeight().horizontalScroll(hScroll)) {
-                Box(Modifier.width(contentW).fillMaxHeight()) { Clip(editor, layer, pps, selected, leadingPad) }
+            TimelineTrackViewport(
+                hScroll, contentW, Modifier.weight(1f).fillMaxHeight(),
+                onEmptyTap = { if (editor.selectedId != null) editor.select(null) }
+            ) {
+                Clip(editor, layer, pps, selected, leadingPad)
             }
         }
         if (selected && hasLayerKeyframes) {
@@ -455,7 +491,9 @@ private fun KeyframeTrackRow(
                 overflow = TextOverflow.Ellipsis
             )
         }
-        Box(Modifier.weight(1f).fillMaxHeight().horizontalScroll(hScroll)) {
+        TimelineTrackViewport(
+            hScroll, contentW, Modifier.weight(1f).fillMaxHeight()
+        ) {
             Canvas(
                 Modifier.width(contentW).fillMaxHeight()
                     .pointerInput(layer.id, propId, pps, leadingPad) {
