@@ -122,7 +122,7 @@ fun PreviewCanvas(
     // video is the lowest visual layer; Canvas then draws stills/text/shapes
     // above it without ever copying the decoded video frame into a Bitmap.
     val hasGpuEffects = activeVisualLayers.any { layer -> layer.effectStack.any { it.enabled } }
-    val hasComplexMasks = editor.layers.any { it.visible && it.maskEnabled && it.maskPath != null }
+    val hasComplexMasks = activeVisualLayers.any { it.maskEnabled && it.maskPath != null }
     val directVideo = videoLayers.singleOrNull()
         ?.takeIf {
             activeVisualLayers.lastOrNull()?.id == it.id && !it.maskEnabled &&
@@ -138,11 +138,7 @@ fun PreviewCanvas(
         // All transformed, multi-layer and effect-bearing footage enters the
         // GLSurfaceView compositor. Video frames remain external-OES textures
         // from SurfaceTexture through the final GPU draw.
-        val visualLayers = editor.layers.filter {
-            it.visible && it.type != LayerType.AUDIO &&
-                it.type != LayerType.NULL && it.type != LayerType.ADJUSTMENT
-        }
-        val qualityScale = resolvePreviewScale(context, qualityIndex, visualLayers.size)
+        val qualityScale = resolvePreviewScale(context, qualityIndex, activeVisualLayers.size)
         GpuCompositionPreviewCanvas(editor, modifier, qualityScale, playback)
     } else if (videoLayers.isNotEmpty() || hasComplexMasks || !supportsGles3(context)) {
         // Complex masks and devices without GLES3 retain the bounded CPU
@@ -187,7 +183,9 @@ internal fun resolvePreviewScale(context: Context, qualityIndex: Int, activeLaye
         else -> lowRamScale
     }
     val pressureAdjusted = if (availableGb < 0.25) minOf(base, 0.25f) else base
-    return if (activeLayers >= 3) (pressureAdjusted * 0.5f).coerceAtLeast(0.25f)
+    // More simultaneous layers should lower the preview scale, never raise
+    // a 360p low-memory preview to 480p just to satisfy a minimum clamp.
+    return if (activeLayers >= 3) (pressureAdjusted * 0.75f).coerceAtLeast(0.125f)
         else pressureAdjusted
 }
 
@@ -245,23 +243,38 @@ private fun GpuCompositionPreviewCanvas(
     val latestPlaying = androidx.compose.runtime.rememberUpdatedState(editor.playing)
     for (layer in editor.layers) {
         val uri = layer.uri
-        val needsBitmap = layer.type == LayerType.IMAGE ||
-            (layer.type == LayerType.VIDEO && layer.id !in textureVideoIds)
+        val needsBitmap = layer.visible && (
+            layer.type == LayerType.IMAGE ||
+                (layer.type == LayerType.VIDEO && layer.id !in textureVideoIds)
+        )
         if (uri != null && needsBitmap) {
             key(layer.id) {
                 DisposableEffect(layer.id) {
                     onDispose { frames.remove(layer.id) }
                 }
                 LaunchedEffect(
-                    uri, layer.type, layer.start, layer.duration,
+                    uri, layer.type, layer.start, layer.duration, layer.visible,
                     layer.srcOffset, layer.speed, qualityScale, compositionFps
                 ) {
                     val source = Uri.parse(uri)
                     if (layer.type == LayerType.IMAGE) {
-                        MediaLoader.bitmapFor(
-                            context, source, LayerType.IMAGE, 0f,
-                            sampleFps = compositionFps, maxEdge = 448
-                        )?.let { frames[layer.id] = it }
+                        // Don't decode hidden/future stills until they can appear
+                        // in the composition. This avoids eagerly retaining every
+                        // imported image in a large project.
+                        while (true) {
+                            if (layer.visible && layer.activeAt(latestTimelineTime.value)) {
+                                val bitmap = MediaLoader.bitmapFor(
+                                    context, source, LayerType.IMAGE, 0f,
+                                    sampleFps = compositionFps,
+                                    maxEdge = if (MediaWorkers.isConstrainedDevice) 320 else 448
+                                )
+                                if (bitmap != null && layer.visible &&
+                                    layer.activeAt(latestTimelineTime.value)
+                                ) frames[layer.id] = bitmap
+                                break
+                            }
+                            kotlinx.coroutines.delay(80L)
+                        }
                     } else {
                         var lastBucket = Int.MIN_VALUE
                         var wasActive = false
@@ -307,7 +320,8 @@ private fun GpuCompositionPreviewCanvas(
                                 ) {
                                     frames[layer.id] = frame
                                     recentVideoFrames[uri] = RecentVideoPreviewFrame(sourceTime, frame)
-                                    while (recentVideoFrames.size > 8) {
+                                    val recentFrameLimit = if (MediaWorkers.isConstrainedDevice) 3 else 8
+                                    while (recentVideoFrames.size > recentFrameLimit) {
                                         val oldest = recentVideoFrames.keys.firstOrNull { it != uri } ?: break
                                         recentVideoFrames.remove(oldest)
                                     }
@@ -330,6 +344,7 @@ private fun GpuCompositionPreviewCanvas(
 
     val byId = editor.layers.associateBy { it.id }
     val renderLayers = ArrayList<GpuLayer>()
+    val activeTextTextureIds = HashSet<String>()
     for (layer in editor.layers.asReversed()) {
         if (!layer.visible || !layer.activeAt(editor.time) || layer.type == LayerType.AUDIO ||
             layer.type == LayerType.NULL || layer.type == LayerType.ADJUSTMENT) continue
@@ -345,16 +360,27 @@ private fun GpuCompositionPreviewCanvas(
         val bitmap = when (layer.type) {
             LayerType.IMAGE, LayerType.VIDEO -> frames[layer.id]
             LayerType.TEXT, LayerType.SHAPE -> {
+                activeTextTextureIds.add(layer.id)
                 val signature = if (layer.type == LayerType.TEXT)
                     layer.text.hashCode() * 31 + layer.color
                 else (((layer.color * 31 + layer.width.toInt() * 7 + layer.height.toInt()) * 31 +
                     layer.shapeKind.hashCode()) * 31 + layer.vectorPointsAt(editor.time).hashCode())
                 val cached = textTextures[layer.id]
                 if (cached == null || cached.first != signature || cached.second.isRecycled) {
-                    val w = layer.width.toInt().coerceIn(1, 4096)
-                    val h = layer.height.toInt().coerceIn(1, 4096)
+                    val logicalWidth = layer.width.toInt().coerceIn(1, 4096)
+                    val logicalHeight = layer.height.toInt().coerceIn(1, 4096)
+                    // Text and vector layers are rasterized at preview scale.
+                    // A 4096x4096 ARGB bitmap would otherwise consume 64 MiB
+                    // for one layer, before its GPU copy is considered.
+                    val maxTextureEdge = if (MediaWorkers.isConstrainedDevice) 320 else 768
+                    val bitmapScale = minOf(
+                        1f, maxTextureEdge.toFloat() / maxOf(logicalWidth, logicalHeight)
+                    )
+                    val w = (logicalWidth * bitmapScale).roundToInt().coerceAtLeast(1)
+                    val h = (logicalHeight * bitmapScale).roundToInt().coerceAtLeast(1)
                     val generated = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
                     val canvas = AndroidCanvas(generated)
+                    canvas.scale(bitmapScale, bitmapScale)
                     val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = layer.color }
                     if (layer.type == LayerType.TEXT) {
                         paint.textAlign = Paint.Align.CENTER
@@ -391,6 +417,24 @@ private fun GpuCompositionPreviewCanvas(
             layer.width, layer.height, opacity, layer.maskEnabled,
             "Grayscale" in layer.effects, layer.blendMode, false, effectUniforms(layer.effectStack, editor.time)
         )
+    }
+    // Keep only a small warm set of inactive text/vector bitmaps. Active
+    // textures are protected for this composition; old project layers are
+    // discarded before they can accumulate without bound.
+    val textTextureBudget = if (MediaWorkers.isConstrainedDevice) {
+        2L * 1024L * 1024L
+    } else {
+        8L * 1024L * 1024L
+    }
+    var textTextureBytes = textTextures.values.sumOf { it.second.byteCount.toLong() }
+    if (textTextureBytes > textTextureBudget) {
+        val iterator = textTextures.entries.iterator()
+        while (iterator.hasNext() && textTextureBytes > textTextureBudget) {
+            val entry = iterator.next()
+            if (entry.key in activeTextTextureIds) continue
+            textTextureBytes -= entry.value.second.byteCount.toLong()
+            iterator.remove()
+        }
     }
     val selectedLayer = editor.layers.firstOrNull {
         it.id == editor.selectedId && it.visible && it.activeAt(editor.time) && it.type != LayerType.AUDIO
@@ -560,7 +604,9 @@ private class GpuPreviewSurfaceView(
     )
     init {
         setEGLContextClientVersion(3)
-        setPreserveEGLContextOnPause(true)
+        // Let Android reclaim GL resources when a constrained phone backgrounds
+        // the editor; larger devices can retain the context for faster resume.
+        setPreserveEGLContextOnPause(!MediaWorkers.isConstrainedDevice)
         setRenderer(gpuRenderer)
         renderMode = RENDERMODE_WHEN_DIRTY
         setBackgroundColor(android.graphics.Color.BLACK)
@@ -608,7 +654,7 @@ private class CompositionGlRenderer(
     private val textures = LinkedHashMap<String, TextureEntry>(16, 0.75f, true)
     private var gpuTextureCacheBytes = 0L
     private val gpuTextureCacheBudgetBytes = if (MediaWorkers.isConstrainedDevice) {
-        6L * 1024L * 1024L
+        4L * 1024L * 1024L
     } else {
         24L * 1024L * 1024L
     }
