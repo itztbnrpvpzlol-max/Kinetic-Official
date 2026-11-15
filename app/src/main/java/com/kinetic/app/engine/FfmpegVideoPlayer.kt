@@ -8,18 +8,11 @@ import android.view.Surface
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
-import dev.jdtech.mpv.MPVLib
-import kotlin.math.abs
-import kotlin.math.max
 
 /**
- * FFmpeg/libavcodec-backed editor video decoder.
- *
- * libmpv owns demuxing, decoding, timestamp handling and video output. Its
- * Android GPU output is connected to Kinetic's SurfaceTexture, so decoded
- * frames enter the existing OpenGL composition pass without Bitmap copies.
- *
- * Android MediaCodec remains a compatibility fallback if libmpv cannot start.
+ * Primary video preview decoder. Bundled FFmpeg owns demuxing, timestamps,
+ * seeking and MediaCodec setup; decoded frames go directly to SurfaceTexture.
+ * AndroidVideoPlayer is retained only as a platform compatibility fallback.
  */
 class FfmpegVideoPlayer(
     context: Context,
@@ -28,16 +21,15 @@ class FfmpegVideoPlayer(
     private val surfaceHeight: Int = 720
 ) {
     private val appContext = context.applicationContext
-    // All libmpv calls are serialized off the UI and GL threads.
     private val decoderExecutor = Executors.newSingleThreadExecutor { runnable ->
-        Thread(runnable, "KineticMpvDecoder").apply { isDaemon = true }
+        Thread(runnable, "KineticFFmpegDecoder").apply { isDaemon = true }
     }
     private val pendingClockSync = AtomicReference<ClockSync?>(null)
     private val clockSyncQueued = AtomicBoolean(false)
     private val pendingSeekRequest = AtomicReference<Long?>(null)
     private val seekTaskQueued = AtomicBoolean(false)
-    private var mpv: MPVLib? = null
-    private var sourceDescriptor: ParcelFileDescriptor? = null
+
+    @Volatile private var nativeHandle = 0L
     @Volatile private var fallback: AndroidVideoPlayer? = null
     @Volatile private var released = false
     @Volatile private var state = 0
@@ -45,51 +37,53 @@ class FfmpegVideoPlayer(
     @Volatile private var speed = 1f
     @Volatile private var lastPlaying = false
     @Volatile private var receivedSurfaceFrame = false
-    private var attachedSurface: Surface? = null
-    private var initialized = false
-    private var loaded = false
-    private var masterGeneration = Long.MIN_VALUE
-    private var lastSyncNs = 0L
-    private var lastCorrectionNs = 0L
-    private var lastDiagnosticsNs = 0L
+    @Volatile private var firstFrameDeadlineNs = 0L
+    @Volatile private var attachedSurface: Surface? = null
+    private var sourceDescriptor: ParcelFileDescriptor? = null
+    private var sourcePath: String? = null
 
     private data class ClockSync(
-        val positionUs: Long,
-        val monotonicNs: Long,
-        val masterSpeed: Float,
-        val playing: Boolean,
-        val clipStartUs: Long,
-        val sourceOffsetUs: Long,
-        val clipSpeed: Float,
-        val generation: Long
+        val positionUs: Long, val monotonicNs: Long, val masterSpeed: Float,
+        val playing: Boolean, val clipStartUs: Long, val sourceOffsetUs: Long,
+        val clipSpeed: Float, val generation: Long
     )
 
     fun attachSurface(next: Surface) {
         if (released) return
         postToDecoder {
-            if (fallback != null) {
-                fallback?.attachSurface(next)
+            if (attachedSurface === next && (nativeHandle != 0L || fallback != null)) return@postToDecoder
+            stopNativeDecoder()
+            attachedSurface = next
+            receivedSurfaceFrame = false
+            firstFrameDeadlineNs = System.nanoTime() + FIRST_FRAME_TIMEOUT_NS
+
+            val existingFallback = fallback
+            if (existingFallback != null) {
+                existingFallback.attachSurface(next)
+                existingFallback.setSpeed(speed)
+                existingFallback.updatePositionHint(pendingSeekMs)
+                existingFallback.seekTo(pendingSeekMs)
+                if (lastPlaying) existingFallback.play() else existingFallback.pause()
                 return@postToDecoder
             }
-            if (attachedSurface === next && initialized) return@postToDecoder
+
             try {
-                ensureInitialized()
-                val instance = checkNotNull(mpv)
-                receivedSurfaceFrame = false
-                instance.attachSurface(next)
-                attachedSurface = next
-                // libmpv's Android GPU context needs an explicit output size.
-                // Match the SurfaceTexture default buffer size set by Kinetic's
-                // GLES renderer before loading the clip into this surface.
-                instance.setPropertyString(
-                    "android-surface-size",
-                    "${surfaceWidth.coerceAtLeast(16)}x${surfaceHeight.coerceAtLeast(16)}"
+                NativeFfmpegDecoder.ensureLoaded()
+                val path = sourcePath ?: resolveSourcePath().also { sourcePath = it }
+                val handle = NativeFfmpegDecoder.nativeCreate(
+                    path, next, surfaceWidth.coerceAtLeast(16), surfaceHeight.coerceAtLeast(16)
                 )
-                instance.setOptionString("force-window", "yes")
-                loadIfNeeded()
-                state = 1
+                check(handle != 0L) { "FFmpeg native decoder could not be created" }
+                nativeHandle = handle
+                state = 0
+                NativeFfmpegDecoder.nativeSetSpeed(handle, speed)
+                if (pendingSeekMs > 0L) NativeFfmpegDecoder.nativeSeek(handle, pendingSeekMs * 1_000L)
+                if (lastPlaying) NativeFfmpegDecoder.nativePlay(handle)
+                else NativeFfmpegDecoder.nativePause(handle)
+                pendingClockSync.get()?.let(::applyClockSync)
+                Log.i(TAG, "Direct FFmpeg decoder attached to SurfaceTexture: $sourceUri")
             } catch (error: Throwable) {
-                Log.e(TAG, "libmpv attach failed; switching to MediaCodec fallback", error)
+                Log.e(TAG, "Direct FFmpeg decoder could not start; using Android compatibility fallback", error)
                 activateFallback(next)
             }
         }
@@ -98,20 +92,37 @@ class FfmpegVideoPlayer(
     fun detachSurface() {
         postToDecoder {
             fallback?.detachSurface()
-            if (fallback == null) runCatching { mpv?.detachSurface() }
+            stopNativeDecoder()
             attachedSurface = null
+            receivedSurfaceFrame = false
+            firstFrameDeadlineNs = 0L
         }
     }
 
     fun markFrameAvailable() {
         receivedSurfaceFrame = true
+        firstFrameDeadlineNs = 0L
     }
 
-    fun hasReceivedFrame(): Boolean = receivedSurfaceFrame
+    fun hasReceivedFrame(): Boolean {
+        if (!receivedSurfaceFrame && firstFrameDeadlineNs > 0L &&
+            System.nanoTime() >= firstFrameDeadlineNs
+        ) requestFallback("No FFmpeg frame reached the preview surface before the timeout")
+        return receivedSurfaceFrame
+    }
 
     fun decoderState(): Int {
         if (released) return 2
-        return fallback?.decoderState() ?: state
+        fallback?.let { return it.decoderState() }
+        val handle = nativeHandle
+        if (handle == 0L) return state
+        val nativeState = runCatching { NativeFfmpegDecoder.nativeState(handle) }.getOrDefault(-1)
+        if (nativeState < 0) {
+            val message = runCatching { NativeFfmpegDecoder.nativeError(handle) }
+                .getOrDefault("Unknown FFmpeg decoder error")
+            requestFallback(message)
+        }
+        return fallback?.decoderState() ?: nativeState
     }
 
     fun updatePositionHint(targetMs: Long) {
@@ -134,7 +145,7 @@ class FfmpegVideoPlayer(
         postToDecoder {
             val backup = fallback
             if (backup != null) backup.setSpeed(speed)
-            else runCatching { mpv?.setPropertyDouble("speed", speed.toDouble()) }
+            else if (nativeHandle != 0L) NativeFfmpegDecoder.nativeSetSpeed(nativeHandle, speed)
         }
     }
 
@@ -144,7 +155,7 @@ class FfmpegVideoPlayer(
         postToDecoder {
             val backup = fallback
             if (backup != null) backup.play()
-            else runCatching { mpv?.setPropertyBoolean("pause", false) }
+            else if (nativeHandle != 0L) NativeFfmpegDecoder.nativePlay(nativeHandle)
         }
     }
 
@@ -154,24 +165,13 @@ class FfmpegVideoPlayer(
         postToDecoder {
             val backup = fallback
             if (backup != null) backup.pause()
-            else runCatching { mpv?.setPropertyBoolean("pause", true) }
+            else if (nativeHandle != 0L) NativeFfmpegDecoder.nativePause(nativeHandle)
         }
     }
 
-    /**
-     * The native timeline clock remains authoritative. Only the newest clock
-     * snapshot is retained, so slow native property calls cannot build an
-     * unbounded queue of stale synchronization tasks.
-     */
     fun syncMasterClock(
-        positionUs: Long,
-        monotonicNs: Long,
-        masterSpeed: Float,
-        playing: Boolean,
-        clipStartUs: Long,
-        sourceOffsetUs: Long,
-        clipSpeed: Float,
-        generation: Long
+        positionUs: Long, monotonicNs: Long, masterSpeed: Float, playing: Boolean,
+        clipStartUs: Long, sourceOffsetUs: Long, clipSpeed: Float, generation: Long
     ) {
         if (released) return
         pendingClockSync.set(
@@ -189,31 +189,18 @@ class FfmpegVideoPlayer(
             decoderExecutor.execute {
                 fallback?.release()
                 fallback = null
-                val instance = mpv
-                mpv = null
-                initialized = false
-                loaded = false
-                if (instance != null) {
-                    runCatching { instance.detachSurface() }
-                    runCatching { instance.destroy() }
-                }
+                stopNativeDecoder()
                 sourceDescriptor?.close()
                 sourceDescriptor = null
-                        attachedSurface = null
+                sourcePath = null
                 decoderExecutor.shutdown()
             }
-        }.onFailure {
-            decoderExecutor.shutdownNow()
-        }
+        }.onFailure { decoderExecutor.shutdownNow() }
     }
 
     private fun postToDecoder(block: () -> Unit) {
         if (released) return
-        runCatching {
-            decoderExecutor.execute {
-                if (!released) block()
-            }
-        }
+        runCatching { decoderExecutor.execute { if (!released) block() } }
     }
 
     private fun scheduleSeek() {
@@ -221,22 +208,20 @@ class FfmpegVideoPlayer(
         runCatching {
             decoderExecutor.execute {
                 try {
-                    // Drain only the newest requested position. A long exact
-                    // seek must not leave dozens of stale scrub seeks queued.
                     while (!released) {
                         val target = pendingSeekRequest.getAndSet(null) ?: break
                         val backup = fallback
                         if (backup != null) backup.seekTo(target)
-                        else if (loaded) seekMpv(target)
+                        else if (nativeHandle != 0L) {
+                            NativeFfmpegDecoder.nativeSeek(nativeHandle, target * 1_000L)
+                        }
                     }
                 } finally {
                     seekTaskQueued.set(false)
                     if (pendingSeekRequest.get() != null) scheduleSeek()
                 }
             }
-        }.onFailure {
-            seekTaskQueued.set(false)
-        }
+        }.onFailure { seekTaskQueued.set(false) }
     }
 
     private fun scheduleClockSync() {
@@ -244,16 +229,13 @@ class FfmpegVideoPlayer(
         runCatching {
             decoderExecutor.execute {
                 try {
-                    val latest = pendingClockSync.getAndSet(null)
-                    if (latest != null && !released) applyClockSync(latest)
+                    pendingClockSync.getAndSet(null)?.let(::applyClockSync)
                 } finally {
                     clockSyncQueued.set(false)
                     if (pendingClockSync.get() != null) scheduleClockSync()
                 }
             }
-        }.onFailure {
-            clockSyncQueued.set(false)
-        }
+        }.onFailure { clockSyncQueued.set(false) }
     }
 
     private fun applyClockSync(sync: ClockSync) {
@@ -265,138 +247,29 @@ class FfmpegVideoPlayer(
             )
             return
         }
-        val instance = mpv ?: return
-        val nowNs = System.nanoTime()
-        val safeMasterSpeed = sync.masterSpeed.coerceIn(0.1f, 4f)
-        val safeClipSpeed = sync.clipSpeed.coerceIn(0.1f, 4f)
-        val timelineNowUs = sync.positionUs.coerceAtLeast(0L) +
-            if (sync.playing) (((nowNs - sync.monotonicNs).coerceAtLeast(0L) / 1_000.0) *
-                safeMasterSpeed).toLong() else 0L
-        val expectedSourceUs = sync.sourceOffsetUs.coerceAtLeast(0L) +
-            (((timelineNowUs - sync.clipStartUs).coerceAtLeast(0L)) * safeClipSpeed).toLong()
+        val handle = nativeHandle
+        if (handle == 0L) return
+        NativeFfmpegDecoder.nativeSetClock(
+            handle, sync.positionUs, sync.monotonicNs, sync.masterSpeed.toDouble(),
+            sync.playing, sync.clipStartUs, sync.sourceOffsetUs,
+            sync.clipSpeed.toDouble(), sync.generation
+        )
+    }
 
-        if (nowNs - lastSyncNs >= 100_000_000L) {
-            lastSyncNs = nowNs
-            val actualSeconds = instance.getPropertyDouble("time-pos")
-            val expectedSeconds = expectedSourceUs / 1_000_000.0
-            val generationChanged = masterGeneration != sync.generation
-            val driftSeconds = actualSeconds?.let { it - expectedSeconds }
-            val drifted = driftSeconds != null && abs(driftSeconds) > 0.18
-            val correctionReady = nowNs - lastCorrectionNs >= 300_000_000L
-            // Slew playback speed for ordinary drift; repeated exact seeks make
-            // a slow decoder visibly jump backwards whenever latency grows.
-            val driftSpeedFactor = if (sync.playing && !generationChanged && driftSeconds != null) {
-                (1.0 - driftSeconds.coerceIn(-0.75, 0.75) * 0.04).coerceIn(0.97, 1.03)
-            } else 1.0
-            val targetSpeed = (safeMasterSpeed * safeClipSpeed * driftSpeedFactor)
-                .coerceIn(0.1, 4.0)
-            runCatching {
-                instance.setPropertyDouble("speed", targetSpeed)
-                instance.setPropertyBoolean("pause", !sync.playing)
+    private fun requestFallback(reason: String) {
+        if (released || fallback != null) return
+        val surface = attachedSurface ?: return
+        postToDecoder {
+            if (!released && fallback == null && attachedSurface === surface) {
+                Log.w(TAG, "$reason; switching to Android MediaCodec compatibility fallback")
+                activateFallback(surface)
             }
-
-            if (nowNs - lastDiagnosticsNs >= 1_000_000_000L) {
-                lastDiagnosticsNs = nowNs
-                val activeHwdec = runCatching { instance.getPropertyString("hwdec-current") }
-                    .getOrNull() ?: "pending"
-                val codecName = runCatching { instance.getPropertyString("video-codec-name") }
-                    .getOrNull() ?: "unknown"
-                val decodedFps = runCatching { instance.getPropertyDouble("estimated-vf-fps") }
-                    .getOrNull()
-                val driftMs = driftSeconds?.let { (it * 1_000.0).toLong() } ?: 0L
-                Log.i(TAG, "decoder=$activeHwdec codec=$codecName fps=$decodedFps driftMs=$driftMs")
-            }
-
-            if (generationChanged && loaded) {
-                // Explicit seeks, transport transitions and loop wraps are real
-                // discontinuities; ordinary playback drift is corrected by slew.
-                Log.i(TAG, "Aligning preview clock after transport generation change")
-                seekMpv((expectedSourceUs / 1_000L).coerceAtLeast(0L))
-                lastCorrectionNs = nowNs
-            } else if (sync.playing && drifted && correctionReady) {
-                lastCorrectionNs = nowNs
-                Log.d(TAG, "Preview clock slew driftMs=${driftSeconds?.times(1_000.0)?.toLong() ?: 0L} speed=$targetSpeed")
-            }
-            masterGeneration = sync.generation
         }
-        lastPlaying = sync.playing
-    }
-
-    private fun ensureInitialized() {
-        if (initialized) return
-        val instance = MPVLib.create(appContext) ?: error("libmpv could not be created")
-        try {
-            val options = listOf(
-                "config" to "no",
-                "vo" to "gpu",
-                "gpu-context" to "android",
-                "hwdec" to "auto-safe",
-                "audio" to "no",
-                "sub" to "no",
-                "osd-level" to "0",
-                "terminal" to "no",
-                "keep-open" to "yes",
-                "pause" to "yes",
-                "interpolation" to "no",
-                "framedrop" to "vo",
-                "video-sync" to "display-resample"
-            )
-            options.forEach { (key, value) ->
-                check(instance.setOptionString(key, value) >= 0) {
-                    "libmpv rejected option $key=$value"
-                }
-            }
-            instance.init()
-            mpv = instance
-            initialized = true
-        } catch (error: Throwable) {
-            runCatching { instance.destroy() }
-            throw error
-        }
-    }
-
-    private fun loadIfNeeded() {
-        if (loaded) return
-        val instance = checkNotNull(mpv)
-        val path = resolveSourcePath()
-        instance.command(arrayOf("loadfile", path, "replace"))
-        instance.setPropertyBoolean("pause", true)
-        if (pendingSeekMs > 0L) seekMpv(pendingSeekMs)
-        loaded = true
-        Log.i(TAG, "FFmpeg/libavcodec playback loaded: $sourceUri")
-    }
-
-    private fun resolveSourcePath(): String {
-        when (sourceUri.scheme?.lowercase()) {
-            "file" -> return sourceUri.path ?: error("Video file path is empty")
-            "content" -> {
-                val descriptor = appContext.contentResolver.openFileDescriptor(sourceUri, "r")
-                    ?: error("Android could not open the selected video")
-                sourceDescriptor = descriptor
-                // Keep the descriptor alive for the complete libmpv session.
-                // /proc/self/fd works in-process and avoids copying imported media.
-                return "/proc/self/fd/${descriptor.fd}"
-            }
-            else -> return sourceUri.toString()
-        }
-    }
-
-    private fun seekMpv(targetMs: Long) {
-        val seconds = targetMs.coerceAtLeast(0L) / 1000.0
-        runCatching {
-            mpv?.command(arrayOf("seek", seconds.toString(), "absolute+exact"))
-        }.onFailure { Log.w(TAG, "FFmpeg seek failed", it) }
     }
 
     private fun activateFallback(outputSurface: Surface) {
-        val old = mpv
-        mpv = null
-        initialized = false
-        loaded = false
-        runCatching { old?.detachSurface() }
-        runCatching { old?.destroy() }
-        sourceDescriptor?.close()
-        sourceDescriptor = null
+        if (released || fallback != null) return
+        stopNativeDecoder()
         val player = AndroidVideoPlayer(appContext, sourceUri)
         fallback = player
         state = 0
@@ -407,7 +280,28 @@ class FfmpegVideoPlayer(
         if (lastPlaying) player.play() else player.pause()
     }
 
+    private fun stopNativeDecoder() {
+        val handle = nativeHandle
+        nativeHandle = 0L
+        if (handle != 0L) {
+            runCatching { NativeFfmpegDecoder.nativeRelease(handle) }
+                .onFailure { Log.w(TAG, "FFmpeg native decoder release failed", it) }
+        }
+    }
+
+    private fun resolveSourcePath(): String = when (sourceUri.scheme?.lowercase()) {
+        "file" -> sourceUri.path ?: error("Video file path is empty")
+        "content" -> {
+            val descriptor = appContext.contentResolver.openFileDescriptor(sourceUri, "r")
+                ?: error("Android could not open the selected video")
+            sourceDescriptor = descriptor
+            "/proc/self/fd/\${descriptor.fd}"
+        }
+        else -> sourceUri.toString()
+    }
+
     companion object {
         private const val TAG = "KineticFFmpeg"
+        private const val FIRST_FRAME_TIMEOUT_NS = 6_000_000_000L
     }
 }
