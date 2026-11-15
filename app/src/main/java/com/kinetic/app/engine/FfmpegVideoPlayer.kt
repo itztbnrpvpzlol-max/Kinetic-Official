@@ -11,8 +11,9 @@ import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Primary video preview decoder. Bundled FFmpeg owns demuxing, timestamps,
- * seeking and MediaCodec setup; decoded frames go directly to SurfaceTexture.
- * AndroidVideoPlayer is retained only as a platform compatibility fallback.
+ * seeking and decoding. It prefers MediaCodec surface output and uses FFmpeg's
+ * software decoder plus swscale when a hardware decoder is unavailable.
+ * AndroidVideoPlayer is only a last-resort platform compatibility fallback.
  */
 class FfmpegVideoPlayer(
     context: Context,
