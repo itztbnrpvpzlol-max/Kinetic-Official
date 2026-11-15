@@ -200,7 +200,7 @@ fun EffectControlsPanel(editor: EditorState, layer: Layer, onBrowseEffects: () -
                                 editor.selectEffectParameter(layer.id, effect.id, spec.key)
                             }
                             if (liveEffect.parameterKeys[spec.key].orEmpty().isNotEmpty()) {
-                                EffectKeyframeRow(editor, liveEffect, spec)
+                                EffectKeyframeRow(editor, layer, liveEffect, spec)
                             }
                         }
                     }
@@ -320,6 +320,7 @@ private fun EffectParameterLine(
 @Composable
 private fun EffectKeyframeRow(
     editor: EditorState,
+    layer: Layer,
     effect: EffectInstance,
     spec: EffectControlSpec
 ) {
@@ -341,12 +342,16 @@ private fun EffectKeyframeRow(
                         if (size.width <= 0) return@detectTapGestures
                         val tappedTime = (tap.x / size.width).coerceIn(0f, 1f) * duration
                         val nearest = keys.indices.minByOrNull { abs(keys[it].t - tappedTime) } ?: -1
-                        if (nearest >= 0) editor.selectEffectKey(nearest)
+                        if (nearest >= 0) {
+                            editor.selectEffectParameter(layer.id, effect.id, spec.key)
+                            editor.selectEffectKey(nearest)
+                        }
                     }
                 }
         ) {
             val centerY = size.height / 2f
-            val selectedIndex = editor.selectedEffectKey
+            val selectedIndex = if (editor.selectedEffectId == effect.id &&
+                editor.selectedEffectParameter == spec.key) editor.selectedEffectKey else -1
             keys.forEachIndexed { index, key ->
                 val x = (key.t / duration).coerceIn(0f, 1f) * size.width
                 val selected = index == selectedIndex
