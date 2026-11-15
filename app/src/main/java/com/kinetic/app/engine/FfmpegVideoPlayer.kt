@@ -235,7 +235,7 @@ class FfmpegVideoPlayer(
                     ) applyClockSync(sync)
                 } finally {
                     clockSyncQueued.set(false)
-                    if (pendingClockSync.get() != null) scheduleClockSync()
+                    if (pendingClockSync.get() != null && (fallback != null || nativeHandle != 0L)) scheduleClockSync()
                 }
             }
         }.onFailure { clockSyncQueued.set(false) }
