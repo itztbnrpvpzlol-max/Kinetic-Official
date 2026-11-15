@@ -402,8 +402,8 @@ private fun GpuCompositionPreviewCanvas(
         )
     }
     val scene = GpuScene(renderLayers, selectedLayer, cacheAllowed = !editor.playing, time = editor.time)
-    // libmpv renders into a SurfaceTexture buffer. Give both the producer and
-    // its Android GPU context the same explicit preview-sized output geometry.
+    // FFmpeg's MediaCodec decoder renders into a SurfaceTexture buffer. Give
+    // the producer and decoder the same explicit preview-sized output geometry.
     val videoOutputWidth = (COMP_W * qualityScale).roundToInt().coerceAtLeast(16)
     val videoOutputHeight = (COMP_H * qualityScale).roundToInt().coerceAtLeast(16)
     val view = remember(context, videoOutputWidth, videoOutputHeight) {
