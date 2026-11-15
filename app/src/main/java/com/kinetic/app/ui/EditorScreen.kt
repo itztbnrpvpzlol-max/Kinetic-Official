@@ -650,8 +650,13 @@ private fun ToolEditPanel(
 
 @Composable
 private fun ToolPanelControls(tool: String, editor: EditorState, layer: Layer, displayTime: Float, onExtractAudio: () -> Unit, maskTool: String, onMaskToolChange: (String) -> Unit, rotoForeground: Boolean, onRotoForegroundChange: (Boolean) -> Unit, onOpenEffects: () -> Unit) {
-    Column(Modifier.fillMaxSize().background(KColors.Surface).padding(horizontal = 12.dp, vertical = 7.dp),
-        verticalArrangement = Arrangement.spacedBy(5.dp)) {
+    Column(
+        Modifier.fillMaxSize().background(KColors.Surface).then(
+            if (tool == "Effects") Modifier else Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
+        ),
+        verticalArrangement = if (tool == "Effects") Arrangement.spacedBy(0.dp)
+            else Arrangement.spacedBy(5.dp)
+    ) {
         when (tool) {
             "Speed" -> {
                 PropertyLine("Speed", editor, layer, listOf(PropId.SPEED))
