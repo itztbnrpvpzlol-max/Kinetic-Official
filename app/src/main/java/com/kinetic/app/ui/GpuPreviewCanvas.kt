@@ -42,6 +42,7 @@ import android.opengl.GLES11Ext
 import java.util.concurrent.ConcurrentHashMap
 import java.util.LinkedHashMap
 import java.util.concurrent.atomic.AtomicInteger
+import kotlin.math.roundToInt
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import com.kinetic.app.data.MediaLoader
@@ -401,7 +402,13 @@ private fun GpuCompositionPreviewCanvas(
         )
     }
     val scene = GpuScene(renderLayers, selectedLayer, cacheAllowed = !editor.playing, time = editor.time)
-    val view = remember(context) { GpuPreviewSurfaceView(context) { gpuFailed.value = true } }
+    // libmpv renders into a SurfaceTexture buffer. Give both the producer and
+    // its Android GPU context the same explicit preview-sized output geometry.
+    val videoOutputWidth = (COMP_W * qualityScale).roundToInt().coerceAtLeast(16)
+    val videoOutputHeight = (COMP_H * qualityScale).roundToInt().coerceAtLeast(16)
+    val view = remember(context, videoOutputWidth, videoOutputHeight) {
+        GpuPreviewSurfaceView(context, videoOutputWidth, videoOutputHeight) { gpuFailed.value = true }
+    }
         BoxWithConstraints(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             val fitScale = minOf(maxWidth.value / COMP_W, maxHeight.value / COMP_H)
             val compositionWidth = (COMP_W * fitScale).dp
@@ -424,7 +431,8 @@ private fun GpuCompositionPreviewCanvas(
                             val playbackUri = rememberPlaybackUri(uri, editor.playing)
                             val player = remember(playbackUri, qualityScale) {
                                 com.kinetic.app.engine.FfmpegVideoPlayer(
-                                    context, playbackUri ?: Uri.parse(uri)
+                                    context, playbackUri ?: Uri.parse(uri),
+                                    videoOutputWidth, videoOutputHeight
                                 )
                             }
                             GpuVideoPlayerLayer(
@@ -463,21 +471,21 @@ private fun GpuVideoPlayerLayer(
     }
 
     LaunchedEffect(player, layer.id) {
+        // A decoder being initialized is not proof that it produced a frame.
+        // Wait for the SurfaceTexture callback; otherwise a silent libmpv
+        // surface/output failure can leave the preview black indefinitely.
         var waitedMs = 0
-        while (waitedMs < 10_000) {
-            when (player.decoderState()) {
-                1 -> break
-                -1 -> {
-                    Log.e("KineticVideo", "Hardware decoder failed for layer ${layer.id}; using bitmap fallback")
-                    onDecoderFailed(layer.id)
-                    break
-                }
+        while (waitedMs < 8_000 && !player.hasReceivedFrame()) {
+            if (player.decoderState() == -1) {
+                Log.e("KineticVideo", "Hardware decoder failed for layer ${layer.id}; using bitmap fallback")
+                onDecoderFailed(layer.id)
+                return@LaunchedEffect
             }
             kotlinx.coroutines.delay(50L)
             waitedMs += 50
         }
-        if (waitedMs >= 10_000 && player.decoderState() == 0) {
-            Log.w("KineticVideo", "Hardware decoder startup timed out for layer ${layer.id}; using bitmap fallback")
+        if (!player.hasReceivedFrame()) {
+            Log.w("KineticVideo", "No SurfaceTexture frame for layer ${layer.id} after ${waitedMs}ms; using bitmap fallback")
             onDecoderFailed(layer.id)
         }
     }
@@ -523,12 +531,19 @@ private fun GpuVideoPlayerLayer(
     }
 }
 
-private class GpuPreviewSurfaceView(context: Context, onGpuFailure: () -> Unit) : GLSurfaceView(context) {
+private class GpuPreviewSurfaceView(
+    context: Context,
+    videoOutputWidth: Int,
+    videoOutputHeight: Int,
+    onGpuFailure: () -> Unit
+) : GLSurfaceView(context) {
     private val mainHandler = Handler(Looper.getMainLooper())
     private val attachedPlayers = ConcurrentHashMap<String, com.kinetic.app.engine.FfmpegVideoPlayer>()
     private val frameNotifications = AtomicInteger(0)
     @Volatile private var videoLayerIds: Set<String> = emptySet()
     private val gpuRenderer = CompositionGlRenderer(
+        videoOutputWidth = videoOutputWidth,
+        videoOutputHeight = videoOutputHeight,
         onGpuFailure = onGpuFailure,
         onVideoSurfaceAvailable = { id, surface ->
             mainHandler.post {
@@ -536,9 +551,10 @@ private class GpuPreviewSurfaceView(context: Context, onGpuFailure: () -> Unit) 
                 attachedPlayers[id]?.attachSurface(surface)
             }
         },
-        onFrameAvailable = {
+        onFrameAvailable = { id ->
+            attachedPlayers[id]?.markFrameAvailable()
             val count = frameNotifications.incrementAndGet()
-            if (count <= 5) Log.i("KineticVideo", "SurfaceTexture frame notification #$count")
+            if (count <= 5) Log.i("KineticVideo", "SurfaceTexture frame notification #$count layer=$id")
             requestRender()
         }
     )
@@ -575,9 +591,11 @@ private class GpuPreviewSurfaceView(context: Context, onGpuFailure: () -> Unit) 
 }
 
 private class CompositionGlRenderer(
+    private val videoOutputWidth: Int,
+    private val videoOutputHeight: Int,
     private val onGpuFailure: () -> Unit,
     private val onVideoSurfaceAvailable: (String, Surface) -> Unit,
-    private val onFrameAvailable: () -> Unit
+    private val onFrameAvailable: (String) -> Unit
 ) : GLSurfaceView.Renderer {
     @Volatile private var scene = GpuScene(emptyList(), null)
     private var program = 0
@@ -631,7 +649,8 @@ private class CompositionGlRenderer(
         val textureId: Int,
         val texture: SurfaceTexture,
         val surface: Surface,
-        val transform: FloatArray = FloatArray(16)
+        val transform: FloatArray = FloatArray(16),
+        @Volatile var hasFrame: Boolean = false
     )
     fun submit(next: GpuScene) { scene = next }
     fun updateVideoLayers(ids: Set<String>) {
@@ -655,10 +674,17 @@ private class CompositionGlRenderer(
         GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
         GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
         GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
-        val texture = SurfaceTexture(names[0])
-        texture.setOnFrameAvailableListener { onFrameAvailable() }
+        val texture = SurfaceTexture(names[0]).apply {
+            setDefaultBufferSize(videoOutputWidth, videoOutputHeight)
+        }
         val surface = Surface(texture)
-        videoOutputs[id] = VideoOutput(names[0], texture, surface)
+        val output = VideoOutput(names[0], texture, surface)
+        videoOutputs[id] = output
+        texture.setOnFrameAvailableListener {
+            output.hasFrame = true
+            onFrameAvailable(id)
+        }
+        Log.i("KineticVideo", "Created OES output for layer $id at ${videoOutputWidth}x${videoOutputHeight}")
         onVideoSurfaceAvailable(id, surface)
     }
     fun releaseVideoOutput(id: String) {
@@ -671,11 +697,13 @@ private class CompositionGlRenderer(
     private fun refreshVideoFrames(): Long {
         var signature = -3750763034362895579L
         videoOutputs.forEach { (id, output) ->
-            try {
-                output.texture.updateTexImage()
-                output.texture.getTransformMatrix(output.transform)
-            } catch (error: Throwable) {
-                Log.e("KineticVideo", "updateTexImage failed for layer $id", error)
+            if (output.hasFrame) {
+                try {
+                    output.texture.updateTexImage()
+                    output.texture.getTransformMatrix(output.transform)
+                } catch (error: Throwable) {
+                    Log.e("KineticVideo", "updateTexImage failed for layer $id", error)
+                }
             }
             signature = (signature xor output.texture.timestamp) * 1099511628211L
             signature = (signature xor id.hashCode().toLong()) * 1099511628211L
@@ -863,7 +891,7 @@ private class CompositionGlRenderer(
 
     private fun drawVideoLayer(layer: GpuLayer, scale: Float, ox: Float, oy: Float) {
         val output = videoOutputs[layer.id] ?: return
-        if (layer.opacity <= 0f || externalProgram == 0) return
+        if (!output.hasFrame || layer.opacity <= 0f || externalProgram == 0) return
         val right = if (layer.mask) layer.width * 0.8f else layer.width
         val bottom = if (layer.mask) layer.height * 0.8f else layer.height
         val uvMax = if (layer.mask) 0.8f else 1f
