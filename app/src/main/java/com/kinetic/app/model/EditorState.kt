@@ -750,6 +750,26 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
         }
     }
 
+    /** Move an effect-parameter keyframe in time using the same bounded drag rules as layer properties. */
+    fun moveEffectKeyTime(layerId: String, effectId: String, parameter: String, index: Int, time: Float) {
+        val layer = layers.firstOrNull { it.id == layerId } ?: return
+        val effect = layer.effectStack.firstOrNull { it.id == effectId } ?: return
+        val keys = effect.parameterKeys[parameter].orEmpty()
+        if (index !in keys.indices) return
+        val previous = if (index > 0) keys[index - 1].t + frame else 0f
+        val nextTime = if (index < keys.lastIndex) keys[index + 1].t - frame else duration
+        val moved = keys[index].copy(t = time.coerceIn(previous, max(previous, nextTime)))
+        val sorted = keys.toMutableList().also { it[index] = moved }.sortedBy { it.t }
+        updateLayer(layerId, push = false) { current ->
+            current.copy(effectStack = current.effectStack.map { item ->
+                if (item.id == effectId) item.copy(
+                    parameterKeys = item.parameterKeys + (parameter to sorted)
+                ) else item
+            })
+        }
+        selectedEffectKey = sorted.indexOf(moved)
+    }
+
     fun setExpression(layerId: String, id: PropId, expression: String?) {
         updateLayer(layerId) { l -> l.copy(props = l.props + (id to l.p(id).copy(expression = expression))) }
     }
