@@ -11,6 +11,7 @@
 #include <libavformat/avformat.h>
 #include <libavutil/error.h>
 #include <libavutil/time.h>
+#include <libswscale/swscale.h>
 #include <pthread.h>
 #include <atomic>
 #include <algorithm>
@@ -66,6 +67,11 @@ struct DecoderSession {
     AVFormatContext* format = nullptr;
     AVCodecContext* codec = nullptr;
     AVMediaCodecContext* mediaCodec = nullptr;
+    ANativeWindow* outputWindow = nullptr;
+    SwsContext* sws = nullptr;
+    int windowWidth = 0;
+    int windowHeight = 0;
+    bool hardwareDecoder = false;
     AVPacket* packet = nullptr;
     AVFrame* frame = nullptr;
     int videoStream = -1;
@@ -128,6 +134,19 @@ static const char* mediaCodecDecoderName(AVCodecID id) {
     }
 }
 
+static const char* softwareDecoderName(AVCodecID id) {
+    switch (id) {
+        case AV_CODEC_ID_H264: return "h264";
+        case AV_CODEC_ID_HEVC: return "hevc";
+        case AV_CODEC_ID_MPEG2VIDEO: return "mpeg2video";
+        case AV_CODEC_ID_MPEG4: return "mpeg4";
+        case AV_CODEC_ID_VP8: return "vp8";
+        case AV_CODEC_ID_VP9: return "vp9";
+        case AV_CODEC_ID_AV1: return "av1";
+        default: return nullptr;
+    }
+}
+
 static void closeDecoder(DecoderSession* session) {
     if (session->codec) {
         if (session->codecOpened) {
@@ -135,7 +154,8 @@ static void closeDecoder(DecoderSession* session) {
             session->codecOpened = false;
         }
         if (session->mediaCodec) {
-            av_mediacodec_default_free(session->codec);
+            if (session->codec->hwaccel_context) av_mediacodec_default_free(session->codec);
+            else av_free(session->mediaCodec);
             session->mediaCodec = nullptr;
         }
         avcodec_free_context(&session->codec);
@@ -144,7 +164,61 @@ static void closeDecoder(DecoderSession* session) {
     av_frame_free(&session->frame);
 }
 
-static bool openDecoder(DecoderSession* session) {
+static bool openCodec(DecoderSession* session, const AVCodec* decoder, bool hardware,
+                      std::string* failure) {
+    session->codec = avcodec_alloc_context3(decoder);
+    if (!session->codec) {
+        if (failure) *failure = "FFmpeg could not allocate a video decoder";
+        return false;
+    }
+    AVStream* stream = session->format->streams[session->videoStream];
+    int result = avcodec_parameters_to_context(session->codec, stream->codecpar);
+    if (result < 0) {
+        if (failure) *failure = "FFmpeg could not read codec parameters: " + ffmpegError(result);
+        avcodec_free_context(&session->codec);
+        return false;
+    }
+    session->codec->pkt_timebase = stream->time_base;
+    session->codec->thread_count = 1;
+    session->codec->thread_type = 0;
+
+    if (hardware) {
+        session->mediaCodec = av_mediacodec_alloc_context();
+        if (!session->mediaCodec) {
+            if (failure) *failure = "FFmpeg MediaCodec support was not included in this build";
+            avcodec_free_context(&session->codec);
+            return false;
+        }
+        result = av_mediacodec_default_init(session->codec, session->mediaCodec, session->surface);
+        if (result < 0) {
+            if (session->codec->hwaccel_context) av_mediacodec_default_free(session->codec);
+            else av_free(session->mediaCodec);
+            session->mediaCodec = nullptr;
+            if (failure) *failure = "FFmpeg could not attach MediaCodec to the preview surface: " +
+                ffmpegError(result);
+            avcodec_free_context(&session->codec);
+            return false;
+        }
+    }
+
+    result = avcodec_open2(session->codec, decoder, nullptr);
+    if (result < 0) {
+        if (session->mediaCodec) {
+            if (session->codec->hwaccel_context) av_mediacodec_default_free(session->codec);
+            else av_free(session->mediaCodec);
+            session->mediaCodec = nullptr;
+        }
+        if (failure) *failure = "FFmpeg could not open decoder " +
+            std::string(decoder->name ? decoder->name : "unknown") + ": " + ffmpegError(result);
+        avcodec_free_context(&session->codec);
+        return false;
+    }
+    session->codecOpened = true;
+    session->hardwareDecoder = hardware;
+    return true;
+}
+
+static bool openDecoder(DecoderSession* session, JNIEnv* env) {
     session->format = avformat_alloc_context();
     if (!session->format) {
         setError(session, "FFmpeg could not allocate a media container");
@@ -175,48 +249,32 @@ static bool openDecoder(DecoderSession* session) {
     session->timeBase = stream->time_base;
     session->streamStart = stream->start_time == AV_NOPTS_VALUE ? 0 : stream->start_time;
 
+    std::string hardwareFailure;
     const char* hardwareName = mediaCodecDecoderName(stream->codecpar->codec_id);
-    const AVCodec* decoder = hardwareName ? avcodec_find_decoder_by_name(hardwareName) : nullptr;
-    if (!decoder) {
-        setError(session, "This video codec has no FFmpeg MediaCodec decoder in the bundled build");
-        return false;
+    const AVCodec* hardwareDecoder = hardwareName ? avcodec_find_decoder_by_name(hardwareName) : nullptr;
+    bool opened = hardwareDecoder && openCodec(session, hardwareDecoder, true, &hardwareFailure);
+
+    if (!opened) {
+        if (session->codec || session->packet || session->frame) closeDecoder(session);
+        const char* softwareName = softwareDecoderName(stream->codecpar->codec_id);
+        const AVCodec* softwareDecoder = softwareName
+            ? avcodec_find_decoder_by_name(softwareName)
+            : avcodec_find_decoder(stream->codecpar->codec_id);
+        if (!softwareDecoder || !openCodec(session, softwareDecoder, false, nullptr)) {
+            setError(session, "FFmpeg could not open a hardware or software decoder. " + hardwareFailure);
+            return false;
+        }
+        session->outputWindow = ANativeWindow_fromSurface(env, session->surface);
+        if (!session->outputWindow) {
+            setError(session, "FFmpeg software decoder could not access the preview SurfaceTexture");
+            return false;
+        }
+        __android_log_print(ANDROID_LOG_WARN, "KineticFFmpeg",
+            "Using FFmpeg software decoder %s after MediaCodec was unavailable: %s",
+            softwareDecoder->name ? softwareDecoder->name : "unknown",
+            hardwareFailure.c_str());
     }
 
-    session->codec = avcodec_alloc_context3(decoder);
-    if (!session->codec) {
-        setError(session, "FFmpeg could not allocate a video decoder");
-        return false;
-    }
-    result = avcodec_parameters_to_context(session->codec, stream->codecpar);
-    if (result < 0) {
-        setError(session, "FFmpeg could not read the video codec parameters: " + ffmpegError(result));
-        return false;
-    }
-    session->codec->pkt_timebase = stream->time_base;
-    session->codec->thread_count = 1;
-    session->codec->thread_type = 0;
-
-    session->mediaCodec = av_mediacodec_alloc_context();
-    if (!session->mediaCodec) {
-        setError(session, "FFmpeg MediaCodec support was not included in this build");
-        return false;
-    }
-    result = av_mediacodec_default_init(session->codec, session->mediaCodec, session->surface);
-    if (result < 0) {
-        av_free(session->mediaCodec);
-        session->mediaCodec = nullptr;
-        setError(session, "FFmpeg could not attach Android's hardware decoder to the preview surface: " +
-            ffmpegError(result));
-        return false;
-    }
-
-    result = avcodec_open2(session->codec, decoder, nullptr);
-    if (result < 0) {
-        closeDecoder(session);
-        setError(session, "Android could not start the FFmpeg hardware decoder: " + ffmpegError(result));
-        return false;
-    }
-    session->codecOpened = true;
     session->packet = av_packet_alloc();
     session->frame = av_frame_alloc();
     if (!session->packet || !session->frame) {
@@ -231,8 +289,9 @@ static bool openDecoder(DecoderSession* session) {
         session->condition.notify_all();
     }
     __android_log_print(ANDROID_LOG_INFO, "KineticFFmpeg",
-        "Direct FFmpeg decoder ready: codec=%s size=%dx%d",
-        decoder->name ? decoder->name : "unknown",
+        "Direct FFmpeg decoder ready: mode=%s codec=%s size=%dx%d",
+        session->hardwareDecoder ? "MediaCodec" : "software",
+        session->codec->codec ? session->codec->codec->name : "unknown",
         session->codec->width, session->codec->height);
     return true;
 }
