@@ -48,6 +48,7 @@ android {
 
     sourceSets.getByName("main").res.srcDir(manropeGeneratedRes)
     sourceSets.getByName("main").assets.srcDir(manropeGeneratedAssets)
+    sourceSets.getByName("main").jniLibs.srcDir("src/main/cpp/ffmpeg/prebuilt")
 }
 
 val downloadManropeAssets by tasks.registering {
