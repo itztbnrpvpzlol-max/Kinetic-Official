@@ -80,7 +80,7 @@ class FfmpegVideoPlayer(
                 if (pendingSeekMs > 0L) NativeFfmpegDecoder.nativeSeek(handle, pendingSeekMs * 1_000L)
                 if (lastPlaying) NativeFfmpegDecoder.nativePlay(handle)
                 else NativeFfmpegDecoder.nativePause(handle)
-                pendingClockSync.get()?.let(::applyClockSync)
+                pendingClockSync.getAndSet(null)?.let(::applyClockSync)
                 Log.i(TAG, "Direct FFmpeg decoder attached to SurfaceTexture: $sourceUri")
             } catch (error: Throwable) {
                 Log.e(TAG, "Direct FFmpeg decoder could not start; using Android compatibility fallback", error)
@@ -122,7 +122,7 @@ class FfmpegVideoPlayer(
                 .getOrDefault("Unknown FFmpeg decoder error")
             requestFallback(message)
         }
-        return fallback?.decoderState() ?: nativeState
+        return fallback?.decoderState() ?: if (nativeState < 0) 0 else nativeState
     }
 
     fun updatePositionHint(targetMs: Long) {
@@ -229,7 +229,10 @@ class FfmpegVideoPlayer(
         runCatching {
             decoderExecutor.execute {
                 try {
-                    pendingClockSync.getAndSet(null)?.let(::applyClockSync)
+                    val sync = pendingClockSync.get()
+                    if (sync != null && (fallback != null || nativeHandle != 0L) &&
+                        pendingClockSync.compareAndSet(sync, null)
+                    ) applyClockSync(sync)
                 } finally {
                     clockSyncQueued.set(false)
                     if (pendingClockSync.get() != null) scheduleClockSync()
