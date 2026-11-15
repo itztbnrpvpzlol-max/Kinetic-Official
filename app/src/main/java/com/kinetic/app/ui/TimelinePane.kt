@@ -76,6 +76,7 @@ import androidx.compose.ui.unit.sp
 import com.kinetic.app.data.MediaLoader
 import com.kinetic.app.data.MediaWorkers
 import com.kinetic.app.model.EditorState
+import com.kinetic.app.model.EffectInstance
 import com.kinetic.app.model.fmt
 import com.kinetic.app.model.Layer
 import com.kinetic.app.model.LayerType
@@ -230,6 +231,9 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
                         id != PropId.POS_X && id != PropId.POS_Y &&
                             !(layer.scaleLinked && (id == PropId.SCALE_X || id == PropId.SCALE_Y)) &&
                             prop.keys.isNotEmpty()
+                    } +
+                    layer.effectStack.sumOf { effect ->
+                        effect.parameterKeys.values.count { it.isNotEmpty() }
                     }
                 ) * 28.0 else 0.0) +
                 (if (layer.parentId != null) 20.0 else 0.0)
@@ -340,7 +344,13 @@ private fun LayerRow(
             !(layer.scaleLinked && (id == PropId.SCALE_X || id == PropId.SCALE_Y)) &&
             prop.keys.isNotEmpty()
     }
-    val hasLayerKeyframes = hasPositionKeyframes || hasLinkedScaleKeyframes || visibleKeyframeProps.isNotEmpty()
+    val effectKeyframeTracks = layer.effectStack.flatMap { effect ->
+        effect.parameterKeys.entries.filter { it.value.isNotEmpty() }.map { entry ->
+            Triple(effect, entry.key, entry.value)
+        }
+    }
+    val hasLayerKeyframes = hasPositionKeyframes || hasLinkedScaleKeyframes ||
+        visibleKeyframeProps.isNotEmpty() || effectKeyframeTracks.isNotEmpty()
     val dens = LocalDensity.current.density
     var acc by remember { mutableFloatStateOf(0f) }
     var parentDrag by remember { mutableFloatStateOf(0f) }
@@ -430,6 +440,12 @@ private fun LayerRow(
                 .forEach { (propId, prop) ->
                     KeyframeTrackRow(editor, layer, propId, prop.keys, pps, hScroll, contentW, leftW, leadingPad)
                 }
+            effectKeyframeTracks.forEach { (effect, parameter, keys) ->
+                EffectKeyframeTrackRow(
+                    editor, layer, effect, parameter, keys,
+                    pps, hScroll, contentW, leftW, leadingPad
+                )
+            }
         }
         val parentName = layer.parentId?.let { id -> editor.layers.firstOrNull { it.id == id }?.name }
         if (parentName != null) {
@@ -544,6 +560,132 @@ private fun KeyframeTrackRow(
                         close()
                     }
                     drawPath(diamond, if (kotlin.math.abs(editor.time - key.t) <= editor.frame / 2f) KColors.Accent else KColors.ClipText)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun EffectKeyframeTrackRow(
+    editor: EditorState,
+    layer: Layer,
+    effect: EffectInstance,
+    parameter: String,
+    keys: List<com.kinetic.app.model.Keyframe>,
+    pps: Float,
+    hScroll: ScrollState,
+    contentW: Dp,
+    leftW: Dp,
+    leadingPad: Dp
+) {
+    val dens = LocalDensity.current.density
+    val latestKeys by rememberUpdatedState(keys)
+    var dragPreviewIndex by remember(layer.id, effect.id, parameter) { mutableIntStateOf(-1) }
+    var dragPreviewTime by remember(layer.id, effect.id, parameter) { mutableFloatStateOf(0f) }
+    Row(
+        Modifier.fillMaxWidth().height(28.dp).background(KColors.Bg),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            Modifier.width(leftW).fillMaxHeight()
+                .graphicsLayer { translationX = hScroll.value.toFloat() }.zIndex(1f)
+                .background(KColors.Bg).padding(start = 12.dp),
+            contentAlignment = Alignment.CenterStart
+        ) {
+            Text(
+                "${effect.name} · $parameter",
+                color = KColors.Muted,
+                fontSize = 9.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        Box(Modifier.width(contentW).fillMaxHeight()) {
+            Canvas(
+                Modifier.width(contentW).fillMaxHeight()
+                    .pointerInput(layer.id, effect.id, parameter, pps, leadingPad) {
+                        var draggingIndex = -1
+                        detectDragGesturesAfterLongPress(
+                            onDragStart = { point ->
+                                val currentKeys = latestKeys
+                                val time = ((point.x / dens - leadingPad.value) / pps).coerceAtLeast(0f)
+                                val nearestIndex = currentKeys.indices.minByOrNull {
+                                    abs(currentKeys[it].t - time)
+                                } ?: -1
+                                val nearest = currentKeys.getOrNull(nearestIndex)
+                                draggingIndex = if (nearest != null &&
+                                    abs(nearest.t - time) <= 18f / pps
+                                ) nearestIndex else -1
+                                if (draggingIndex >= 0) {
+                                    editor.selectEffectParameter(layer.id, effect.id, parameter)
+                                    editor.selectEffectKey(draggingIndex)
+                                    editor.beginEdit()
+                                    dragPreviewIndex = draggingIndex
+                                    dragPreviewTime = currentKeys[draggingIndex].t
+                                }
+                            },
+                            onDragEnd = {
+                                if (draggingIndex >= 0) {
+                                    editor.moveEffectKeyTime(
+                                        layer.id, effect.id, parameter, draggingIndex, dragPreviewTime
+                                    )
+                                }
+                                draggingIndex = -1
+                                dragPreviewIndex = -1
+                            },
+                            onDragCancel = {
+                                draggingIndex = -1
+                                dragPreviewIndex = -1
+                            }
+                        ) { change, _ ->
+                            if (draggingIndex >= 0) {
+                                change.consume()
+                                val currentKeys = latestKeys
+                                val rawTime = ((change.position.x / dens - leadingPad.value) / pps)
+                                    .coerceAtLeast(0f)
+                                val minTime = if (draggingIndex > 0)
+                                    currentKeys[draggingIndex - 1].t + editor.frame else 0f
+                                val maxTime = if (draggingIndex < currentKeys.lastIndex)
+                                    currentKeys[draggingIndex + 1].t - editor.frame else editor.duration
+                                dragPreviewTime = rawTime.coerceIn(minTime, maxOf(minTime, maxTime))
+                            }
+                        }
+                    }
+                    .pointerInput(layer.id, effect.id, parameter, pps, leadingPad) {
+                        detectTapGestures { tap ->
+                            val currentKeys = latestKeys
+                            val time = ((tap.x / dens - leadingPad.value) / pps).coerceAtLeast(0f)
+                            val nearestIndex = currentKeys.indices.minByOrNull {
+                                abs(currentKeys[it].t - time)
+                            } ?: -1
+                            val nearest = currentKeys.getOrNull(nearestIndex)
+                            if (nearest != null && abs(nearest.t - time) <= 18f / pps) {
+                                editor.selectEffectParameter(layer.id, effect.id, parameter)
+                                editor.selectEffectKey(nearestIndex)
+                            }
+                        }
+                    }
+            ) {
+                val centerY = size.height / 2f
+                val selectedIndex = if (editor.selectedEffectId == effect.id &&
+                    editor.selectedEffectParameter == parameter
+                ) editor.selectedEffectKey else -1
+                keys.forEachIndexed { index, key ->
+                    val keyTime = if (index == dragPreviewIndex) dragPreviewTime else key.t
+                    val x = leadingPad.value * dens + keyTime * pps * dens
+                    val radius = 5.dp.toPx()
+                    val diamond = Path().apply {
+                        moveTo(x, centerY - radius)
+                        lineTo(x + radius, centerY)
+                        lineTo(x, centerY + radius)
+                        lineTo(x - radius, centerY)
+                        close()
+                    }
+                    drawPath(
+                        diamond,
+                        if (index == selectedIndex) KColors.Accent else KColors.ClipText
+                    )
                 }
             }
         }
