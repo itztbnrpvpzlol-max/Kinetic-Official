@@ -523,7 +523,7 @@ Java_com_kinetic_app_engine_NativeRenderEngine_nativeGlInit(JNIEnv*, jobject) {
         "else { sx=sin(t*6.28318); sy=sin(t*6.28318+2.17); } vec2 d=waveDir(f.z); vec2 p=vec2(-d.y,d.x); uv+=d*(sx*e.y)+p*(sy*e.z); }"
         "else if(k==5){ float t=uTime*e.w*6.28318+radians(f.y); float w=waveShape(t,f.x); if(f.z>0.5) w=(w+1.0)*0.5;"
         "uv+=vec2(w*e.y,sin(t+1.5708)*e.z); } } return clamp(uv,0.0,1.0); }"
-        "void main(){ vec2 uv=warpUv(vTexCoord); vec4 c=texture(uTexture,uv);"
+        "void main(){ vec2 uv=warpUv(vTexCoord); vec4 sampled=texture(uTexture,uv); vec4 c=vec4(sampled.a>0.00001?sampled.rgb/sampled.a:vec3(0.0),sampled.a);"
         "for(int i=0;i<8;i++){ if(i>=uEffectCount) break; vec4 e=uEffects[i*2]; vec4 f=uEffects[i*2+1]; int k=int(e.x+0.5);"
         "if(k==4){ vec2 dir=waveDir(f.x); if(f.y>0.5){ vec2 radial=normalize(uv-vec2(f.z,f.w)+vec2(0.00001)); dir=radial; }"
         "vec2 dr=dir*e.y; vec2 dg=dir*e.z; vec2 db=dir*e.w; c.r=texture(uTexture,clamp(uv+dr,0.0,1.0)).r;"
