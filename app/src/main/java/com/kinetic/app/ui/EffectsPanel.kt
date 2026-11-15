@@ -143,13 +143,13 @@ fun EffectControlsPanel(editor: EditorState, layer: Layer, onBrowseEffects: () -
         }
 
         layer.effectStack.forEachIndexed { index, effect ->
+            var graphOpen by remember(effect.id) { mutableStateOf(false) }
             val expanded = expandedEffectId == effect.id
             val keyedParameters = effect.parameterKeys.values.count { it.isNotEmpty() }
             val accent = if (effect.enabled) KColors.Accent else KColors.Dim
             Column(
                 Modifier.fillMaxWidth()
                     .background(KColors.Bg)
-                    .border(1.dp, if (expanded) KColors.Accent.copy(alpha = 0.48f) else KColors.Line)
             ) {
                 Row(
                     Modifier.fillMaxWidth().height(42.dp).clickable {
@@ -187,15 +187,41 @@ fun EffectControlsPanel(editor: EditorState, layer: Layer, onBrowseEffects: () -
                     }
                 }
                 if (expanded) {
+                    val specs = controlsFor(effect)
+                    val selectedSpec = specs.firstOrNull {
+                        editor.selectedEffectId == effect.id && editor.selectedEffectParameter == it.key
+                    }
+                    val liveEffect = editor.layers.firstOrNull { it.id == layer.id }
+                        ?.effectStack?.firstOrNull { it.id == effect.id } ?: effect
+                    val selectedKeys = selectedSpec?.let { liveEffect.parameterKeys[it.key].orEmpty() }.orEmpty()
+                    val keyAtPlayhead = selectedKeys.any { abs(it.t - editor.time) <= editor.frame / 2f }
                     Column(
-                        Modifier.fillMaxWidth().padding(start = 2.dp, end = 2.dp, bottom = 2.dp, top = 0.dp),
+                        Modifier.fillMaxWidth().padding(start = 2.dp, end = 2.dp, bottom = 2.dp),
                         verticalArrangement = Arrangement.spacedBy(3.dp)
                     ) {
                         Box(Modifier.fillMaxWidth().height(1.dp).background(KColors.Line))
-                        controlsFor(effect).forEach { spec ->
-                            val liveEffect = editor.layers.firstOrNull { it.id == layer.id }
-                                ?.effectStack?.firstOrNull { it.id == effect.id } ?: effect
-                            EffectParameterLine(editor, layer, liveEffect, spec)
+                        Row(
+                            Modifier.fillMaxWidth().height(32.dp).padding(horizontal = 3.dp),
+                            horizontalArrangement = Arrangement.spacedBy(5.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            EffectToolbarButton(if (keyAtPlayhead) "REMOVE KEY" else "ADD KEY",
+                                selected = keyAtPlayhead, enabled = selectedSpec != null) {
+                                selectedSpec?.let { editor.toggleEffectParameterKey(layer.id, effect.id, it.key) }
+                            }
+                            EffectToolbarButton("GRAPH", selected = graphOpen, enabled = selectedSpec != null) {
+                                if (selectedSpec != null) graphOpen = !graphOpen
+                            }
+                        }
+                        specs.forEach { spec ->
+                            val selected = editor.selectedEffectId == effect.id &&
+                                editor.selectedEffectParameter == spec.key
+                            EffectParameterLine(editor, layer, liveEffect, spec, selected) {
+                                editor.selectEffectParameter(layer.id, effect.id, spec.key)
+                            }
+                        }
+                        if (graphOpen && selectedSpec != null) {
+                            EffectParameterGraph(editor, layer, liveEffect, selectedSpec)
                         }
                     }
                 }
@@ -204,13 +230,13 @@ fun EffectControlsPanel(editor: EditorState, layer: Layer, onBrowseEffects: () -
 
         Row(
             Modifier.fillMaxWidth().height(42.dp)
-                .background(KColors.Bg).border(1.dp, KColors.Line)
+                .clip(RoundedCornerShape(10.dp))
+                .background(KColors.Accent)
                 .clickable(onClick = onBrowseEffects),
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("+", color = KColors.Accent, fontSize = 17.sp,
-                fontWeight = FontWeight.Bold)
+            Text("+", color = KColors.Text, fontSize = 17.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.width(7.dp))
             Text("ADD EFFECT", color = KColors.Text,
                 fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp)
@@ -244,68 +270,66 @@ private fun EffectIconAction(kind: IconKind, active: Boolean, onClick: () -> Uni
 }
 
 @Composable
-private fun EffectParameterLine(editor: EditorState, layer: Layer, effect: EffectInstance, spec: EffectControlSpec) {
+private fun EffectToolbarButton(
+    label: String, selected: Boolean, enabled: Boolean, onClick: () -> Unit
+) {
+    Box(
+        Modifier.clip(RoundedCornerShape(6.dp))
+            .background(if (enabled && selected) KColors.Accent.copy(alpha = 0.2f) else KColors.Bg)
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 9.dp, vertical = 6.dp)
+    ) {
+        Text(label, color = if (enabled && selected) KColors.Accent else if (enabled) KColors.Text else KColors.Dim,
+            fontSize = 8.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.45.sp)
+    }
+}
+
+@Composable
+private fun EffectParameterLine(
+    editor: EditorState, layer: Layer, effect: EffectInstance, spec: EffectControlSpec,
+    selected: Boolean, onSelect: () -> Unit
+) {
     val current = effect.parameterAt(spec.key, editor.time)
-    val keys = effect.parameterKeys[spec.key].orEmpty()
-    val keyAtTime = keys.any { abs(it.t - editor.time) <= editor.frame / 2f }
-    var graphOpen by remember(effect.id, spec.key) { mutableStateOf(false) }
     Column(
         Modifier.fillMaxWidth()
-            .background(KColors.Surface.copy(alpha = 0.32f))
+            .background(if (selected) KColors.Accent.copy(alpha = 0.055f) else KColors.Surface.copy(alpha = 0.22f))
             .padding(horizontal = 2.dp, vertical = 2.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(spec.label, color = KColors.Text, fontSize = 9.sp,
-                fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-            Box(
-                Modifier.clip(RoundedCornerShape(6.dp))
-                    .background(if (keyAtTime) KColors.Accent.copy(alpha = 0.18f) else KColors.Bg)
-                    .border(1.dp, if (keyAtTime) KColors.Accent.copy(alpha = 0.55f) else KColors.Line,
-                        RoundedCornerShape(6.dp))
-                    .clickable {
-                        editor.toggleEffectParameterKey(layer.id, effect.id, spec.key)
-                    }.padding(horizontal = 8.dp, vertical = 5.dp)
-            ) {
-                Text(if (keyAtTime) "◆ KEY" else "◇ KEY",
-                    color = if (keyAtTime) KColors.Accent else KColors.Muted,
-                    fontSize = 8.sp, fontWeight = FontWeight.Bold)
-            }
-            Spacer(Modifier.width(5.dp))
-            Box(
-                Modifier.clip(RoundedCornerShape(6.dp))
-                    .background(if (graphOpen) KColors.Accent.copy(alpha = 0.18f) else KColors.Bg)
-                    .border(1.dp, if (graphOpen) KColors.Accent.copy(alpha = 0.55f) else KColors.Line,
-                        RoundedCornerShape(6.dp))
-                    .clickable { graphOpen = !graphOpen }
-                    .padding(horizontal = 8.dp, vertical = 5.dp)
-            ) {
-                Text("GRAPH", color = if (graphOpen) KColors.Accent else KColors.Muted,
-                    fontSize = 8.sp, fontWeight = FontWeight.Bold)
+        Row(Modifier.fillMaxWidth().height(24.dp).clickable(onClick = onSelect),
+            verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.width(2.dp).height(16.dp).background(if (selected) KColors.Accent else KColors.Dim))
+            Spacer(Modifier.width(6.dp))
+            Text(spec.label, color = if (selected) KColors.Accent else KColors.Text,
+                fontSize = 9.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+            if (effect.parameterKeys[spec.key].orEmpty().isNotEmpty()) {
+                Text("ANIMATED", color = KColors.Accent, fontSize = 7.sp,
+                    fontWeight = FontWeight.Bold, letterSpacing = 0.4.sp)
             }
         }
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             when {
                 spec.toggle -> Switch(checked = current >= 0.5f, onCheckedChange = {
+                    onSelect()
                     editor.beginEdit()
                     editor.updateEffectParameter(layer.id, effect.id, spec.key, if (it) 1f else 0f)
                 }, modifier = Modifier.size(width = 42.dp, height = 28.dp))
                 spec.choices.isNotEmpty() -> {
                     var menuOpen by remember(effect.id, spec.key) { mutableStateOf(false) }
                     Box {
-                        Box(
-                            Modifier.clip(RoundedCornerShape(7.dp)).background(KColors.Bg)
-                                .border(1.dp, KColors.Line, RoundedCornerShape(7.dp))
-                                .clickable { menuOpen = true }
-                                .padding(horizontal = 11.dp, vertical = 8.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
+                        Box(Modifier.clip(RoundedCornerShape(7.dp))
+                            .background(if (selected) KColors.Accent.copy(alpha = 0.10f) else KColors.Bg)
+                            .clickable { onSelect(); menuOpen = true }
+                            .padding(horizontal = 11.dp, vertical = 8.dp),
+                            contentAlignment = Alignment.Center) {
                             Text(spec.choices.minByOrNull { abs(it.second - current) }?.first ?: "Select",
-                                color = KColors.Accent, fontSize = 9.sp, fontWeight = FontWeight.SemiBold)
+                                color = if (selected) KColors.Accent else KColors.Text,
+                                fontSize = 9.sp, fontWeight = FontWeight.SemiBold)
                         }
                         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                             spec.choices.forEach { (label, value) ->
                                 DropdownMenuItem(text = { Text(label, fontSize = 10.sp) }, onClick = {
+                                    onSelect()
                                     editor.beginEdit()
                                     editor.updateEffectParameter(layer.id, effect.id, spec.key, value)
                                     menuOpen = false
@@ -316,18 +340,14 @@ private fun EffectParameterLine(editor: EditorState, layer: Layer, effect: Effec
                 }
                 else -> {
                     val valueFormat = "%." + spec.decimals + "f" + spec.suffix
-                    ScrubValueBar(
-                        spec.label, current, Modifier.weight(1f), step = spec.step,
+                    ScrubValueBar(spec.label, current, Modifier.weight(1f), step = spec.step,
+                        selected = selected, onSelect = onSelect,
                         minValue = spec.min, maxValue = spec.max, valueFormat = valueFormat,
-                        onScrubStart = { editor.beginEdit() }
-                    ) { value ->
+                        onScrubStart = { onSelect(); editor.beginEdit() }) { value ->
                         editor.updateEffectParameter(layer.id, effect.id, spec.key, value.coerceIn(spec.min, spec.max))
                     }
                 }
             }
-        }
-        if (graphOpen) {
-            EffectParameterGraph(editor, layer, effect, spec)
         }
     }
 }
