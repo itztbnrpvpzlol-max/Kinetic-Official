@@ -86,8 +86,8 @@ fi
   --enable-jni \
   --enable-mediacodec \
   --enable-network \
-  --enable-static \
-  --disable-shared \
+  --enable-shared \
+  --disable-static \
   --enable-pic \
   --disable-programs \
   --disable-doc \
@@ -107,10 +107,13 @@ make -j"$(nproc)"
 make install
 
 for library in avformat avcodec swscale avutil; do
-  test -s "$PREFIX/lib/lib${library}.a" || {
-    echo "FFmpeg did not produce lib${library}.a for $ABI" >&2
+  source_library="$PREFIX/lib/lib${library}.so"
+  test -s "$source_library" || {
+    echo "FFmpeg did not produce lib${library}.so for $ABI" >&2
     exit 4
   }
+  cp -L "$source_library" "$PREFIX/lib${library}.so"
+  test -s "$PREFIX/lib${library}.so"
 done
 test -s "$PREFIX/include/libavcodec/mediacodec.h"
 test -s "$PREFIX/include/libavcodec/jni.h"
