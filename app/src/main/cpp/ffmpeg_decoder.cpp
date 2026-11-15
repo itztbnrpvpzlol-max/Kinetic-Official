@@ -301,6 +301,22 @@ static bool renderHardwareFrame(DecoderSession* session, AVFrame* frame) {
             av_mediacodec_release_buffer(buffer, 0);
             return true;
         }
+        if (!session->playing) {
+            const bool stepNow = session->stepPending;
+            const int64_t pausedTargetUs = session->seekTargetUs;
+            lock.unlock();
+            if (!stepNow || ptsUs + 40000 < pausedTargetUs) {
+                av_mediacodec_release_buffer(buffer, 0);
+                return true;
+            }
+            const int pausedResult = av_mediacodec_release_buffer(buffer, 1);
+            if (pausedResult < 0) return false;
+            std::lock_guard<std::mutex> pausedLock(session->mutex);
+            session->lastRenderedPtsUs = ptsUs;
+            session->stepPending = false;
+            session->condition.notify_all();
+            return true;
+        }
         expectedUs = expectedSourceUsLocked(session, monotonicNs());
         deltaUs = ptsUs - expectedUs;
     }
