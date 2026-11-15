@@ -92,7 +92,7 @@ fun EffectsBrowserScreen(onClose: () -> Unit, onAddEffect: (String) -> Unit) {
             }
         }
 
-        val visibleCategories = if (selectedCategory == null) effectCategories else listOf(selectedCategory!!)
+        val visibleCategories = (if (selectedCategory == null) effectCategories else listOf(selectedCategory!!))\n            .filter { it.effects.isNotEmpty() }
         visibleCategories.forEach { category ->
             Row(
                 Modifier.fillMaxWidth().padding(top = 7.dp, bottom = 7.dp),
