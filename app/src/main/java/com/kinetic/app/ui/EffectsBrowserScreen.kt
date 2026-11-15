@@ -92,26 +92,23 @@ fun EffectsBrowserScreen(onClose: () -> Unit, onAddEffect: (String) -> Unit) {
             }
         }
 
-        val visibleCategories = (if (selectedCategory == null) effectCategories else listOf(selectedCategory!!))
-            .filter { it.effects.isNotEmpty() }
-        visibleCategories.forEach { category ->
-            Row(
-                Modifier.fillMaxWidth().padding(top = 7.dp, bottom = 7.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(category.title, color = KColors.Text, fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp)
-                Spacer(Modifier.weight(1f))
-                Text("${category.effects.size}", color = KColors.Muted, fontSize = 9.sp)
-            }
-            category.effects.chunked(4).forEach { row ->
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    row.forEach { effect ->
-                        EffectChoice(effect, category.accent, Modifier.weight(1f)) { onAddEffect(effect) }
+        } else {
+            val category = selectedCategory!!
+            Text("Choose an effect to add it to the selected layer.", color = KColors.Muted, fontSize = 11.sp)
+            Spacer(Modifier.height(14.dp))
+            if (category.effects.isEmpty()) {
+                Text("No effects in this category yet.", color = KColors.Dim, fontSize = 12.sp,
+                    modifier = Modifier.padding(vertical = 20.dp))
+            } else {
+                category.effects.chunked(4).forEach { row ->
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        row.forEach { effect ->
+                            EffectChoice(effect, category.accent, Modifier.weight(1f)) { onAddEffect(effect) }
+                        }
+                        repeat(4 - row.size) { Spacer(Modifier.weight(1f)) }
                     }
-                    repeat(4 - row.size) { Spacer(Modifier.weight(1f)) }
+                    Spacer(Modifier.height(6.dp))
                 }
-                Spacer(Modifier.height(6.dp))
             }
         }
         Spacer(Modifier.height(18.dp))
