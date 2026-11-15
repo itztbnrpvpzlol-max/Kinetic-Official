@@ -201,7 +201,15 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
                     // made empty-space drags feel like taps and caused uneven ranges.
                     Row(Modifier.fillMaxWidth().height(72.dp)) {
                         Spacer(Modifier.width(leftW))
-                        Box(Modifier.weight(1f).fillMaxHeight().horizontalScroll(hScroll)) {
+                        Box(
+                            Modifier.weight(1f).fillMaxHeight()
+                                .pointerInput(hScroll) {
+                                    detectHorizontalDragGestures { change, dragAmount ->
+                                        change.consume()
+                                        hScroll.dispatchRawDelta(-dragAmount)
+                                    }
+                                }
+                        ) {
                             Spacer(Modifier.width(contentW).fillMaxHeight())
                         }
                     }
