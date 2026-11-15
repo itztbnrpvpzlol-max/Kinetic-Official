@@ -249,12 +249,16 @@ static bool renderHardwareFrame(DecoderSession* session, AVFrame* frame) {
     if (!buffer) return false;
 
     bool playing = false;
+    bool stepPending = false;
+    int64_t seekTargetUs = 0;
     int64_t ptsUs = frameSourceTimeUs(session, frame);
     int64_t expectedUs = 0;
     double rate = 1.0;
     {
         std::lock_guard<std::mutex> lock(session->mutex);
         playing = session->playing;
+        stepPending = session->stepPending;
+        seekTargetUs = session->seekTargetUs;
         expectedUs = expectedSourceUsLocked(session, monotonicNs());
         rate = session->clock.valid
             ? std::max(0.1, session->clock.masterSpeed * session->clock.clipSpeed)
@@ -263,11 +267,11 @@ static bool renderHardwareFrame(DecoderSession* session, AVFrame* frame) {
     if (ptsUs < 0) ptsUs = expectedUs;
 
     if (!playing) {
-        if (!session->stepPending) {
+        if (!stepPending) {
             av_mediacodec_release_buffer(buffer, 0);
             return true;
         }
-        const int64_t target = session->seekTargetUs;
+        const int64_t target = seekTargetUs;
         if (ptsUs + 40000 < target) {
             av_mediacodec_release_buffer(buffer, 0);
             return true;
@@ -383,7 +387,13 @@ static void* decoderThread(void* opaque) {
 
     bool eof = false;
     while (!session->stop.load()) {
+        bool hadPendingSeek = false;
+        {
+            std::lock_guard<std::mutex> lock(session->mutex);
+            hadPendingSeek = session->seekPending;
+        }
         if (!applyPendingSeek(session)) break;
+        if (hadPendingSeek) eof = false;
 
         bool shouldRead = false;
         {
@@ -460,7 +470,7 @@ static DecoderSession* fromHandle(jlong handle) {
 }
 } // namespace
 
-JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void*) {
+extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void*) {
     gJavaVm = vm;
     av_jni_set_java_vm(vm, nullptr);
     return JNI_VERSION_1_6;
