@@ -23,7 +23,9 @@ import kotlin.math.max
  */
 class FfmpegVideoPlayer(
     context: Context,
-    private val sourceUri: Uri
+    private val sourceUri: Uri,
+    private val surfaceWidth: Int = 1280,
+    private val surfaceHeight: Int = 720
 ) {
     private val appContext = context.applicationContext
     // All libmpv calls are serialized off the UI and GL threads.
@@ -42,6 +44,7 @@ class FfmpegVideoPlayer(
     @Volatile private var pendingSeekMs = 0L
     @Volatile private var speed = 1f
     @Volatile private var lastPlaying = false
+    @Volatile private var receivedSurfaceFrame = false
     private var attachedSurface: Surface? = null
     private var initialized = false
     private var loaded = false
@@ -72,8 +75,17 @@ class FfmpegVideoPlayer(
             try {
                 ensureInitialized()
                 val instance = checkNotNull(mpv)
+                receivedSurfaceFrame = false
                 instance.attachSurface(next)
                 attachedSurface = next
+                // libmpv's Android GPU context needs an explicit output size.
+                // Match the SurfaceTexture default buffer size set by Kinetic's
+                // GLES renderer before loading the clip into this surface.
+                instance.setPropertyString(
+                    "android-surface-size",
+                    "${surfaceWidth.coerceAtLeast(16)}x${surfaceHeight.coerceAtLeast(16)}"
+                )
+                instance.setOptionString("force-window", "yes")
                 loadIfNeeded()
                 state = 1
             } catch (error: Throwable) {
@@ -90,6 +102,12 @@ class FfmpegVideoPlayer(
             attachedSurface = null
         }
     }
+
+    fun markFrameAvailable() {
+        receivedSurfaceFrame = true
+    }
+
+    fun hasReceivedFrame(): Boolean = receivedSurfaceFrame
 
     fun decoderState(): Int {
         if (released) return 2
