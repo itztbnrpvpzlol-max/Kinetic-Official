@@ -1,17 +1,14 @@
 package com.kinetic.app.ui
 
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -32,12 +29,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -45,7 +36,6 @@ import com.kinetic.app.model.EditorState
 import com.kinetic.app.model.EffectInstance
 import com.kinetic.app.model.Layer
 import kotlin.math.abs
-import kotlin.math.sqrt
 
 internal data class EffectControlSpec(
     val label: String, val key: String, val min: Float = 0f, val max: Float = 1f,
@@ -310,114 +300,6 @@ private fun EffectParameterLine(
                     }
                 }
             }
-        }
-    }
-}
-
-@Composable
-private fun EffectParameterGraph(
-    editor: EditorState, layer: Layer, effect: EffectInstance, spec: EffectControlSpec,
-    graphHeight: androidx.compose.ui.unit.Dp = 112.dp
-) {
-    val keys = effect.parameterKeys[spec.key].orEmpty()
-    val density = LocalDensity.current.density
-    Column(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
-            .background(KColors.Bg).border(1.dp, KColors.Line, RoundedCornerShape(8.dp))
-            .padding(8.dp),
-        verticalArrangement = Arrangement.spacedBy(5.dp)
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("VALUE GRAPH", color = KColors.Muted, fontSize = 8.sp,
-                fontWeight = FontWeight.Bold, letterSpacing = 0.7.sp,
-                modifier = Modifier.weight(1f))
-            Text("${keys.size} keys", color = KColors.Accent, fontSize = 8.sp)
-        }
-        if (keys.isEmpty()) {
-            Text("Select this property, then add a keyframe from the side rail.",
-                color = KColors.Muted, fontSize = 8.sp)
-        } else {
-            Canvas(
-                Modifier.fillMaxWidth().height(graphHeight)
-                    .pointerInput(effect.id, spec.key, spec.min, spec.max, layer.start, layer.duration) {
-                        var activeIndex = -1
-                        detectDragGestures(
-                            onDragStart = { offset ->
-                                val graphKeys = editor.layers.firstOrNull { it.id == layer.id }
-                                    ?.effectStack?.firstOrNull { it.id == effect.id }
-                                    ?.parameterKeys?.get(spec.key).orEmpty()
-                                val minX = 10f
-                                val maxX = (size.width - 10f).coerceAtLeast(11f)
-                                val minY = 10f
-                                val maxY = (size.height - 10f).coerceAtLeast(11f)
-                                activeIndex = graphKeys.indices.minByOrNull { index ->
-                                    val key = graphKeys[index]
-                                    val x = minX + ((key.t - layer.start) / layer.duration.coerceAtLeast(0.001f)).coerceIn(0f, 1f) * (maxX - minX)
-                                    val y = maxY - ((key.v - spec.min) / (spec.max - spec.min).coerceAtLeast(0.0001f)).coerceIn(0f, 1f) * (maxY - minY)
-                                    val dx = offset.x - x
-                                    val dy = offset.y - y
-                                    dx * dx + dy * dy
-                                } ?: -1
-                                val nearest = activeIndex.takeIf { it >= 0 }?.let { index ->
-                                    val key = graphKeys[index]
-                                    val x = minX + ((key.t - layer.start) / layer.duration.coerceAtLeast(0.001f)).coerceIn(0f, 1f) * (maxX - minX)
-                                    val y = maxY - ((key.v - spec.min) / (spec.max - spec.min).coerceAtLeast(0.0001f)).coerceIn(0f, 1f) * (maxY - minY)
-                                    sqrt((offset.x - x) * (offset.x - x) + (offset.y - y) * (offset.y - y))
-                                } ?: Float.MAX_VALUE
-                                if (nearest <= 28f * density) editor.beginEdit() else activeIndex = -1
-                            },
-                            onDragEnd = { activeIndex = -1 },
-                            onDragCancel = { activeIndex = -1 }
-                        ) { change, _ ->
-                            if (activeIndex in keys.indices) {
-                                val minY = 10f
-                                val maxY = (size.height - 10f).coerceAtLeast(11f)
-                                val normalized = (1f - ((change.position.y - minY) / (maxY - minY))).coerceIn(0f, 1f)
-                                val key = editor.layers.firstOrNull { it.id == layer.id }
-                                    ?.effectStack?.firstOrNull { it.id == effect.id }
-                                    ?.parameterKeys?.get(spec.key)?.getOrNull(activeIndex) ?: keys[activeIndex]
-                                val value = spec.min + normalized * (spec.max - spec.min)
-                                editor.replaceEffectParameterKey(layer.id, effect.id, spec.key,
-                                    activeIndex, key.copy(v = value))
-                                change.consume()
-                            }
-                        }
-                    }
-            ) {
-                val left = 10.dp.toPx()
-                val right = (size.width - 10.dp.toPx()).coerceAtLeast(left + 1f)
-                val top = 10.dp.toPx()
-                val bottom = (size.height - 10.dp.toPx()).coerceAtLeast(top + 1f)
-                for (row in 0..4) {
-                    val y = top + (bottom - top) * row / 4f
-                    drawLine(KColors.Line, Offset(left, y), Offset(right, y), 1.dp.toPx())
-                }
-                val playheadX = left + ((editor.time - layer.start) / layer.duration.coerceAtLeast(0.001f))
-                    .coerceIn(0f, 1f) * (right - left)
-                drawLine(KColors.Accent.copy(alpha = 0.45f), Offset(playheadX, top),
-                    Offset(playheadX, bottom), 1.dp.toPx())
-                if (keys.isNotEmpty()) {
-                    val path = Path()
-                    keys.forEachIndexed { index, key ->
-                        val x = left + ((key.t - layer.start) / layer.duration.coerceAtLeast(0.001f))
-                            .coerceIn(0f, 1f) * (right - left)
-                        val y = bottom - ((key.v - spec.min) / (spec.max - spec.min).coerceAtLeast(0.0001f))
-                            .coerceIn(0f, 1f) * (bottom - top)
-                        if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
-                    }
-                    drawPath(path, KColors.Accent, style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round))
-                    keys.forEach { key ->
-                        val x = left + ((key.t - layer.start) / layer.duration.coerceAtLeast(0.001f))
-                            .coerceIn(0f, 1f) * (right - left)
-                        val y = bottom - ((key.v - spec.min) / (spec.max - spec.min).coerceAtLeast(0.0001f))
-                            .coerceIn(0f, 1f) * (bottom - top)
-                        drawCircle(KColors.Accent, radius = 5.dp.toPx(), center = Offset(x, y))
-                        drawCircle(KColors.Bg, radius = 2.dp.toPx(), center = Offset(x, y))
-                    }
-                }
-            }
-            Text("Drag a point vertically to edit its value. Use KEY at the playhead to add or remove points.",
-                color = KColors.Muted, fontSize = 8.sp)
         }
     }
 }
