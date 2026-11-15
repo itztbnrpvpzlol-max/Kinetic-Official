@@ -283,6 +283,8 @@ class FfmpegVideoPlayer(
     private fun activateFallback(outputSurface: Surface) {
         if (released || fallback != null) return
         stopNativeDecoder()
+        receivedSurfaceFrame = false
+        state = 0
         val player = AndroidVideoPlayer(appContext, sourceUri)
         fallback = player
         state = 0
