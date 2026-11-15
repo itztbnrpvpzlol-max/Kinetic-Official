@@ -176,9 +176,7 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
                 }
             }
             LazyColumn(
-                Modifier.weight(1f).fillMaxWidth()
-                    // A tap on unused timeline space clears the active layer selection.
-                    .clickable { editor.select(null) },
+                Modifier.weight(1f).fillMaxWidth(),
                 state = rememberLazyListState(),
                 // Stable item keys let Compose retain only the visible layer rows.
                 // Large projects no longer compose every layer and every property row.
