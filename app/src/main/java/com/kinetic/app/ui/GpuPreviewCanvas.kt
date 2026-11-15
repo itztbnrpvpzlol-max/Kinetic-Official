@@ -707,6 +707,7 @@ private class CompositionGlRenderer(
     private var viewportWidth = 1
     private var viewportHeight = 1
     @Volatile private var gpuFailureReported = false
+    private var consecutiveFrameFailures = 0
 
     private fun reportGpuFailure(error: Throwable) {
         if (gpuFailureReported) return
@@ -898,6 +899,17 @@ private class CompositionGlRenderer(
         try {
             if (program == 0) return
 
+            // SurfaceTexture/driver callbacks can leave a stale GL error from
+            // outside this frame. Drain it before measuring our own commands so
+            // one unrelated error cannot permanently disable effect rendering.
+            var staleError = GLES20.glGetError()
+            var staleCount = 0
+            while (staleError != GLES20.GL_NO_ERROR && staleCount < 8) {
+                Log.w("KineticGpu", "Ignoring pre-existing GL error 0x${staleError.toString(16)}")
+                staleError = GLES20.glGetError()
+                staleCount++
+            }
+
             // Render directly to the GLSurfaceView window framebuffer.
             // The previous paused-preview FBO/blit cache could report a
             // successful present while leaving the device preview black on
@@ -929,8 +941,22 @@ private class CompositionGlRenderer(
             trimGpuTextureCache(activeTextureIds)
             current.selected?.let { drawSelection(it, scale, offsetX, offsetY) }
             checkGlErrors("selection draw")
+            // A single transient driver/texture error should skip one frame,
+            // not permanently switch to the CPU renderer (which cannot apply
+            // the full effect stack). Fall back only after repeated failures.
+            consecutiveFrameFailures = 0
         } catch (error: Throwable) {
-            reportGpuFailure(error)
+            consecutiveFrameFailures++
+            if (consecutiveFrameFailures >= 3) {
+                reportGpuFailure(error)
+            } else {
+                Log.w(
+                    "KineticGpu",
+                    "Transient composition frame failure " +
+                        "$consecutiveFrameFailures/3; keeping GPU effects renderer alive",
+                    error
+                )
+            }
         } finally {
             PreviewDiagnostics.recordGlFrame(System.nanoTime() - startedNs)
         }
