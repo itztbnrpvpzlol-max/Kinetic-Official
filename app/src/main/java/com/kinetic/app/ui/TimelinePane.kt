@@ -206,7 +206,18 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
                                 .pointerInput(hScroll) {
                                     detectHorizontalDragGestures { change, dragAmount ->
                                         change.consume()
+                                        if (editor.playing) editor.playing = false
                                         hScroll.dispatchRawDelta(-dragAmount)
+                                        // Raw dragging bypasses ScrollState's fling
+                                        // bookkeeping, so seek from the same centre
+                                        // coordinate used by layer-row scrolling.
+                                        val centreTime = (
+                                            (hScroll.value.toFloat() + paneW / 2f - leftPx - leadingPadPx) /
+                                                (pps * dens).coerceAtLeast(0.001f)
+                                            ).coerceAtLeast(0f)
+                                        if (kotlin.math.abs(editor.time - centreTime) > editor.frame / 2f) {
+                                            editor.seek(centreTime)
+                                        }
                                     }
                                 }
                         ) {
