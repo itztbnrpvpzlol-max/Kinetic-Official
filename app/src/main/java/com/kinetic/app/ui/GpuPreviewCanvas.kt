@@ -270,8 +270,15 @@ private fun GpuCompositionPreviewCanvas(
                                 )
                                 if (bitmap != null && layer.visible &&
                                     layer.activeAt(latestTimelineTime.value)
-                                ) frames[layer.id] = bitmap
-                                break
+                                ) {
+                                    frames[layer.id] = bitmap
+                                    break
+                                }
+                                // The playhead may leave this still while its
+                                // decode is running. Keep waiting so it can be
+                                // decoded when the layer becomes active again.
+                                kotlinx.coroutines.delay(if (bitmap == null) 300L else 80L)
+                                continue
                             }
                             kotlinx.coroutines.delay(80L)
                         }
