@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ABI="\${1:?Usage: build-ffmpeg-android.sh <arm64-v8a|armeabi-v7a|x86_64>}"
+ABI="${1:?Usage: build-ffmpeg-android.sh <arm64-v8a|armeabi-v7a|x86_64>}"
 FFMPEG_VERSION="9.0.2"
 API_LEVEL="26"
-NDK="\${ANDROID_NDK_HOME:-\${ANDROID_NDK_ROOT:-}}"
+NDK="${ANDROID_NDK_HOME:-${ANDROID_NDK_ROOT:-}}"
 if [[ -z "$NDK" ]]; then
   echo "ANDROID_NDK_HOME or ANDROID_NDK_ROOT must point to the Android NDK." >&2
   exit 1
@@ -20,8 +20,8 @@ esac
 HOST_TAG="linux-x86_64"
 TOOLCHAIN="$NDK/toolchains/llvm/prebuilt/$HOST_TAG"
 SYSROOT="$TOOLCHAIN/sysroot"
-CC="$TOOLCHAIN/bin/\${TARGET}\${API_LEVEL}-clang"
-CXX="$TOOLCHAIN/bin/\${TARGET}\${API_LEVEL}-clang++"
+CC="$TOOLCHAIN/bin/${TARGET}${API_LEVEL}-clang"
+CXX="$TOOLCHAIN/bin/${TARGET}${API_LEVEL}-clang++"
 AR="$TOOLCHAIN/bin/llvm-ar"
 RANLIB="$TOOLCHAIN/bin/llvm-ranlib"
 NM="$TOOLCHAIN/bin/llvm-nm"
@@ -31,7 +31,7 @@ for tool in "$CC" "$CXX" "$AR" "$RANLIB" "$NM"; do
   test -x "$tool" || { echo "Missing NDK tool: $tool" >&2; exit 3; }
 done
 
-ROOT="$(cd "$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORK="$ROOT/ffmpeg/work"
 SOURCE="$WORK/ffmpeg-$FFMPEG_VERSION"
 BUILD="$WORK/build-$ABI"
@@ -101,14 +101,14 @@ fi
   --disable-outdevs \
   --disable-autodetect \
   --disable-symver \
-  "\${ARCH_FLAGS[@]}"
+  "${ARCH_FLAGS[@]}"
 
 make -j"$(nproc)"
 make install
 
 for library in avformat avcodec swscale avutil; do
-  test -s "$PREFIX/lib/lib\${library}.a" || {
-    echo "FFmpeg did not produce lib\${library}.a for $ABI" >&2
+  test -s "$PREFIX/lib/lib${library}.a" || {
+    echo "FFmpeg did not produce lib${library}.a for $ABI" >&2
     exit 4
   }
 done
