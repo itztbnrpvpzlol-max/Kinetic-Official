@@ -22,6 +22,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -116,6 +117,7 @@ fun EffectControlsPanel(editor: EditorState, layer: Layer, onBrowseEffects: () -
     // Reopening the panel never auto-expands the most recently added effect.
     // Expansion is a deliberate user action for this panel session.
     var expandedEffectId by remember(layer.id) { mutableStateOf<String?>(null) }
+    LaunchedEffect(layer.id) { editor.clearEffectParameterSelection() }
     Column(
         Modifier.fillMaxSize().background(KColors.Surface)
             .verticalScroll(rememberScrollState()),
@@ -142,6 +144,9 @@ fun EffectControlsPanel(editor: EditorState, layer: Layer, onBrowseEffects: () -
             ) {
                 Row(
                     Modifier.fillMaxWidth().height(42.dp).clickable {
+                        if (!expanded && editor.selectedEffectId != effect.id) {
+                            editor.clearEffectParameterSelection()
+                        }
                         expandedEffectId = if (expanded) null else effect.id
                     }.padding(horizontal = 7.dp),
                     verticalAlignment = Alignment.CenterVertically
