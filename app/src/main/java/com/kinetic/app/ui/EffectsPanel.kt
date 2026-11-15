@@ -175,7 +175,7 @@ fun EffectControlsPanel(editor: EditorState, layer: Layer, onBrowseEffects: () -
                         RoundedCornerShape(13.dp))
             ) {
                 Row(
-                    Modifier.fillMaxWidth().height(58.dp).clickable {
+                    Modifier.fillMaxWidth().height(49.dp).clickable {
                         expandedEffectId = if (expanded) null else effect.id
                     }.padding(horizontal = 11.dp),
                     verticalAlignment = Alignment.CenterVertically
@@ -340,7 +340,7 @@ private fun EffectParameterLine(editor: EditorState, layer: Layer, effect: Effec
                 else -> {
                     val valueFormat = "%." + spec.decimals + "f" + spec.suffix
                     ScrubValueBar(
-                        spec.label, current, Modifier.width(142.dp), step = spec.step,
+                        spec.label, current, Modifier.weight(1f), step = spec.step,
                         minValue = spec.min, maxValue = spec.max, valueFormat = valueFormat,
                         onScrubStart = { editor.beginEdit() }
                     ) { value ->
