@@ -460,7 +460,18 @@ data class Layer(
     val maskPath: LayerMask? = null
 ) {
     val end: Float get() = start + duration
-    fun p(id: PropId): Prop = props[id] ?: Prop(if (id.isVectorPoint) 0.5f else 0f)
+    fun p(id: PropId): Prop = props[id] ?: Prop(
+        when (id) {
+            PropId.ANCHOR_X -> width / 2f
+            PropId.ANCHOR_Y -> height / 2f
+            PropId.POS_X -> COMP_W / 2f
+            PropId.POS_Y -> COMP_H / 2f
+            PropId.SCALE_X, PropId.SCALE_Y -> 100f
+            PropId.OPACITY, PropId.MASK_OPACITY -> 100f
+            PropId.SPEED, PropId.VOLUME -> 1f
+            else -> if (id.isVectorPoint) 0.5f else 0f
+        }
+    )
     fun maskAt(t: Float): LayerMask? = maskPath?.let { mask -> mask.copy(opacity = (props[PropId.MASK_OPACITY]?.valueAt(t) ?: mask.opacity).coerceIn(0f, 100f), feather = (props[PropId.MASK_FEATHER]?.valueAt(t) ?: mask.feather).coerceIn(0f, 100f), expansion = (props[PropId.MASK_EXPANSION]?.valueAt(t) ?: mask.expansion).coerceIn(-50f, 50f), brushSize = (props[PropId.MASK_BRUSH_SIZE]?.valueAt(t) ?: mask.brushSize * 100f).coerceIn(1f, 18f) / 100f) }
     fun vectorPointsAt(t: Float): List<VectorPoint> = vectorPoints.mapIndexed { index, point ->
         val x = PropId.vectorPoint(index, 'X')?.let { props[it]?.valueAt(t) } ?: point.x
@@ -498,6 +509,9 @@ fun newLayer(
  * Reuses caller-owned Matrix instances for the CPU preview draw loop.
  * This avoids allocating a Matrix for every layer and parent on every frame.
  */
+private fun Layer.transformValue(id: PropId, time: Float, fallback: Float): Float =
+    p(id).valueAt(time).takeIf { it.isFinite() } ?: fallback
+
 fun layerMatrixInto(
     layer: Layer,
     t: Float,
@@ -507,10 +521,13 @@ fun layerMatrixInto(
     depth: Int = 0
 ) {
     out.reset()
-    out.postTranslate(-layer.p(PropId.ANCHOR_X).valueAt(t), -layer.p(PropId.ANCHOR_Y).valueAt(t))
-    out.postScale(layer.p(PropId.SCALE_X).valueAt(t) / 100f, layer.p(PropId.SCALE_Y).valueAt(t) / 100f)
-    out.postRotate(layer.p(PropId.ROTATION).valueAt(t))
-    out.postTranslate(layer.p(PropId.POS_X).valueAt(t), layer.p(PropId.POS_Y).valueAt(t))
+    out.postTranslate(-layer.transformValue(PropId.ANCHOR_X, t, layer.width / 2f),
+        -layer.transformValue(PropId.ANCHOR_Y, t, layer.height / 2f))
+    out.postScale(layer.transformValue(PropId.SCALE_X, t, 100f) / 100f,
+        layer.transformValue(PropId.SCALE_Y, t, 100f) / 100f)
+    out.postRotate(layer.transformValue(PropId.ROTATION, t, 0f))
+    out.postTranslate(layer.transformValue(PropId.POS_X, t, COMP_W / 2f),
+        layer.transformValue(PropId.POS_Y, t, COMP_H / 2f))
     val parent = layer.parentId?.let { byId[it] }
     if (parent != null && parent.id != layer.id && depth < 16) {
         val parentMatrix = scratch.getOrPut(depth + 1) { Matrix() }
@@ -523,10 +540,13 @@ fun layerMatrixInto(
 /** Layer-space -> composition-space matrix at time t, including the parent chain. */
 fun layerMatrix(layer: Layer, t: Float, byId: Map<String, Layer>, depth: Int = 0): Matrix {
     val m = Matrix()
-    m.postTranslate(-layer.p(PropId.ANCHOR_X).valueAt(t), -layer.p(PropId.ANCHOR_Y).valueAt(t))
-    m.postScale(layer.p(PropId.SCALE_X).valueAt(t) / 100f, layer.p(PropId.SCALE_Y).valueAt(t) / 100f)
-    m.postRotate(layer.p(PropId.ROTATION).valueAt(t))
-    m.postTranslate(layer.p(PropId.POS_X).valueAt(t), layer.p(PropId.POS_Y).valueAt(t))
+    m.postTranslate(-layer.transformValue(PropId.ANCHOR_X, t, layer.width / 2f),
+        -layer.transformValue(PropId.ANCHOR_Y, t, layer.height / 2f))
+    m.postScale(layer.transformValue(PropId.SCALE_X, t, 100f) / 100f,
+        layer.transformValue(PropId.SCALE_Y, t, 100f) / 100f)
+    m.postRotate(layer.transformValue(PropId.ROTATION, t, 0f))
+    m.postTranslate(layer.transformValue(PropId.POS_X, t, COMP_W / 2f),
+        layer.transformValue(PropId.POS_Y, t, COMP_H / 2f))
     val parent = layer.parentId?.let { byId[it] }
     if (parent != null && depth < 16) {
         val pm = layerMatrix(parent, t, byId, depth + 1)
