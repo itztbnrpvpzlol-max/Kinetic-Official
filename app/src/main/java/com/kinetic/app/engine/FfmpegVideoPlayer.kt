@@ -264,18 +264,20 @@ class FfmpegVideoPlayer(
     private fun scheduleHealthCheck(surface: Surface) {
         if (released) return
         decoderExecutor.schedule({
-            if (released || attachedSurface !== surface || fallback != null) return@schedule
-            val handle = nativeHandle
-            if (handle == 0L) return@schedule
-            val decoderState = runCatching { NativeFfmpegDecoder.nativeState(handle) }
-                .getOrDefault(-1)
-            if (decoderState < 0 || decoderState == 2) {
-                val reason = runCatching { NativeFfmpegDecoder.nativeError(handle) }
-                    .getOrDefault("FFmpeg decoder stopped unexpectedly")
-                Log.w(TAG, "$reason; switching to Android MediaCodec compatibility fallback")
-                activateFallback(surface)
-            } else {
-                scheduleHealthCheck(surface)
+            if (!released && attachedSurface === surface && fallback == null) {
+                val handle = nativeHandle
+                if (handle != 0L) {
+                    val decoderState = runCatching { NativeFfmpegDecoder.nativeState(handle) }
+                        .getOrDefault(-1)
+                    if (decoderState < 0 || decoderState == 2) {
+                        val reason = runCatching { NativeFfmpegDecoder.nativeError(handle) }
+                            .getOrDefault("FFmpeg decoder stopped unexpectedly")
+                        Log.w(TAG, "$reason; switching to Android MediaCodec compatibility fallback")
+                        activateFallback(surface)
+                    } else {
+                        scheduleHealthCheck(surface)
+                    }
+                }
             }
         }, 1L, TimeUnit.SECONDS)
     }
