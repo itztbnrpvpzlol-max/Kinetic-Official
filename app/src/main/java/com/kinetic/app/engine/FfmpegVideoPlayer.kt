@@ -289,7 +289,7 @@ class FfmpegVideoPlayer(
         state = 0
         val player = AndroidVideoPlayer(appContext, sourceUri)
         fallback = player
-        state = 0
+        pendingClockSync.getAndSet(null)?.let(::applyClockSync)
         player.attachSurface(outputSurface)
         player.setSpeed(speed)
         player.updatePositionHint(pendingSeekMs)
