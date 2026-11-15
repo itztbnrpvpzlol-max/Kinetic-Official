@@ -238,7 +238,8 @@ fun EffectGraphPanel(editor: EditorState, layer: Layer, modifier: Modifier = Mod
         ?.effectStack?.firstOrNull { it.id == effect.id } ?: effect
     val keys = liveEffect.parameterKeys[spec.key].orEmpty()
     var mode by remember(effect.id, spec.key) { mutableStateOf(GraphMode.EASE) }
-    val segment = graphSegment(keys, -1)
+    val graphSelection = editor.selectedEffectKey.takeIf { it in keys.indices } ?: 0
+    val segment = graphSegment(keys, graphSelection)
     val segmentKey = keys.getOrNull(segment)
     val hasBezier = segmentKey?.type == KeyType.BEZIER
     val valueAt: (Float) -> Float = { t ->
@@ -256,6 +257,30 @@ fun EffectGraphPanel(editor: EditorState, layer: Layer, modifier: Modifier = Mod
             GraphModeButton("Value", mode == GraphMode.VALUE) { mode = GraphMode.VALUE }
             Spacer(Modifier.width(4.dp))
             GraphModeButton("Speed", mode == GraphMode.SPEED) { mode = GraphMode.SPEED }
+        }
+        if (keys.isNotEmpty()) {
+            Row(
+                Modifier.fillMaxWidth().height(30.dp).horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                keys.forEachIndexed { index, key ->
+                    val selectedKey = index == graphSelection
+                    Box(
+                        Modifier.clip(RoundedCornerShape(6.dp))
+                            .background(if (selectedKey) KColors.Accent.copy(alpha = 0.16f) else KColors.Bg)
+                            .border(1.dp, if (selectedKey) KColors.Accent else KColors.Line, RoundedCornerShape(6.dp))
+                            .clickable { editor.selectEffectKey(index) }
+                            .padding(horizontal = 8.dp, vertical = 5.dp)
+                    ) {
+                        Text("K" + (index + 1) + " · " +
+                            String.format(java.util.Locale.US, "%.2fs", key.t),
+                            color = if (selectedKey) KColors.Accent else KColors.Muted,
+                            fontSize = 8.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            }
         }
 
         if (keys.size < 2) {
