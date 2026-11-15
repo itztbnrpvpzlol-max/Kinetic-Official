@@ -21,7 +21,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
-import com.kinetic.app.engine.AndroidVideoPlayer
+import com.kinetic.app.engine.FfmpegVideoPlayer
 import com.kinetic.app.data.PreviewDiagnostics
 import com.kinetic.app.engine.NativePlaybackEngine
 import com.kinetic.app.model.COMP_H
@@ -75,7 +75,7 @@ internal fun canUseDirectSurfaceVideo(layer: Layer): Boolean {
 
 private class DirectVideoTextureView(
     context: Context,
-    private val player: AndroidVideoPlayer
+    private val player: FfmpegVideoPlayer
 ) : TextureView(context), TextureView.SurfaceTextureListener {
     private var outputSurface: Surface? = null
 
@@ -86,6 +86,7 @@ private class DirectVideoTextureView(
 
     override fun onSurfaceTextureAvailable(surfaceTexture: SurfaceTexture, width: Int, height: Int) {
         outputSurface?.release()
+        surfaceTexture.setDefaultBufferSize(1280, 720)
         outputSurface = Surface(surfaceTexture)
         player.attachSurface(checkNotNull(outputSurface))
     }
@@ -93,6 +94,7 @@ private class DirectVideoTextureView(
     override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) = Unit
 
     override fun onSurfaceTextureUpdated(surface: SurfaceTexture) {
+        player.markFrameAvailable()
         PreviewDiagnostics.recordSurfaceVideoFrame()
     }
 
@@ -119,7 +121,7 @@ internal fun DirectSurfaceVideoPreview(
 ) {
     val context = LocalContext.current
     val uri = Uri.parse(checkNotNull(layer.uri))
-    val player = remember(uri) { AndroidVideoPlayer(context, uri) }
+    val player = remember(uri) { FfmpegVideoPlayer(context, uri) }
     val textureView = remember(context, player) { DirectVideoTextureView(context, player) }
     val sourcePositionMs = (
         (layer.sourceElapsedAt(editor.time) + layer.srcOffset).coerceAtLeast(0f) * 1000f
