@@ -72,6 +72,7 @@ struct DecoderSession {
     int windowWidth = 0;
     int windowHeight = 0;
     bool hardwareDecoder = false;
+    std::string decoderName;
     AVPacket* packet = nullptr;
     AVFrame* frame = nullptr;
     int videoStream = -1;
@@ -215,6 +216,7 @@ static bool openCodec(DecoderSession* session, const AVCodec* decoder, bool hard
     }
     session->codecOpened = true;
     session->hardwareDecoder = hardware;
+    session->decoderName = decoder->name ? decoder->name : "unknown";
     return true;
 }
 
@@ -291,7 +293,7 @@ static bool openDecoder(DecoderSession* session, JNIEnv* env) {
     __android_log_print(ANDROID_LOG_INFO, "KineticFFmpeg",
         "Direct FFmpeg decoder ready: mode=%s codec=%s size=%dx%d",
         session->hardwareDecoder ? "MediaCodec" : "software",
-        session->codec->codec ? session->codec->codec->name : "unknown",
+        session->decoderName.c_str(),
         session->codec->width, session->codec->height);
     return true;
 }
@@ -396,6 +398,100 @@ static bool renderHardwareFrame(DecoderSession* session, AVFrame* frame) {
     return true;
 }
 
+
+static bool renderSoftwareFrame(DecoderSession* session, AVFrame* frame) {
+    if (!session->outputWindow) return false;
+    int64_t ptsUs = frameSourceTimeUs(session, frame);
+    bool shouldRender = false;
+    bool pausedFrame = false;
+
+    while (!session->stop.load()) {
+        std::unique_lock<std::mutex> lock(session->mutex);
+        if (session->seekPending) return true;
+        const bool playing = session->playing;
+        const bool step = session->stepPending;
+        const int64_t targetUs = session->seekTargetUs;
+        const int64_t expectedUs = expectedSourceUsLocked(session, monotonicNs());
+        if (ptsUs < 0) ptsUs = expectedUs;
+
+        if (!playing) {
+            if (!step || ptsUs + 40000 < targetUs) return true;
+            shouldRender = true;
+            pausedFrame = true;
+            break;
+        }
+
+        const int64_t deltaUs = ptsUs - expectedUs;
+        if (deltaUs < -100000) return true;
+        if (deltaUs <= 50000) {
+            shouldRender = true;
+            break;
+        }
+        session->condition.wait_for(lock, std::chrono::milliseconds(8));
+    }
+
+    if (!shouldRender || session->stop.load()) return true;
+
+    if (session->windowWidth != frame->width || session->windowHeight != frame->height) {
+        const int geometryResult = ANativeWindow_setBuffersGeometry(
+            session->outputWindow, frame->width, frame->height, WINDOW_FORMAT_RGBA_8888);
+        if (geometryResult < 0) return false;
+        session->windowWidth = frame->width;
+        session->windowHeight = frame->height;
+    }
+
+    ANativeWindow_Buffer buffer{};
+    if (ANativeWindow_lock(session->outputWindow, &buffer, nullptr) != 0) return false;
+
+    session->sws = sws_getCachedContext(
+        session->sws,
+        frame->width,
+        frame->height,
+        static_cast<AVPixelFormat>(frame->format),
+        buffer.width,
+        buffer.height,
+        AV_PIX_FMT_RGBA,
+        SWS_FAST_BILINEAR,
+        nullptr,
+        nullptr,
+        nullptr
+    );
+    if (!session->sws) {
+        ANativeWindow_unlockAndPost(session->outputWindow);
+        return false;
+    }
+
+    uint8_t* destination[4] = {
+        static_cast<uint8_t*>(buffer.bits), nullptr, nullptr, nullptr
+    };
+    int destinationLinesize[4] = {buffer.stride * 4, 0, 0, 0};
+    const int rows = sws_scale(
+        session->sws,
+        frame->data,
+        frame->linesize,
+        0,
+        frame->height,
+        destination,
+        destinationLinesize
+    );
+    const int postResult = ANativeWindow_unlockAndPost(session->outputWindow);
+    if (rows <= 0 || postResult != 0) return false;
+
+    {
+        std::lock_guard<std::mutex> lock(session->mutex);
+        session->lastRenderedPtsUs = ptsUs;
+        if (pausedFrame) session->stepPending = false;
+        session->condition.notify_all();
+    }
+    return true;
+}
+
+static bool renderFrame(DecoderSession* session, AVFrame* frame) {
+    return session->hardwareDecoder
+        ? renderHardwareFrame(session, frame)
+        : renderSoftwareFrame(session, frame);
+}
+
 static bool applyPendingSeek(DecoderSession* session) {
     int64_t targetUs = 0;
     {
@@ -427,7 +523,7 @@ static bool drainDecoder(DecoderSession* session, bool* received) {
             return false;
         }
         *received = true;
-        const bool rendered = renderHardwareFrame(session, session->frame);
+        const bool rendered = renderFrame(session, session->frame);
         av_frame_unref(session->frame);
         if (!rendered) {
             setError(session, "FFmpeg could not present a decoded frame to the preview surface");
@@ -440,23 +536,29 @@ static bool drainDecoder(DecoderSession* session, bool* received) {
 static void cleanupSession(DecoderSession* session) {
     closeDecoder(session);
     if (session->format) avformat_close_input(&session->format);
+    if (session->sws) {
+        sws_freeContext(session->sws);
+        session->sws = nullptr;
+    }
+    if (session->outputWindow) {
+        ANativeWindow_release(session->outputWindow);
+        session->outputWindow = nullptr;
+    }
 }
 
 static void* decoderThread(void* opaque) {
     auto* session = static_cast<DecoderSession*>(opaque);
-    if (gJavaVm) {
-        JNIEnv* env = nullptr;
-        if (gJavaVm->AttachCurrentThread(&env, nullptr) != JNI_OK) {
-            setError(session, "FFmpeg decoder thread could not attach to the Android runtime");
-            return nullptr;
-        }
+    JNIEnv* env = nullptr;
+    if (!gJavaVm || gJavaVm->AttachCurrentThread(&env, nullptr) != JNI_OK) {
+        setError(session, "FFmpeg decoder thread could not attach to the Android runtime");
+        return nullptr;
     }
 
     av_log_set_level(AV_LOG_WARNING);
     avformat_network_init();
-    if (!openDecoder(session)) {
+    if (!openDecoder(session, env)) {
         cleanupSession(session);
-        if (gJavaVm) gJavaVm->DetachCurrentThread();
+        gJavaVm->DetachCurrentThread();
         return nullptr;
     }
 
@@ -536,7 +638,7 @@ static void* decoderThread(void* opaque) {
         if (session->state != -1) session->state = session->stop.load() ? 2 : 1;
         session->condition.notify_all();
     }
-    if (gJavaVm) gJavaVm->DetachCurrentThread();
+    gJavaVm->DetachCurrentThread();
     return nullptr;
 }
 
