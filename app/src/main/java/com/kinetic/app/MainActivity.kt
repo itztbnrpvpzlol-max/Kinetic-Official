@@ -1,5 +1,6 @@
 package com.kinetic.app
 
+import android.content.ComponentCallbacks2
 import android.graphics.Color
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -12,6 +13,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import com.kinetic.app.data.AppSettings
+import com.kinetic.app.data.MediaLoader
 import com.kinetic.app.data.ProjectStore
 import com.kinetic.app.model.EditorState
 import com.kinetic.app.ui.EditorScreen
@@ -22,6 +24,16 @@ import com.kinetic.app.ui.SettingsScreen
 private enum class Screen { HOME, EDITOR, SETTINGS }
 
 class MainActivity : ComponentActivity() {
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        MediaLoader.trimMemory(level)
+    }
+
+    override fun onLowMemory() {
+        super.onLowMemory()
+        MediaLoader.trimMemory(ComponentCallbacks2.TRIM_MEMORY_COMPLETE)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge(statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT), navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT))
