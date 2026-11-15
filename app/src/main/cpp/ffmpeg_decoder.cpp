@@ -579,11 +579,15 @@ Java_com_kinetic_app_engine_NativeFfmpegDecoder_nativePlay(
     auto* session = fromHandle(handle);
     if (!session || session->stop.load()) return;
     std::lock_guard<std::mutex> lock(session->mutex);
-    session->localPositionUs = expectedSourceUsLocked(session, monotonicNs());
-    session->localAnchorNs = monotonicNs();
+    const int64_t now = monotonicNs();
+    session->localPositionUs = expectedSourceUsLocked(session, now);
+    session->localAnchorNs = now;
     session->playing = true;
     session->stepPending = false;
-    if (session->clock.valid) session->clock.playing = true;
+    if (session->clock.valid) {
+        session->clock.monotonicNs = now;
+        session->clock.playing = true;
+    }
     session->condition.notify_all();
 }
 
@@ -593,11 +597,21 @@ Java_com_kinetic_app_engine_NativeFfmpegDecoder_nativePause(
     auto* session = fromHandle(handle);
     if (!session || session->stop.load()) return;
     std::lock_guard<std::mutex> lock(session->mutex);
-    session->localPositionUs = expectedSourceUsLocked(session, monotonicNs());
-    session->localAnchorNs = monotonicNs();
+    const int64_t now = monotonicNs();
+    session->localPositionUs = expectedSourceUsLocked(session, now);
+    session->localAnchorNs = now;
     session->playing = false;
-    session->stepPending = false;
-    if (session->clock.valid) session->clock.playing = false;
+    // Keep a pending paused seek's single-frame request alive until it is drawn.
+    if (session->clock.valid) {
+        if (session->clock.playing) {
+            const int64_t elapsedUs = static_cast<int64_t>(
+                std::max<int64_t>(0, now - session->clock.monotonicNs) / 1000.0 *
+                session->clock.masterSpeed);
+            session->clock.positionUs += elapsedUs;
+        }
+        session->clock.monotonicNs = now;
+        session->clock.playing = false;
+    }
     session->condition.notify_all();
 }
 
