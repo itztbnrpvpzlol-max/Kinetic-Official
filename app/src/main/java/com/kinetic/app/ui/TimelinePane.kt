@@ -51,6 +51,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -169,16 +170,20 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
             .onSizeChanged { paneW = it.width; paneH = it.height }
             .pointerInput(Unit) { detectPinch { z -> pps = (pps * z).coerceIn(18f, 400f) } }
     ) {
-        Column(Modifier.fillMaxSize()) {
-            Row(Modifier.fillMaxWidth().height(30.dp)) {
-                Spacer(Modifier.width(leftW))
-                TimelineTrackViewport(
-                    hScroll, contentW, Modifier.weight(1f).fillMaxHeight()
-                ) {
+        // One horizontal scroll container owns the ruler, every layer row,
+        // keyframe rows and blank track area. The left control rail counter-moves
+        // by the scroll offset, so only the timeline canvas moves underneath it.
+        Column(Modifier.fillMaxSize().horizontalScroll(hScroll)) {
+            Column(Modifier.width(leftW + contentW).fillMaxHeight()) {
+                Row(Modifier.fillMaxWidth().height(30.dp)) {
+                    Spacer(
+                        Modifier.width(leftW)
+                            .offset(x = (hScroll.value / dens).dp)
+                            .zIndex(1f)
+                    )
                     Ruler(editor, pps, contentW, leadingPad)
                 }
-            }
-            LazyColumn(
+                LazyColumn(
                 Modifier.weight(1f).fillMaxWidth(),
                 state = rememberLazyListState(),
                 // Stable item keys let Compose retain only the visible layer rows.
@@ -198,19 +203,19 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
                     LayerRow(editor, layer, pps, hScroll, contentW, leftW, leadingPad)
                 }
                 item(key = "timeline-empty-scroll-space") {
-                    // Match LayerRow's exact scroll viewport: the fixed layer
-                    // controls column stays outside the shared horizontal scroller.
-                    // Sharing one ScrollState across different viewport widths
-                    // made empty-space drags feel like taps and caused uneven ranges.
                     Row(Modifier.fillMaxWidth().height(72.dp)) {
-                        Spacer(Modifier.width(leftW))
-                        TimelineTrackViewport(
-                            hScroll, contentW, Modifier.weight(1f).fillMaxHeight(),
-                            onEmptyTap = { if (editor.selectedId != null) editor.select(null) }
-                        ) {
-                            Spacer(Modifier.fillMaxSize())
-                        }
+                        Spacer(
+                            Modifier.width(leftW).fillMaxHeight()
+                                .offset(x = (hScroll.value / dens).dp).zIndex(1f)
+                        )
+                        Box(
+                            Modifier.width(contentW).fillMaxHeight().clickable(
+                                indication = null,
+                                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+                            ) { if (editor.selectedId != null) editor.select(null) }
+                        )
                     }
+                }
                 }
             }
         }
@@ -285,36 +290,6 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
 }
 
 
-/**
- * The one horizontal timeline viewport used by the ruler, clips, keyframe
- * tracks and blank track space. Keeping the scroll modifier in one place
- * prevents different rows from acquiring subtly different gesture handling.
- * Taps on uncovered track area deselect; drags are consumed by horizontalScroll.
- */
-@Composable
-private fun TimelineTrackViewport(
-    state: ScrollState,
-    contentWidth: Dp,
-    modifier: Modifier = Modifier,
-    onEmptyTap: (() -> Unit)? = null,
-    content: @Composable BoxScope.() -> Unit
-) {
-    Box(modifier.horizontalScroll(state)) {
-        Box(Modifier.width(contentWidth).fillMaxHeight()) {
-            if (onEmptyTap != null) {
-                Box(
-                    Modifier.fillMaxSize().clickable(
-                        indication = null,
-                        interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
-                        onClick = onEmptyTap
-                    )
-                )
-            }
-            content()
-        }
-    }
-}
-
 @Composable
 private fun Ruler(editor: EditorState, pps: Float, contentW: Dp, leadingPad: Dp) {
     val dens = LocalDensity.current.density
@@ -377,7 +352,12 @@ private fun LayerRow(
                 .padding(vertical = 1.dp)
                 .background(if (selected) KColors.RowSel else KColors.Row)
         ) {
-            Row(Modifier.width(leftW).fillMaxHeight(), verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                Modifier.width(leftW).fillMaxHeight()
+                    .offset(x = (hScroll.value / dens).dp).zIndex(1f)
+                    .background(if (selected) KColors.RowSel else KColors.Row),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 Box(
                     Modifier.size(36.dp).clickable { editor.toggleVisible(layer.id) },
                     contentAlignment = Alignment.Center
@@ -427,9 +407,11 @@ private fun LayerRow(
                     }
                 }
             }
-            TimelineTrackViewport(
-                hScroll, contentW, Modifier.weight(1f).fillMaxHeight(),
-                onEmptyTap = { if (editor.selectedId != null) editor.select(null) }
+            Box(
+                Modifier.width(contentW).fillMaxHeight().clickable(
+                    indication = null,
+                    interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+                ) { if (editor.selectedId != null) editor.select(null) }
             ) {
                 Clip(editor, layer, pps, selected, leadingPad)
             }
@@ -451,7 +433,7 @@ private fun LayerRow(
         val parentName = layer.parentId?.let { id -> editor.layers.firstOrNull { it.id == id }?.name }
         if (parentName != null) {
             Row(Modifier.fillMaxWidth().height(20.dp).background(KColors.Row), verticalAlignment = Alignment.CenterVertically) {
-                Spacer(Modifier.width(leftW))
+                Spacer(Modifier.width(leftW).offset(x = (hScroll.value / dens).dp).zIndex(1f))
                 Text("╰── Parent: $parentName", color = KColors.Accent, fontSize = 10.sp, modifier = Modifier.padding(start = 14.dp))
             }
         }
@@ -480,7 +462,9 @@ private fun KeyframeTrackRow(
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(
-            Modifier.width(leftW).fillMaxHeight().padding(start = 12.dp),
+            Modifier.width(leftW).fillMaxHeight()
+                .offset(x = (hScroll.value / LocalDensity.current.density).dp).zIndex(1f)
+                .background(KColors.Bg).padding(start = 12.dp),
             contentAlignment = Alignment.CenterStart
         ) {
             Text(
@@ -491,9 +475,7 @@ private fun KeyframeTrackRow(
                 overflow = TextOverflow.Ellipsis
             )
         }
-        TimelineTrackViewport(
-            hScroll, contentW, Modifier.weight(1f).fillMaxHeight()
-        ) {
+        Box(Modifier.width(contentW).fillMaxHeight()) {
             Canvas(
                 Modifier.width(contentW).fillMaxHeight()
                     .pointerInput(layer.id, propId, pps, leadingPad) {
