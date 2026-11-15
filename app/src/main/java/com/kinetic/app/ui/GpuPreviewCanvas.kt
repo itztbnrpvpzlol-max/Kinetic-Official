@@ -219,12 +219,12 @@ private fun GpuCompositionPreviewCanvas(
     val activeVideoLayers = editor.layers.filter {
         it.visible && it.activeAt(editor.time) && it.type == LayerType.VIDEO && it.uri != null
     }
-    // Keep effect-bearing footage on the SurfaceTexture / external-OES path.
-    // The external fragment shader receives the same packed effect uniforms as
-    // bitmap textures, so effects must not force a decoder-to-bitmap detour.
-    // Only a decoder that actually failed is moved to the bounded bitmap fallback.
+    // Effect-bearing footage deliberately uses the bounded decoded-bitmap
+    // texture path instead of SurfaceTexture/external-OES. This gives effects
+    // the same ordinary GL_TEXTURE_2D sampling path used by shapes and images,
+    // avoiding driver-specific external-texture shader behavior.
     val videoLayers = activeVideoLayers
-        .filter { failedVideoSources[it.id] != it.uri }
+        .filter { failedVideoSources[it.id] != it.uri && it.effectStack.none { effect -> effect.enabled } }
         .take(decoderLimit)
     val textureVideoIds = videoLayers.mapTo(HashSet<String>()) { it.id }
 
@@ -236,10 +236,9 @@ private fun GpuCompositionPreviewCanvas(
             .forEach { failedVideoSources.remove(it) }
     }
 
-    // Video layers use FFmpeg/libavcodec Surface outputs and are composited
-    // alongside stills, text and shapes in the same OpenGL draw order.
-    // Bitmap fallback layers use the composition cadence too, with one
-    // sequential decoder loop that skips obsolete frame requests.
+    // Untreated video uses SurfaceTexture; effect-bearing video is decoded
+    // into bounded preview bitmaps and uploaded as GL_TEXTURE_2D. Both paths
+    // share the same ordered GLES scene compositor and effect shader.
     val compositionFps = editor.fps.coerceIn(1, 60)
     val latestTimelineTime = androidx.compose.runtime.rememberUpdatedState(editor.time)
     val latestPlaying = androidx.compose.runtime.rememberUpdatedState(editor.playing)
