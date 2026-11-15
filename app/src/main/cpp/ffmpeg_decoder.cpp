@@ -254,16 +254,20 @@ static bool openDecoder(DecoderSession* session, JNIEnv* env) {
     std::string hardwareFailure;
     const char* hardwareName = mediaCodecDecoderName(stream->codecpar->codec_id);
     const AVCodec* hardwareDecoder = hardwareName ? avcodec_find_decoder_by_name(hardwareName) : nullptr;
-    bool opened = hardwareDecoder && openCodec(session, hardwareDecoder, true, &hardwareFailure);
+    if (!hardwareName) hardwareFailure = "No MediaCodec decoder is registered for this codec.";
+    else if (!hardwareDecoder) hardwareFailure = std::string("FFmpeg build does not contain ") + hardwareName + ".";
 
+    const bool opened = hardwareDecoder && openCodec(session, hardwareDecoder, true, &hardwareFailure);
     if (!opened) {
         if (session->codec || session->packet || session->frame) closeDecoder(session);
         const char* softwareName = softwareDecoderName(stream->codecpar->codec_id);
         const AVCodec* softwareDecoder = softwareName
             ? avcodec_find_decoder_by_name(softwareName)
             : avcodec_find_decoder(stream->codecpar->codec_id);
-        if (!softwareDecoder || !openCodec(session, softwareDecoder, false, nullptr)) {
-            setError(session, "FFmpeg could not open a hardware or software decoder. " + hardwareFailure);
+        std::string softwareFailure;
+        if (!softwareDecoder || !openCodec(session, softwareDecoder, false, &softwareFailure)) {
+            setError(session, "FFmpeg could not open a hardware or software decoder. " +
+                hardwareFailure + " " + softwareFailure);
             return false;
         }
         session->outputWindow = ANativeWindow_fromSurface(env, session->surface);
@@ -311,6 +315,7 @@ static bool renderHardwareFrame(DecoderSession* session, AVFrame* frame) {
 
     bool playing = false;
     bool stepPending = false;
+    bool seekPending = false;
     int64_t seekTargetUs = 0;
     int64_t ptsUs = frameSourceTimeUs(session, frame);
     int64_t expectedUs = 0;
@@ -319,6 +324,7 @@ static bool renderHardwareFrame(DecoderSession* session, AVFrame* frame) {
         std::lock_guard<std::mutex> lock(session->mutex);
         playing = session->playing;
         stepPending = session->stepPending;
+        seekPending = session->seekPending;
         seekTargetUs = session->seekTargetUs;
         expectedUs = expectedSourceUsLocked(session, monotonicNs());
         rate = session->clock.valid
@@ -326,6 +332,10 @@ static bool renderHardwareFrame(DecoderSession* session, AVFrame* frame) {
             : std::max(0.1f, session->manualSpeed);
     }
     if (ptsUs < 0) ptsUs = expectedUs;
+    if (seekPending) {
+        av_mediacodec_release_buffer(buffer, 0);
+        return true;
+    }
 
     if (!playing) {
         if (!stepPending) {
