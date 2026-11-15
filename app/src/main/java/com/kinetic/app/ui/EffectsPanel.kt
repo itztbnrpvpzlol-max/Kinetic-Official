@@ -143,7 +143,6 @@ fun EffectControlsPanel(editor: EditorState, layer: Layer, onBrowseEffects: () -
         }
 
         layer.effectStack.forEachIndexed { index, effect ->
-            var graphOpen by remember(effect.id) { mutableStateOf(false) }
             val expanded = expandedEffectId == effect.id
             val keyedParameters = effect.parameterKeys.values.count { it.isNotEmpty() }
             val accent = if (effect.enabled) KColors.Accent else KColors.Dim
@@ -187,41 +186,19 @@ fun EffectControlsPanel(editor: EditorState, layer: Layer, onBrowseEffects: () -
                     }
                 }
                 if (expanded) {
-                    val specs = controlsFor(effect)
-                    val selectedSpec = specs.firstOrNull {
-                        editor.selectedEffectId == effect.id && editor.selectedEffectParameter == it.key
-                    }
                     val liveEffect = editor.layers.firstOrNull { it.id == layer.id }
                         ?.effectStack?.firstOrNull { it.id == effect.id } ?: effect
-                    val selectedKeys = selectedSpec?.let { liveEffect.parameterKeys[it.key].orEmpty() }.orEmpty()
-                    val keyAtPlayhead = selectedKeys.any { abs(it.t - editor.time) <= editor.frame / 2f }
                     Column(
                         Modifier.fillMaxWidth().padding(start = 2.dp, end = 2.dp, bottom = 2.dp),
                         verticalArrangement = Arrangement.spacedBy(3.dp)
                     ) {
                         Box(Modifier.fillMaxWidth().height(1.dp).background(KColors.Line))
-                        Row(
-                            Modifier.fillMaxWidth().height(32.dp).padding(horizontal = 3.dp),
-                            horizontalArrangement = Arrangement.spacedBy(5.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            EffectToolbarButton(if (keyAtPlayhead) "REMOVE KEY" else "ADD KEY",
-                                selected = keyAtPlayhead, enabled = selectedSpec != null) {
-                                selectedSpec?.let { editor.toggleEffectParameterKey(layer.id, effect.id, it.key) }
-                            }
-                            EffectToolbarButton("GRAPH", selected = graphOpen, enabled = selectedSpec != null) {
-                                if (selectedSpec != null) graphOpen = !graphOpen
-                            }
-                        }
-                        specs.forEach { spec ->
+                        controlsFor(effect).forEach { spec ->
                             val selected = editor.selectedEffectId == effect.id &&
                                 editor.selectedEffectParameter == spec.key
                             EffectParameterLine(editor, layer, liveEffect, spec, selected) {
                                 editor.selectEffectParameter(layer.id, effect.id, spec.key)
                             }
-                        }
-                        if (graphOpen && selectedSpec != null) {
-                            EffectParameterGraph(editor, layer, liveEffect, selectedSpec)
                         }
                     }
                 }
@@ -266,21 +243,6 @@ private fun EffectIconAction(kind: IconKind, active: Boolean, onClick: () -> Uni
         contentAlignment = Alignment.Center
     ) {
         KIcon(kind, if (active) KColors.Accent else KColors.Muted, Modifier.size(15.dp))
-    }
-}
-
-@Composable
-private fun EffectToolbarButton(
-    label: String, selected: Boolean, enabled: Boolean, onClick: () -> Unit
-) {
-    Box(
-        Modifier.clip(RoundedCornerShape(6.dp))
-            .background(if (enabled && selected) KColors.Accent.copy(alpha = 0.2f) else KColors.Bg)
-            .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = 9.dp, vertical = 6.dp)
-    ) {
-        Text(label, color = if (enabled && selected) KColors.Accent else if (enabled) KColors.Text else KColors.Dim,
-            fontSize = 8.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.45.sp)
     }
 }
 
@@ -353,8 +315,32 @@ private fun EffectParameterLine(
 }
 
 @Composable
+fun EffectGraphPanel(editor: EditorState, layer: Layer, modifier: Modifier = Modifier) {
+    val effect = layer.effectStack.firstOrNull { it.id == editor.selectedEffectId }
+    val spec = effect?.let { selected ->
+        controlsFor(selected).firstOrNull { it.key == editor.selectedEffectParameter }
+    }
+    if (effect == null || spec == null) {
+        Box(modifier.fillMaxSize().background(KColors.Surface), contentAlignment = Alignment.Center) {
+            Text("Select an effect property to edit its animation curve.",
+                color = KColors.Muted, fontSize = 10.sp)
+        }
+        return
+    }
+    val liveEffect = editor.layers.firstOrNull { it.id == layer.id }
+        ?.effectStack?.firstOrNull { it.id == effect.id } ?: effect
+    Column(modifier.fillMaxSize().background(KColors.Surface).padding(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(effect.name + "  ·  " + spec.label, color = KColors.Text,
+            fontSize = 11.sp, fontWeight = FontWeight.Bold)
+        EffectParameterGraph(editor, layer, liveEffect, spec, graphHeight = 260.dp)
+    }
+}
+
+@Composable
 private fun EffectParameterGraph(
-    editor: EditorState, layer: Layer, effect: EffectInstance, spec: EffectControlSpec
+    editor: EditorState, layer: Layer, effect: EffectInstance, spec: EffectControlSpec,
+    graphHeight: androidx.compose.ui.unit.Dp = 112.dp
 ) {
     val keys = effect.parameterKeys[spec.key].orEmpty()
     val density = LocalDensity.current.density
@@ -375,7 +361,7 @@ private fun EffectParameterGraph(
                 color = KColors.Muted, fontSize = 8.sp)
         } else {
             Canvas(
-                Modifier.fillMaxWidth().height(112.dp)
+                Modifier.fillMaxWidth().height(graphHeight)
                     .pointerInput(effect.id, spec.key, spec.min, spec.max, layer.start, layer.duration) {
                         var activeIndex = -1
                         detectDragGestures(
