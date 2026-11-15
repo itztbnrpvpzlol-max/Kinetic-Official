@@ -32,6 +32,9 @@ find_library(log-lib log)
 find_library(android-lib android)
 find_library(glesv3-lib GLESv3)
 find_library(mediandk-lib mediandk)
+if(NOT mediandk-lib)
+    message(FATAL_ERROR "Android MediaCodec NDK library (mediandk) is required by the FFmpeg build.")
+endif()
 find_library(z-lib z)
 find_library(dl-lib dl)
 find_library(m-lib m)
@@ -41,10 +44,12 @@ target_compile_features(kinetic_engine PRIVATE cxx_std_17)
 target_compile_options(kinetic_engine PRIVATE -O3 -fno-exceptions -fno-rtti)
 target_link_options(kinetic_engine PRIVATE "-Wl,-z,max-page-size=16384")
 target_link_libraries(kinetic_engine
+    "-Wl,--start-group"
     ffmpeg_avformat
     ffmpeg_avcodec
     ffmpeg_swscale
     ffmpeg_avutil
+    "-Wl,--end-group"
     ${log-lib}
     ${android-lib}
     ${glesv3-lib}
