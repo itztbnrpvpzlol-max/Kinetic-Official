@@ -307,8 +307,11 @@ data class EffectInstance(
     val parameters: Map<String, Float> = emptyMap(),
     val parameterKeys: Map<String, List<Keyframe>> = emptyMap()
 ) {
-    fun parameterAt(key: String, time: Float): Float =
-        Prop(parameters[key] ?: 0f, parameterKeys[key].orEmpty()).valueAt(time)
+    fun parameterAt(key: String, time: Float, fallback: Float = 0f): Float {
+        val base = parameters[key] ?: fallback
+        return Prop(base, parameterKeys[key].orEmpty()).valueAt(time)
+            .takeIf { it.isFinite() } ?: fallback
+    }
 }
 
 fun createEffect(name: String): EffectInstance? {
@@ -340,7 +343,7 @@ fun effectUniforms(effects: List<EffectInstance>, time: Float = 0f): FloatArray 
     val active = effects.asSequence().filter { it.enabled }.take(8).toList()
     val output = FloatArray(active.size * 8)
     fun value(effect: EffectInstance, key: String, fallback: Float, min: Float, max: Float): Float {
-        val raw = effect.parameterAt(key, time)
+        val raw = effect.parameterAt(key, time, fallback)
         return (if (raw.isFinite()) raw else fallback).coerceIn(min, max)
     }
     active.forEachIndexed { index, effect ->
