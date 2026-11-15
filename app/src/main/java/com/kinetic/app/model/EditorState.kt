@@ -152,7 +152,7 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
         selectedEffectKey = -1
     }
 
-    fun selectEffectKey(index: Int) {
+    fun selectEffectKey(index: Int, seekTo: Boolean = true) {
         val effectId = selectedEffectId ?: return
         val parameter = selectedEffectParameter ?: return
         val keys = layers.firstOrNull { it.id == selectedId }
@@ -164,7 +164,7 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
         }
         if (index !in keys.indices) return
         selectedEffectKey = index
-        time = keys[index].t.coerceIn(0f, duration)
+        if (seekTo) time = keys[index].t.coerceIn(0f, duration)
     }
 
 
