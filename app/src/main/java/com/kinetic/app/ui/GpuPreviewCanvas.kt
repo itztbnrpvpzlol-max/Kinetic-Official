@@ -150,12 +150,10 @@ fun PreviewCanvas(
         // simple direct-surface path. Preview frames stay resolution-capped.
         CpuPreviewCanvas(editor, modifier)
     } else {
-        val visualLayers = editor.layers.filter {
-            it.visible && it.type != LayerType.AUDIO &&
-                it.type != LayerType.NULL && it.type != LayerType.ADJUSTMENT
-        }
-        val qualityScale = resolvePreviewScale(context, qualityIndex, visualLayers.size)
-        GpuCompositionPreviewCanvas(editor, modifier, qualityScale, playback)
+        // Still images, text and shapes use the established Canvas renderer.
+        // Keep the GLES compositor for video compositions so transformed and
+        // animated clips remain on the SurfaceTexture path above.
+        CpuPreviewCanvas(editor, modifier)
     }
 }
 
