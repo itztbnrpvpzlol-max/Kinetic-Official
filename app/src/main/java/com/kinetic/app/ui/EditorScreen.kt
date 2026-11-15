@@ -612,6 +612,10 @@ private fun ToolEditPanel(
         "Blending" -> PropId.OPACITY
         else -> null
     }
+    val selectedEffect = layer.effectStack.firstOrNull { it.id == editor.selectedEffectId }
+    val selectedEffectParameter = editor.selectedEffectParameter?.takeIf { selectedEffect != null }
+    val selectedEffectKeys = selectedEffectParameter?.let { selectedEffect?.parameterKeys?.get(it).orEmpty() }.orEmpty()
+    val hasEffectKey = selectedEffectKeys.any { kotlin.math.abs(it.t - displayTime) <= editor.frame / 2f }
     val hasAnimatedKey = animatedProp?.let { id -> layer.p(id).keys.any { kotlin.math.abs(it.t - displayTime) <= editor.frame / 2f } } == true
     val panelShape = RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp)
     Column(modifier.clip(panelShape).background(KColors.Surface).border(1.dp, KColors.Line, panelShape)) {
@@ -629,7 +633,20 @@ private fun ToolEditPanel(
                     showGraph = false
                     animatedProp?.let { editor.selectProp(it) }
                 }
-                if (animatedProp != null) {
+                if (tool == "Effects") {
+                    RailAction(IconKind.GRAPH, showGraph, enabled = selectedEffectParameter != null) {
+                        showGraph = true
+                    }
+                    Box(Modifier.padding(vertical = 5.dp).width(24.dp).height(1.dp).background(KColors.Line))
+                    RailAction(if (hasEffectKey) IconKind.DIAMOND_FILLED else IconKind.DIAMOND,
+                        hasEffectKey, enabled = selectedEffect != null && selectedEffectParameter != null) {
+                        val effectId = selectedEffect?.id
+                        val parameter = selectedEffectParameter
+                        if (effectId != null && parameter != null) {
+                            editor.toggleEffectParameterKey(layer.id, effectId, parameter)
+                        }
+                    }
+                } else if (animatedProp != null) {
                     RailAction(IconKind.GRAPH, showGraph) {
                         editor.selectProp(animatedProp)
                         showGraph = !showGraph
@@ -642,7 +659,13 @@ private fun ToolEditPanel(
                 }
             }
             Box(Modifier.weight(1f).fillMaxHeight()) {
-                if (showGraph) GraphPanel(editor, layer) else ToolPanelControls(tool, editor, layer, displayTime, onExtractAudio, maskTool, onMaskToolChange, rotoForeground, onRotoForegroundChange, onOpenEffects)
+                if (showGraph) {
+                    if (tool == "Effects") EffectGraphPanel(editor, layer, Modifier.fillMaxSize())
+                    else GraphPanel(editor, layer)
+                } else {
+                    ToolPanelControls(tool, editor, layer, displayTime, onExtractAudio, maskTool,
+                        onMaskToolChange, rotoForeground, onRotoForegroundChange, onOpenEffects)
+                }
             }
         }
     }
