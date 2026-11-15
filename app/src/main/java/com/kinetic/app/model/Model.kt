@@ -315,121 +315,60 @@ data class EffectInstance(
 }
 
 fun createEffect(name: String): EffectInstance? {
-    val parameters = when (name) {
-        "Motion Tile" -> mapOf("Tile Width" to 100f, "Tile Height" to 100f, "Output Width" to 200f,
-            "Output Height" to 200f, "Mirror Edges" to 1f, "Phase X" to 0f, "Phase Y" to 0f)
-        "Wave Warp" -> mapOf("Wave Height" to 0.012f, "Wave Width" to 4f, "Wave Speed" to 1f,
-            "Wave Type" to 0f, "Direction" to 0f, "Phase" to 0f, "Pinning" to 0f)
-        "Warp Shake" -> mapOf("X Amount" to 0.008f, "Y Amount" to 0.008f, "Frequency" to 8f,
-            "Motion" to 0f, "Seed" to 0f, "Direction" to 0f)
-        "RGB Split" -> mapOf("Red Offset" to 0.006f, "Green Offset" to 0f, "Blue Offset" to -0.006f,
-            "Angle" to 0f, "Radial Split" to 0f, "Center X" to 0.5f, "Center Y" to 0.5f)
-        "Oscillate" -> mapOf("X Amplitude" to 0.02f, "Y Amplitude" to 0.02f, "Frequency" to 1f,
-            "Wave Shape" to 0f, "Phase" to 0f, "Half Range" to 0f)
-        "Deep Glow" -> mapOf("Threshold" to 0.65f, "Radius" to 0.012f, "Intensity" to 1.2f,
-            "Quality" to 0f, "Spread" to 1f, "Saturation" to 1f, "Glow Only" to 0f)
-        "Exposure And Gamma" -> mapOf("Exposure" to 0f, "Gamma" to 1f, "Offset" to 0f, "Channel" to 0f)
-        else -> return null
+    if (!NativeRenderEngine.available) return null
+    val encoded = runCatching { NativeRenderEngine.nativeCreateEffect(name) }.getOrNull() ?: return null
+    if (encoded.isEmpty() || encoded.size % 2 != 0) return null
+    val parameters = LinkedHashMap<String, Float>(encoded.size / 2)
+    var index = 0
+    while (index < encoded.size) {
+        val value = encoded[index + 1].toFloatOrNull()?.takeIf { it.isFinite() } ?: return null
+        parameters[encoded[index]] = value
+        index += 2
     }
     return EffectInstance(name = name, parameters = parameters)
 }
 
 /**
- * Packs bounded, finite effect parameters into two vec4 uniforms per effect.
- * Project files can outlive shader versions, so validate values at the GPU
- * boundary instead of trusting persisted or externally edited floats.
+ * Serializes editable effect state only. Effect definitions, defaults, keyframe
+ * evaluation, validation, and shader-uniform packing are owned by KRE in C++.
  */
 fun effectUniforms(effects: List<EffectInstance>, time: Float = 0f): FloatArray {
-    val active = effects.asSequence().filter { it.enabled }.take(8).toList()
-    val output = FloatArray(active.size * 8)
-    fun value(effect: EffectInstance, key: String, fallback: Float, min: Float, max: Float): Float {
-        val raw = effect.parameterAt(key, time, fallback)
-        return (if (raw.isFinite()) raw else fallback).coerceIn(min, max)
-    }
-    active.forEachIndexed { index, effect ->
-        val first: FloatArray
-        val second: FloatArray
-        when (effect.name) {
-            "Motion Tile" -> {
-                first = floatArrayOf(1f,
-                    value(effect, "Tile Width", 100f, 10f, 300f),
-                    value(effect, "Tile Height", 100f, 10f, 300f),
-                    value(effect, "Output Width", 200f, 100f, 500f))
-                second = floatArrayOf(
-                    value(effect, "Output Height", 200f, 100f, 500f),
-                    value(effect, "Mirror Edges", 1f, 0f, 1f),
-                    value(effect, "Phase X", 0f, -2f, 2f),
-                    value(effect, "Phase Y", 0f, -2f, 2f))
-            }
-            "Wave Warp" -> {
-                first = floatArrayOf(2f,
-                    value(effect, "Wave Height", 0.012f, 0f, 0.08f),
-                    value(effect, "Wave Width", 4f, 1f, 24f),
-                    value(effect, "Wave Speed", 1f, -8f, 8f))
-                second = floatArrayOf(
-                    value(effect, "Wave Type", 0f, 0f, 3f),
-                    value(effect, "Direction", 0f, 0f, 360f),
-                    value(effect, "Phase", 0f, 0f, 360f),
-                    value(effect, "Pinning", 0f, 0f, 3f))
-            }
-            "Warp Shake" -> {
-                first = floatArrayOf(3f,
-                    value(effect, "X Amount", 0.008f, 0f, 0.08f),
-                    value(effect, "Y Amount", 0.008f, 0f, 0.08f),
-                    value(effect, "Frequency", 8f, 0.1f, 30f))
-                second = floatArrayOf(
-                    value(effect, "Motion", 0f, 0f, 1f),
-                    value(effect, "Seed", 0f, 0f, 100f),
-                    value(effect, "Direction", 0f, 0f, 360f), 0f)
-            }
-            "RGB Split" -> {
-                first = floatArrayOf(4f,
-                    value(effect, "Red Offset", 0.006f, -0.04f, 0.04f),
-                    value(effect, "Green Offset", 0f, -0.04f, 0.04f),
-                    value(effect, "Blue Offset", -0.006f, -0.04f, 0.04f))
-                second = floatArrayOf(
-                    value(effect, "Angle", 0f, 0f, 360f),
-                    value(effect, "Radial Split", 0f, 0f, 1f),
-                    value(effect, "Center X", 0.5f, 0f, 1f),
-                    value(effect, "Center Y", 0.5f, 0f, 1f))
-            }
-            "Oscillate" -> {
-                first = floatArrayOf(5f,
-                    value(effect, "X Amplitude", 0.02f, 0f, 0.15f),
-                    value(effect, "Y Amplitude", 0.02f, 0f, 0.15f),
-                    value(effect, "Frequency", 1f, 0.1f, 12f))
-                second = floatArrayOf(
-                    value(effect, "Wave Shape", 0f, 0f, 3f),
-                    value(effect, "Phase", 0f, 0f, 360f),
-                    value(effect, "Half Range", 0f, 0f, 1f), 0f)
-            }
-            "Deep Glow" -> {
-                first = floatArrayOf(6f,
-                    value(effect, "Threshold", 0.65f, 0f, 1f),
-                    value(effect, "Radius", 0.012f, 0.001f, 0.08f),
-                    value(effect, "Intensity", 1.2f, 0f, 4f))
-                second = floatArrayOf(
-                    value(effect, "Quality", 0f, 0f, 1f),
-                    value(effect, "Spread", 1f, 0.25f, 3f),
-                    value(effect, "Saturation", 1f, 0f, 2f),
-                    value(effect, "Glow Only", 0f, 0f, 1f))
-            }
-            "Exposure And Gamma" -> {
-                first = floatArrayOf(7f,
-                    value(effect, "Exposure", 0f, -5f, 5f),
-                    value(effect, "Gamma", 1f, 0.1f, 3f),
-                    value(effect, "Offset", 0f, -1f, 1f))
-                second = floatArrayOf(value(effect, "Channel", 0f, 0f, 3f), 0f, 0f, 0f)
-            }
-            else -> {
-                first = floatArrayOf(0f, 0f, 0f, 0f)
-                second = floatArrayOf(0f, 0f, 0f, 0f)
+    if (!NativeRenderEngine.available || effects.isEmpty()) return FloatArray(0)
+    val effectNames = effects.map { it.name }.toTypedArray()
+    val enabled = effects.map { it.enabled }.toBooleanArray()
+    val parameterNames = ArrayList<String>()
+    val parameterValues = ArrayList<Float>()
+    val parameterEffectIndices = ArrayList<Int>()
+    val keyframeParameterIndices = ArrayList<Int>()
+    val keyframeData = ArrayList<Float>()
+
+    effects.forEachIndexed { effectIndex, effect ->
+        val names = (effect.parameters.keys + effect.parameterKeys.keys).distinct()
+        for (name in names) {
+            val parameterIndex = parameterNames.size
+            parameterNames += name
+            parameterValues += (effect.parameters[name] ?: 0f)
+            parameterEffectIndices += effectIndex
+            effect.parameterKeys[name].orEmpty().forEach { key ->
+                keyframeParameterIndices += parameterIndex
+                keyframeData += key.t
+                keyframeData += key.v
+                keyframeData += key.type.ordinal.toFloat()
+                keyframeData += key.x1
+                keyframeData += key.y1
+                keyframeData += key.x2
+                keyframeData += key.y2
             }
         }
-        first.copyInto(output, index * 8)
-        second.copyInto(output, index * 8 + 4)
     }
-    return output
+
+    return runCatching {
+        NativeRenderEngine.nativeBuildEffectUniforms(
+            effectNames, enabled, parameterNames.toTypedArray(),
+            parameterValues.toFloatArray(), parameterEffectIndices.toIntArray(),
+            keyframeParameterIndices.toIntArray(), keyframeData.toFloatArray(), time
+        )
+    }.getOrElse { FloatArray(0) }
 }
 
 data class Layer(
