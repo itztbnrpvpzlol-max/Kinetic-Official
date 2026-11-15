@@ -83,6 +83,7 @@ fi
   --strip="$STRIP" \
   --extra-cflags="$EXTRA_CFLAGS" \
   --extra-ldflags="$EXTRA_LDFLAGS" \
+  --enable-pthreads \
   --enable-jni \
   --enable-mediacodec \
   --enable-network \
