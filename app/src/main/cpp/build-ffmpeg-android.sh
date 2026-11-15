@@ -96,7 +96,6 @@ fi
   --disable-encoders \
   --disable-muxers \
   --disable-filters \
-  --disable-postproc \
   --disable-devices \
   --disable-indevs \
   --disable-outdevs \
