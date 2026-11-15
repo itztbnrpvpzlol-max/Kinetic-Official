@@ -80,6 +80,13 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
 
     private fun fixSelection() {
         if (layers.none { it.id == selectedId }) clearSelection()
+        val effectStillExists = selectedEffectId?.let { effectId ->
+            layers.any { layer -> layer.effectStack.any { it.id == effectId } }
+        } ?: true
+        if (!effectStillExists) {
+            selectedEffectId = null
+            selectedEffectParameter = null
+        }
     }
 
     private fun clearSelection() {
@@ -138,6 +145,7 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
 
     fun selectKey(prop: PropId, index: Int, seekTo: Float?) {
         selectedProp = prop; selectedKey = index
+        selectedEffectId = null; selectedEffectParameter = null
         if (seekTo != null) time = seekTo.coerceIn(0f, duration)
     }
 
