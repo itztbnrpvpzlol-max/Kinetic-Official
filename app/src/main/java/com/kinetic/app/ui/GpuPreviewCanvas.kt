@@ -107,10 +107,10 @@ fun PreviewCanvas(
         onVideoReady(true)
     }
 
-    // A single untransformed video layer can bypass Bitmap/YUV conversion
-    // entirely: MediaCodec/libmpv writes straight into a TextureView Surface.
-    // Keep the proven Canvas compositor for multi-layer timelines and all
-    // transformed clips, preserving the visual-layer reliability fix.
+    // A single video with completely static default transforms can bypass
+    // Bitmap/YUV conversion through TextureView. Any animated transform,
+    // effect, or multi-layer video composition uses the synchronized GLES
+    // compositor and SurfaceTexture external-OES texture path.
     val activeVisualLayers = editor.layers.filter {
         it.visible && it.activeAt(editor.time) &&
             it.type != LayerType.AUDIO && it.type != LayerType.NULL &&
@@ -134,8 +134,9 @@ fun PreviewCanvas(
             CpuPreviewCanvas(editor, Modifier.fillMaxSize(), directVideoLayerId = directVideo.id)
         }
     } else if ((videoLayers.isNotEmpty() || hasGpuEffects) && supportsGles3(context) && !hasComplexMasks) {
-        // Effect-bearing footage enters the GLSurfaceView compositor. Its
-        // SurfaceTexture decoder feeds the GPU shader stack without a CPU bitmap hop.
+        // All transformed, multi-layer and effect-bearing footage enters the
+        // GLSurfaceView compositor. Video frames remain external-OES textures
+        // from SurfaceTexture through the final GPU draw.
         val visualLayers = editor.layers.filter {
             it.visible && it.type != LayerType.AUDIO &&
                 it.type != LayerType.NULL && it.type != LayerType.ADJUSTMENT
@@ -143,11 +144,9 @@ fun PreviewCanvas(
         val qualityScale = resolvePreviewScale(context, qualityIndex, visualLayers.size)
         GpuCompositionPreviewCanvas(editor, modifier, qualityScale, playback)
     } else if (videoLayers.isNotEmpty() || hasComplexMasks || !supportsGles3(context)) {
-        // Keep video that needs transforms, overlaps, masks or compositing on
-        // the established MediaExtractor/MediaCodec bitmap path. The libmpv
-        // external-texture path is not reliable on every GLES driver and could
-        // turn an otherwise valid clip black as soon as keyframes disabled the
-        // simple direct-surface path. Preview frames stay resolution-capped.
+        // Complex masks and devices without GLES3 retain the bounded CPU
+        // compatibility renderer. Normal GLES3 video compositions never take
+        // this bitmap path, including clips with transform keyframes.
         CpuPreviewCanvas(editor, modifier)
     } else {
         // Still images, text and shapes use the established Canvas renderer.
