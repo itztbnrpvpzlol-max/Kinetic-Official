@@ -644,6 +644,13 @@ private fun ToolEditPanel(
                         val parameter = selectedEffectParameter
                         if (effectId != null && parameter != null) {
                             editor.toggleEffectParameterKey(layer.id, effectId, parameter)
+                            val updatedKeys = editor.layers.firstOrNull { it.id == layer.id }
+                                ?.effectStack?.firstOrNull { it.id == effectId }
+                                ?.parameterKeys?.get(parameter).orEmpty()
+                            val keyIndex = updatedKeys.indexOfFirst {
+                                kotlin.math.abs(it.t - editor.time) <= editor.frame / 2f
+                            }
+                            editor.selectEffectKey(keyIndex)
                         }
                     }
                 } else if (animatedProp != null) {
