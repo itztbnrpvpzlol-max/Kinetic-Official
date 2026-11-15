@@ -209,28 +209,41 @@ data class Prop(val base: Float, val keys: List<Keyframe> = emptyList(), val exp
     val animated: Boolean get() = keys.isNotEmpty()
 
     fun valueAt(t: Float): Float {
+        if (!t.isFinite()) return base
         val expr = expression?.trim()
         if (expr != null) {
             val match = Regex("wiggle\\s*\\(\\s*([0-9.]+)\\s*,\\s*([0-9.]+)\\s*\\)", RegexOption.IGNORE_CASE).find(expr)
             if (match != null) {
-                val frequency = match.groupValues[1].toFloatOrNull() ?: 2f
-                val amplitude = match.groupValues[2].toFloatOrNull() ?: 20f
-                val noise = kotlin.math.sin(t * frequency * 6.2831855f) * 0.55f + kotlin.math.sin(t * frequency * 13.7f) * 0.3f + kotlin.math.sin(t * frequency * 31.1f) * 0.15f
-                return (if (keys.isEmpty()) base else valueAtWithoutExpression(t)) + amplitude * noise
+                val frequency = match.groupValues[1].toFloatOrNull()?.takeIf { it.isFinite() } ?: 2f
+                val amplitude = match.groupValues[2].toFloatOrNull()?.takeIf { it.isFinite() } ?: 20f
+                val baseValue = if (keys.isEmpty()) base else valueAtWithoutExpression(t)
+                val noise = kotlin.math.sin(t * frequency * 6.2831855f) * 0.55f +
+                    kotlin.math.sin(t * frequency * 13.7f) * 0.3f +
+                    kotlin.math.sin(t * frequency * 31.1f) * 0.15f
+                val result = baseValue + amplitude * noise
+                return result.takeIf { it.isFinite() } ?: base
             }
         }
-        return valueAtWithoutExpression(t)
+        return valueAtWithoutExpression(t).takeIf { it.isFinite() } ?: base
     }
 
     private fun valueAtWithoutExpression(t: Float): Float {
         if (keys.isEmpty()) return base
-        if (t <= keys.first().t) return keys.first().v
-        if (t >= keys.last().t) return keys.last().v
+        val first = keys.first()
+        val last = keys.last()
+        if (!first.t.isFinite() || !first.v.isFinite()) return base
+        if (t <= first.t) return first.v
+        if (!last.t.isFinite() || !last.v.isFinite()) return first.v
+        if (t >= last.t) return last.v
         var i = 0
         while (i < keys.size - 2 && keys[i + 1].t <= t) i++
         val a = keys[i]
         val b = keys[i + 1]
-        val u = ((t - a.t) / (b.t - a.t)).coerceIn(0f, 1f)
+        if (!a.t.isFinite() || !a.v.isFinite()) return base
+        if (!b.t.isFinite() || !b.v.isFinite()) return a.v
+        val span = b.t - a.t
+        if (!span.isFinite() || span <= 0.000001f) return b.v
+        val u = ((t - a.t) / span).coerceIn(0f, 1f)
         val p = when (a.type) {
             KeyType.HOLD -> 0f
             KeyType.LINEAR -> u
@@ -248,11 +261,13 @@ data class Prop(val base: Float, val keys: List<Keyframe> = emptyList(), val exp
                 }
             }
         }
-        return a.v + (b.v - a.v) * p
+        val result = a.v + (b.v - a.v) * p
+        return result.takeIf { it.isFinite() } ?: a.v
     }
 
     /** Set the value at time t. Not animated -> changes base. Animated -> edits/creates a key (like AE). */
     fun withValueAt(t: Float, v: Float, eps: Float): Prop {
+        if (!t.isFinite() || !v.isFinite()) return this
         if (keys.isEmpty()) return copy(base = v)
         val idx = keys.indexOfFirst { abs(it.t - t) <= eps }
         return if (idx >= 0) {
