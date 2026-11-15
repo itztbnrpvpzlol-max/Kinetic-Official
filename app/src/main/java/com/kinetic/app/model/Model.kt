@@ -316,44 +316,92 @@ fun createEffect(name: String): EffectInstance? {
     return EffectInstance(name = name, parameters = parameters)
 }
 
-/** Packs up to eight enabled effects into two vec4 GLES uniforms per effect. */
+/**
+ * Packs bounded, finite effect parameters into two vec4 uniforms per effect.
+ * Project files can outlive shader versions, so validate values at the GPU
+ * boundary instead of trusting persisted or externally edited floats.
+ */
 fun effectUniforms(effects: List<EffectInstance>, time: Float = 0f): FloatArray {
-    val active = effects.filter { it.enabled }.take(8)
+    val active = effects.asSequence().filter { it.enabled }.take(8).toList()
     val output = FloatArray(active.size * 8)
+    fun value(effect: EffectInstance, key: String, fallback: Float, min: Float, max: Float): Float {
+        val raw = effect.parameterAt(key, time)
+        return (if (raw.isFinite()) raw else fallback).coerceIn(min, max)
+    }
     active.forEachIndexed { index, effect ->
-        val p = effect.parameters.mapValues { (key, base) ->
-            Prop(base, effect.parameterKeys[key].orEmpty()).valueAt(time)
-        }
         val first: FloatArray
         val second: FloatArray
         when (effect.name) {
             "Motion Tile" -> {
-                first = floatArrayOf(1f, p["Tile Width"] ?: 100f, p["Tile Height"] ?: 100f, p["Output Width"] ?: 200f)
-                second = floatArrayOf(p["Output Height"] ?: 200f, p["Mirror Edges"] ?: 1f, p["Phase X"] ?: 0f, p["Phase Y"] ?: 0f)
+                first = floatArrayOf(1f,
+                    value(effect, "Tile Width", 100f, 10f, 300f),
+                    value(effect, "Tile Height", 100f, 10f, 300f),
+                    value(effect, "Output Width", 200f, 100f, 500f))
+                second = floatArrayOf(
+                    value(effect, "Output Height", 200f, 100f, 500f),
+                    value(effect, "Mirror Edges", 1f, 0f, 1f),
+                    value(effect, "Phase X", 0f, -2f, 2f),
+                    value(effect, "Phase Y", 0f, -2f, 2f))
             }
             "Wave Warp" -> {
-                first = floatArrayOf(2f, p["Wave Height"] ?: 0.012f, p["Wave Width"] ?: 4f, p["Wave Speed"] ?: 1f)
-                second = floatArrayOf(p["Wave Type"] ?: 0f, p["Direction"] ?: 0f, p["Phase"] ?: 0f, p["Pinning"] ?: 0f)
+                first = floatArrayOf(2f,
+                    value(effect, "Wave Height", 0.012f, 0f, 0.08f),
+                    value(effect, "Wave Width", 4f, 1f, 24f),
+                    value(effect, "Wave Speed", 1f, -8f, 8f))
+                second = floatArrayOf(
+                    value(effect, "Wave Type", 0f, 0f, 3f),
+                    value(effect, "Direction", 0f, 0f, 360f),
+                    value(effect, "Phase", 0f, 0f, 360f),
+                    value(effect, "Pinning", 0f, 0f, 3f))
             }
             "Warp Shake" -> {
-                first = floatArrayOf(3f, p["X Amount"] ?: 0.008f, p["Y Amount"] ?: 0.008f, p["Frequency"] ?: 8f)
-                second = floatArrayOf(p["Motion"] ?: 0f, p["Seed"] ?: 0f, p["Direction"] ?: 0f, 0f)
+                first = floatArrayOf(3f,
+                    value(effect, "X Amount", 0.008f, 0f, 0.08f),
+                    value(effect, "Y Amount", 0.008f, 0f, 0.08f),
+                    value(effect, "Frequency", 8f, 0.1f, 30f))
+                second = floatArrayOf(
+                    value(effect, "Motion", 0f, 0f, 1f),
+                    value(effect, "Seed", 0f, 0f, 100f),
+                    value(effect, "Direction", 0f, 0f, 360f), 0f)
             }
             "RGB Split" -> {
-                first = floatArrayOf(4f, p["Red Offset"] ?: 0.006f, p["Green Offset"] ?: 0f, p["Blue Offset"] ?: -0.006f)
-                second = floatArrayOf(p["Angle"] ?: 0f, p["Radial Split"] ?: 0f, p["Center X"] ?: 0.5f, p["Center Y"] ?: 0.5f)
+                first = floatArrayOf(4f,
+                    value(effect, "Red Offset", 0.006f, -0.04f, 0.04f),
+                    value(effect, "Green Offset", 0f, -0.04f, 0.04f),
+                    value(effect, "Blue Offset", -0.006f, -0.04f, 0.04f))
+                second = floatArrayOf(
+                    value(effect, "Angle", 0f, 0f, 360f),
+                    value(effect, "Radial Split", 0f, 0f, 1f),
+                    value(effect, "Center X", 0.5f, 0f, 1f),
+                    value(effect, "Center Y", 0.5f, 0f, 1f))
             }
             "Oscillate" -> {
-                first = floatArrayOf(5f, p["X Amplitude"] ?: 0.02f, p["Y Amplitude"] ?: 0.02f, p["Frequency"] ?: 1f)
-                second = floatArrayOf(p["Wave Shape"] ?: 0f, p["Phase"] ?: 0f, p["Half Range"] ?: 0f, 0f)
+                first = floatArrayOf(5f,
+                    value(effect, "X Amplitude", 0.02f, 0f, 0.15f),
+                    value(effect, "Y Amplitude", 0.02f, 0f, 0.15f),
+                    value(effect, "Frequency", 1f, 0.1f, 12f))
+                second = floatArrayOf(
+                    value(effect, "Wave Shape", 0f, 0f, 3f),
+                    value(effect, "Phase", 0f, 0f, 360f),
+                    value(effect, "Half Range", 0f, 0f, 1f), 0f)
             }
             "Deep Glow" -> {
-                first = floatArrayOf(6f, p["Threshold"] ?: 0.65f, p["Radius"] ?: 0.012f, p["Intensity"] ?: 1.2f)
-                second = floatArrayOf(p["Quality"] ?: 0f, p["Spread"] ?: 1f, p["Saturation"] ?: 1f, p["Glow Only"] ?: 0f)
+                first = floatArrayOf(6f,
+                    value(effect, "Threshold", 0.65f, 0f, 1f),
+                    value(effect, "Radius", 0.012f, 0.001f, 0.08f),
+                    value(effect, "Intensity", 1.2f, 0f, 4f))
+                second = floatArrayOf(
+                    value(effect, "Quality", 0f, 0f, 1f),
+                    value(effect, "Spread", 1f, 0.25f, 3f),
+                    value(effect, "Saturation", 1f, 0f, 2f),
+                    value(effect, "Glow Only", 0f, 0f, 1f))
             }
             "Exposure And Gamma" -> {
-                first = floatArrayOf(7f, p["Exposure"] ?: 0f, p["Gamma"] ?: 1f, p["Offset"] ?: 0f)
-                second = floatArrayOf(p["Channel"] ?: 0f, 0f, 0f, 0f)
+                first = floatArrayOf(7f,
+                    value(effect, "Exposure", 0f, -5f, 5f),
+                    value(effect, "Gamma", 1f, 0.1f, 3f),
+                    value(effect, "Offset", 0f, -1f, 1f))
+                second = floatArrayOf(value(effect, "Channel", 0f, 0f, 3f), 0f, 0f, 0f)
             }
             else -> {
                 first = floatArrayOf(0f, 0f, 0f, 0f)
