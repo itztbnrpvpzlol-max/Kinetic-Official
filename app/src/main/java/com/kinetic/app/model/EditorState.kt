@@ -28,6 +28,8 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
         private set
     var selectedEffectParameter by mutableStateOf<String?>(null)
         private set
+    var selectedEffectKey by mutableIntStateOf(-1)
+        private set
     var canUndo by mutableStateOf(false)
         private set
     var canRedo by mutableStateOf(false)
@@ -45,7 +47,7 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
         time = savedTime.coerceIn(0f, duration)
         layers = savedLayers.map(::syncPositionKeyframes)
         selectedId = null; selectedProp = null; selectedKey = -1
-        selectedEffectId = null; selectedEffectParameter = null
+        selectedEffectId = null; selectedEffectParameter = null; selectedEffectKey = -1
         undoStack.clear(); redoStack.clear(); sync()
     }
 
@@ -86,12 +88,13 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
         if (!effectStillExists) {
             selectedEffectId = null
             selectedEffectParameter = null
+            selectedEffectKey = -1
         }
     }
 
     private fun clearSelection() {
         selectedId = null; selectedProp = null; selectedKey = -1
-        selectedEffectId = null; selectedEffectParameter = null
+        selectedEffectId = null; selectedEffectParameter = null; selectedEffectKey = -1
     }
 
     private fun commit(f: (List<Layer>) -> List<Layer>) { beginEdit(); layers = f(layers) }
@@ -125,12 +128,12 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
     // ---------- selection / time ----------
     fun select(id: String?) {
         selectedId = id; selectedProp = null; selectedKey = -1
-        selectedEffectId = null; selectedEffectParameter = null
+        selectedEffectId = null; selectedEffectParameter = null; selectedEffectKey = -1
     }
 
     fun selectProp(id: PropId?) {
         selectedProp = id; selectedKey = -1
-        selectedEffectId = null; selectedEffectParameter = null
+        selectedEffectId = null; selectedEffectParameter = null; selectedEffectKey = -1
     }
 
     fun selectEffectParameter(layerId: String, effectId: String, parameter: String) {
@@ -140,17 +143,30 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
         selectedKey = -1
         selectedEffectId = effectId
         selectedEffectParameter = parameter
+        selectedEffectKey = -1
     }
 
     fun clearEffectParameterSelection() {
         selectedEffectId = null
         selectedEffectParameter = null
+        selectedEffectKey = -1
+    }
+
+    fun selectEffectKey(index: Int) {
+        val effectId = selectedEffectId ?: return
+        val parameter = selectedEffectParameter ?: return
+        val keys = layers.firstOrNull { it.id == selectedId }
+            ?.effectStack?.firstOrNull { it.id == effectId }
+            ?.parameterKeys?.get(parameter).orEmpty()
+        if (index !in keys.indices) return
+        selectedEffectKey = index
+        time = keys[index].t.coerceIn(0f, duration)
     }
 
 
     fun selectKey(prop: PropId, index: Int, seekTo: Float?) {
         selectedProp = prop; selectedKey = index
-        selectedEffectId = null; selectedEffectParameter = null
+        selectedEffectId = null; selectedEffectParameter = null; selectedEffectKey = -1
         if (seekTo != null) time = seekTo.coerceIn(0f, duration)
     }
 
