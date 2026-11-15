@@ -78,7 +78,6 @@ struct DecoderSession {
     int videoStream = -1;
     AVRational timeBase{1, AV_TIME_BASE};
     int64_t streamStart = 0;
-    bool codecOpened = false;
 };
 
 static int64_t monotonicNs() {
@@ -150,10 +149,8 @@ static const char* softwareDecoderName(AVCodecID id) {
 
 static void closeDecoder(DecoderSession* session) {
     if (session->codec) {
-        if (session->codecOpened) {
-            avcodec_close(session->codec);
-            session->codecOpened = false;
-        }
+        // Release FFmpeg's caller-owned surface reference before freeing the
+        // codec context; the decoder keeps its own reference until close.
         if (session->mediaCodec) {
             if (session->codec->hwaccel_context) av_mediacodec_default_free(session->codec);
             else av_free(session->mediaCodec);
@@ -214,7 +211,6 @@ static bool openCodec(DecoderSession* session, const AVCodec* decoder, bool hard
         avcodec_free_context(&session->codec);
         return false;
     }
-    session->codecOpened = true;
     session->hardwareDecoder = hardware;
     session->decoderName = decoder->name ? decoder->name : "unknown";
     return true;
