@@ -116,11 +116,11 @@ fun EffectsBrowserScreen(onClose: () -> Unit, onAddEffect: (String) -> Unit) {
             SectionHeading("Categories")
             Spacer(Modifier.height(12.dp))
             effectCategories.chunked(2).forEach { row ->
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     row.forEach { category -> CategoryTile(category, Modifier.weight(1f)) { selectedCategory = category } }
-                    repeat(4 - row.size) { Spacer(Modifier.weight(1f)) }
+                    if (row.size == 1) Spacer(Modifier.weight(1f))
                 }
-                Spacer(Modifier.height(6.dp))
+                Spacer(Modifier.height(10.dp))
             }
         } else {
             val category = selectedCategory!!
@@ -131,13 +131,13 @@ fun EffectsBrowserScreen(onClose: () -> Unit, onAddEffect: (String) -> Unit) {
                     modifier = Modifier.padding(vertical = 20.dp))
             } else {
                 category.effects.chunked(4).forEach { row ->
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         row.forEach { effect ->
                             EffectChoice(effect, category.accent, Modifier.weight(1f)) { onAddEffect(effect) }
                         }
-                        if (row.size == 1) Spacer(Modifier.weight(1f))
+                        repeat(4 - row.size) { Spacer(Modifier.weight(1f)) }
                     }
-                    Spacer(Modifier.height(10.dp))
+                    Spacer(Modifier.height(6.dp))
                 }
             }
         }
