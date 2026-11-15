@@ -201,26 +201,11 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
                     // made empty-space drags feel like taps and caused uneven ranges.
                     Row(Modifier.fillMaxWidth().height(72.dp)) {
                         Spacer(Modifier.width(leftW))
-                        Box(
-                            Modifier.weight(1f).fillMaxHeight()
-                                .pointerInput(hScroll, pps, dens, paneW, leftPx, leadingPadPx) {
-                                    detectHorizontalDragGestures { change, dragAmount ->
-                                        change.consume()
-                                        if (editor.playing) editor.playing = false
-                                        hScroll.dispatchRawDelta(-dragAmount)
-                                        // Raw dragging bypasses ScrollState's fling
-                                        // bookkeeping, so seek from the same centre
-                                        // coordinate used by layer-row scrolling.
-                                        val centreTime = (
-                                            (hScroll.value.toFloat() + paneW / 2f - leftPx - leadingPadPx) /
-                                                (pps * dens).coerceAtLeast(0.001f)
-                                            ).coerceAtLeast(0f)
-                                        if (kotlin.math.abs(editor.time - centreTime) > editor.frame / 2f) {
-                                            editor.seek(centreTime)
-                                        }
-                                    }
-                                }
-                        ) {
+                        // Use the exact same horizontalScroll container as every
+                        // layer row. Empty track space is not a separate gesture
+                        // surface, so drag slop, velocity, fling and scroll state
+                        // are identical everywhere in the timeline.
+                        Box(Modifier.weight(1f).fillMaxHeight().horizontalScroll(hScroll)) {
                             Spacer(Modifier.width(contentW).fillMaxHeight())
                         }
                     }
