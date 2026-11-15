@@ -680,6 +680,7 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
         if (selectedEffectId == effectId) {
             selectedEffectId = null
             selectedEffectParameter = null
+            selectedEffectKey = -1
         }
     }
 
