@@ -165,53 +165,89 @@ private fun ShelfSection(title: String, emptyMessage: String, icon: IconKind, ac
 
 @Composable
 private fun EffectChoice(name: String, accent: Color, modifier: Modifier = Modifier, onClick: () -> Unit) {
-    Box(
-        modifier.aspectRatio(1f).clip(RoundedCornerShape(15.dp))
-            .background(KColors.Bg)
-            .border(1.dp, KColors.Line, RoundedCornerShape(15.dp))
+    Column(
+        modifier.aspectRatio(0.82f).clip(RoundedCornerShape(12.dp))
+            .background(KColors.Surface)
+            .border(1.dp, KColors.Line, RoundedCornerShape(12.dp))
             .clickable(onClick = onClick)
     ) {
-        Canvas(Modifier.fillMaxSize()) {
-            val side = size.minDimension
-            drawCircle(
-                Brush.radialGradient(
-                    listOf(accent.copy(alpha = 0.22f), Color.Transparent),
-                    center = Offset(size.width * 0.82f, size.height * 0.16f),
-                    radius = side * 0.78f
-                ),
-                radius = side * 0.78f,
-                center = Offset(size.width * 0.82f, size.height * 0.16f)
-            )
-            drawRoundRect(
-                accent.copy(alpha = 0.10f),
-                Offset(size.width * 0.12f, size.height * 0.14f),
-                androidx.compose.ui.geometry.Size(size.width * 0.76f, size.height * 0.72f),
-                androidx.compose.ui.geometry.CornerRadius(side * 0.10f),
-                style = Stroke(side * 0.014f)
-            )
+        Box(Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(topStart = 11.dp, topEnd = 11.dp))) {
+            EffectArtwork(name, accent, Modifier.fillMaxSize())
+            Box(
+                Modifier.align(Alignment.TopEnd).padding(6.dp).size(23.dp)
+                    .clip(CircleShape).background(KColors.Bg.copy(alpha = 0.82f)),
+                contentAlignment = Alignment.Center
+            ) {
+                KIcon(IconKind.PLUS, accent, Modifier.size(12.dp))
+            }
         }
         Column(
-            Modifier.fillMaxSize().padding(11.dp),
-            verticalArrangement = Arrangement.SpaceBetween
+            Modifier.fillMaxWidth().height(43.dp).padding(horizontal = 6.dp, vertical = 5.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
         ) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                KIcon(IconKind.EFFECTS, accent, Modifier.size(21.dp))
-                Spacer(Modifier.weight(1f))
-                Box(
-                    Modifier.size(25.dp).clip(RoundedCornerShape(8.dp))
-                        .background(accent.copy(alpha = 0.16f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    KIcon(IconKind.PLUS, accent, Modifier.size(13.dp))
+            Text(name, color = KColors.Text, fontSize = 9.sp, lineHeight = 10.sp,
+                fontWeight = FontWeight.SemiBold, maxLines = 2,
+                overflow = TextOverflow.Ellipsis, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+        }
+    }
+}
+
+@Composable
+private fun EffectArtwork(name: String, accent: Color, modifier: Modifier = Modifier) {
+    Canvas(modifier) {
+        val w = size.width
+        val h = size.height
+        val seed = name.hashCode()
+        val second = when (kotlin.math.abs(seed % 5)) {
+            0 -> Color(0xFF75D5D0)
+            1 -> Color(0xFFFFA66D)
+            2 -> Color(0xFF9C8BFF)
+            3 -> Color(0xFF8FC5FF)
+            else -> Color(0xFFFF83B2)
+        }
+        drawRect(Brush.linearGradient(listOf(
+            KColors.Bg, accent.copy(alpha = 0.62f), second.copy(alpha = 0.72f), KColors.Surface
+        ), start = Offset(0f, 0f), end = Offset(w, h)))
+        drawCircle(Brush.radialGradient(
+            listOf(Color.White.copy(alpha = 0.30f), Color.Transparent),
+            center = Offset(w * 0.32f, h * 0.34f), radius = w * 0.58f
+        ), radius = w * 0.58f, center = Offset(w * 0.32f, h * 0.34f))
+        when {
+            name.contains("Glow", true) || name.contains("Light", true) -> {
+                drawCircle(Color.White.copy(alpha = 0.22f), w * 0.22f, Offset(w * 0.5f, h * 0.48f))
+                drawCircle(accent.copy(alpha = 0.60f), w * 0.14f, Offset(w * 0.5f, h * 0.48f))
+            }
+            name.contains("Warp", true) || name.contains("Wave", true) || name.contains("Shake", true) -> {
+                for (i in 0..5) {
+                    val y = h * (0.16f + i * 0.13f)
+                    val p = androidx.compose.ui.graphics.Path().apply {
+                        moveTo(0f, y)
+                        cubicTo(w * 0.25f, y - h * 0.16f, w * 0.65f, y + h * 0.16f, w, y - h * 0.02f)
+                    }
+                    drawPath(p, Color.White.copy(alpha = 0.34f - i * 0.035f),
+                        style = Stroke(width = (w * 0.018f).coerceAtLeast(1f)))
                 }
             }
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(name, color = KColors.Text, fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                Text("ADD TO LAYER", color = KColors.Muted, fontSize = 7.sp,
-                    fontWeight = FontWeight.Bold, letterSpacing = 0.65.sp)
+            name.contains("RGB", true) || name.contains("Color", true) || name.contains("Hue", true) -> {
+                val sw = w / 3f
+                drawRect(Color(0xFFFF6262).copy(alpha = 0.60f), Offset(0f, 0f), androidx.compose.ui.geometry.Size(sw, h))
+                drawRect(Color(0xFF5FE5A5).copy(alpha = 0.48f), Offset(sw, 0f), androidx.compose.ui.geometry.Size(sw, h))
+                drawRect(Color(0xFF65A8FF).copy(alpha = 0.60f), Offset(sw * 2f, 0f), androidx.compose.ui.geometry.Size(sw, h))
+            }
+            else -> {
+                for (i in 0..7) {
+                    val x = w * (0.10f + (i * 37 % 80) / 100f)
+                    val y = h * (0.12f + (i * 23 % 72) / 100f)
+                    val r = w * (0.045f + (i % 3) * 0.025f)
+                    drawCircle(Color.White.copy(alpha = 0.28f), r, Offset(x, y))
+                }
+                drawRoundRect(Color.White.copy(alpha = 0.25f),
+                    Offset(w * 0.16f, h * 0.28f), androidx.compose.ui.geometry.Size(w * 0.68f, h * 0.42f),
+                    androidx.compose.ui.geometry.CornerRadius(w * 0.06f), style = Stroke(w * 0.018f))
             }
         }
+        drawRect(Color.Black.copy(alpha = 0.08f))
     }
 }
 @Composable
