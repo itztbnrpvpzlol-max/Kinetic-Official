@@ -1,4 +1,8 @@
 #include <jni.h>
+#include <android/log.h>
+#include <libavutil/mem.h>
+#include <cstdlib>
+#include <new>
 #include <android/native_window.h>
 #include <android/native_window_jni.h>
 #include <libavcodec/avcodec.h>
@@ -259,6 +263,10 @@ static bool renderHardwareFrame(DecoderSession* session, AVFrame* frame) {
     if (ptsUs < 0) ptsUs = expectedUs;
 
     if (!playing) {
+        if (!session->stepPending) {
+            av_mediacodec_release_buffer(buffer, 0);
+            return true;
+        }
         const int64_t target = session->seekTargetUs;
         if (ptsUs + 40000 < target) {
             av_mediacodec_release_buffer(buffer, 0);
@@ -511,7 +519,12 @@ Java_com_kinetic_app_engine_NativeFfmpegDecoder_nativeSetClock(
     next.generation = generation;
 
     if (session->clock.valid && session->clock.generation != generation) {
-        const int64_t target = expectedSourceUsLocked(session, now);
+        const int64_t elapsedUs = next.playing
+            ? static_cast<int64_t>(std::max<int64_t>(0, now - next.monotonicNs) / 1000.0 * next.masterSpeed)
+            : 0;
+        const int64_t timelineUs = std::max<int64_t>(0, next.positionUs + elapsedUs);
+        const int64_t target = std::max<int64_t>(0, next.sourceOffsetUs +
+            static_cast<int64_t>(std::max<int64_t>(0, timelineUs - next.clipStartUs) * next.clipSpeed));
         if (session->lastRenderedPtsUs < 0 ||
             std::llabs(target - session->lastRenderedPtsUs) > 140000) {
             session->seekTargetUs = target;
