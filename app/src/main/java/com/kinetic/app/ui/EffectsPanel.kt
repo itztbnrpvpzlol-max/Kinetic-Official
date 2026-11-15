@@ -123,9 +123,9 @@ private fun controlsFor(effect: EffectInstance): List<EffectControlSpec> = when 
 }
 @Composable
 fun EffectControlsPanel(editor: EditorState, layer: Layer, onBrowseEffects: () -> Unit) {
-    var expandedEffectId by remember(layer.id, layer.effectStack.lastOrNull()?.id) {
-        mutableStateOf(layer.effectStack.lastOrNull()?.id)
-    }
+    // Reopening the panel never auto-expands the most recently added effect.
+    // Expansion is a deliberate user action for this panel session.
+    var expandedEffectId by remember(layer.id) { mutableStateOf<String?>(null) }
     Column(
         Modifier.fillMaxSize().background(KColors.Surface)
             .verticalScroll(rememberScrollState()),
