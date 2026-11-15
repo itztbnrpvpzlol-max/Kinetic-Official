@@ -386,8 +386,35 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
         layers = m
     }
 
-    fun moveClip(id: String, dt: Float) =
-        updateLayer(id, push = false) { it.copy(start = max(0f, it.start + dt)) }
+    /**
+     * Move a clip and its animation as one timeline object. Property and effect
+     * keyframe times are composition-time values, so they must follow the clip
+     * when its start position changes; otherwise the animation is left behind.
+     */
+    fun moveClip(id: String, dt: Float) {
+        val original = layers.firstOrNull { it.id == id } ?: return
+        val nextStart = max(0f, original.start + dt)
+        val actualDelta = nextStart - original.start
+        if (abs(actualDelta) < 0.0001f) return
+
+        updateLayer(id, push = false) { layer ->
+            val shiftedProps = layer.props.mapValues { (_, prop) ->
+                if (prop.keys.isEmpty()) prop else prop.copy(
+                    keys = prop.keys.map { key -> key.copy(t = (key.t + actualDelta).coerceAtLeast(0f)) }
+                        .sortedBy { it.t }
+                )
+            }
+            val shiftedEffects = layer.effectStack.map { effect ->
+                if (effect.parameterKeys.isEmpty()) effect else effect.copy(
+                    parameterKeys = effect.parameterKeys.mapValues { (_, keys) ->
+                        keys.map { key -> key.copy(t = (key.t + actualDelta).coerceAtLeast(0f)) }
+                            .sortedBy { it.t }
+                    }
+                )
+            }
+            layer.copy(start = nextStart, props = shiftedProps, effectStack = shiftedEffects)
+        }
+    }
 
     fun trimRight(id: String, dt: Float) = updateLayer(id, push = false) { l ->
         l.copy(duration = (l.duration + dt).coerceIn(0.1f, max(0.1f, l.srcLength - l.srcOffset)))
