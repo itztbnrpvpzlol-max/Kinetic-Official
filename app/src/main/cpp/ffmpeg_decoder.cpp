@@ -1,10 +1,12 @@
 #include <jni.h>
 #include <android/log.h>
-#include <libavutil/mem.h>
 #include <cstdlib>
 #include <new>
 #include <android/native_window.h>
 #include <android/native_window_jni.h>
+
+extern "C" {
+#include <libavutil/mem.h>
 #include <libavcodec/avcodec.h>
 #include <libavcodec/mediacodec.h>
 #include <libavcodec/jni.h>
@@ -12,6 +14,7 @@
 #include <libavutil/error.h>
 #include <libavutil/time.h>
 #include <libswscale/swscale.h>
+}
 #include <pthread.h>
 #include <atomic>
 #include <algorithm>
