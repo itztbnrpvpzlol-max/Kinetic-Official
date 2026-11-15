@@ -10,12 +10,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: kinetic-android-apk-\${{ github.ref }}
+  group: kinetic-android-apk-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   build-ffmpeg:
-    name: Build FFmpeg (\${{ matrix.abi }})
+    name: Build FFmpeg (${{ matrix.abi }})
     runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:
@@ -35,35 +35,35 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y nasm yasm gnupg
-          SDKMANAGER="\${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager"
+          SDKMANAGER="${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager"
           for attempt in 1 2 3; do
-            if { yes || true; } | "\${SDKMANAGER}" --install "ndk;26.1.10909125"; then
-              test -x "\${ANDROID_HOME}/ndk/26.1.10909125/ndk-build"
+            if { yes || true; } | "${SDKMANAGER}" --install "ndk;26.1.10909125"; then
+              test -x "${ANDROID_HOME}/ndk/26.1.10909125/ndk-build"
               break
             fi
-            if [ "\${attempt}" -eq 3 ]; then
+            if [ "${attempt}" -eq 3 ]; then
               echo "Android NDK installation failed after 3 attempts."
               exit 1
             fi
             sleep 10
           done
-          echo "ANDROID_NDK_HOME=\${ANDROID_HOME}/ndk/26.1.10909125" >> "\${GITHUB_ENV}"
+          echo "ANDROID_NDK_HOME=${ANDROID_HOME}/ndk/26.1.10909125" >> "${GITHUB_ENV}"
 
       - name: Cache FFmpeg native libraries
         id: ffmpeg-cache
         uses: actions/cache@v4
         with:
-          path: app/src/main/cpp/ffmpeg/prebuilt/\${{ matrix.abi }}
-          key: kinetic-ffmpeg-9.0.2-\${{ matrix.abi }}-ndk26.1.10909125-v1
+          path: app/src/main/cpp/ffmpeg/prebuilt/${{ matrix.abi }}
+          key: kinetic-ffmpeg-9.0.2-${{ matrix.abi }}-ndk26.1.10909125-v1
 
       - name: Build FFmpeg from verified upstream source
         if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
-        run: bash app/src/main/cpp/build-ffmpeg-android.sh "\${{ matrix.abi }}"
+        run: bash app/src/main/cpp/build-ffmpeg-android.sh "${{ matrix.abi }}"
 
       - name: Upload FFmpeg libraries
         uses: actions/upload-artifact@v4
         with:
-          name: ffmpeg-\${{ matrix.abi }}
+          name: ffmpeg-${{ matrix.abi }}
           path: app/src/main/cpp/ffmpeg/prebuilt
           if-no-files-found: error
           retention-days: 1
@@ -99,15 +99,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          SDKMANAGER="\${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager"
+          SDKMANAGER="${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager"
           for attempt in 1 2 3; do
-            rm -rf "\${ANDROID_HOME}/ndk/26.1.10909125"
-            if { yes || true; } | "\${SDKMANAGER}" --install "platforms;android-36" "build-tools;36.0.0" "ndk;26.1.10909125" "cmake;3.22.1"; then
-              test -x "\${ANDROID_HOME}/ndk/26.1.10909125/ndk-build"
-              test -d "\${ANDROID_HOME}/platforms/android-36"
+            rm -rf "${ANDROID_HOME}/ndk/26.1.10909125"
+            if { yes || true; } | "${SDKMANAGER}" --install "platforms;android-36" "build-tools;36.0.0" "ndk;26.1.10909125" "cmake;3.22.1"; then
+              test -x "${ANDROID_HOME}/ndk/26.1.10909125/ndk-build"
+              test -d "${ANDROID_HOME}/platforms/android-36"
               break
             fi
-            if [ "\${attempt}" -eq 3 ]; then
+            if [ "${attempt}" -eq 3 ]; then
               echo "Android NDK installation failed after 3 attempts."
               exit 1
             fi
@@ -119,25 +119,25 @@ jobs:
         run: |
           set -euo pipefail
           VERSION_CODE=$((GITHUB_RUN_NUMBER * 100 + GITHUB_RUN_ATTEMPT))
-          VERSION_NAME="0.\${GITHUB_RUN_NUMBER}.\${GITHUB_RUN_ATTEMPT}"
-          echo "KINETIC_VERSION_CODE=\${VERSION_CODE}" >> "\${GITHUB_ENV}"
-          echo "KINETIC_VERSION_NAME=\${VERSION_NAME}" >> "\${GITHUB_ENV}"
-          echo "Building Kinetic \${VERSION_NAME} (versionCode \${VERSION_CODE})"
+          VERSION_NAME="0.${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
+          echo "KINETIC_VERSION_CODE=${VERSION_CODE}" >> "${GITHUB_ENV}"
+          echo "KINETIC_VERSION_NAME=${VERSION_NAME}" >> "${GITHUB_ENV}"
+          echo "Building Kinetic ${VERSION_NAME} (versionCode ${VERSION_CODE})"
 
       - name: Verify FFmpeg ABI outputs
         shell: bash
         run: |
           set -euo pipefail
           for abi in arm64-v8a armeabi-v7a x86_64; do
-            test -s "app/src/main/cpp/ffmpeg/prebuilt/\${abi}/lib/libavformat.a"
-            test -s "app/src/main/cpp/ffmpeg/prebuilt/\${abi}/lib/libavcodec.a"
-            test -s "app/src/main/cpp/ffmpeg/prebuilt/\${abi}/lib/libswscale.a"
-            test -s "app/src/main/cpp/ffmpeg/prebuilt/\${abi}/lib/libavutil.a"
-            test -s "app/src/main/cpp/ffmpeg/prebuilt/\${abi}/include/libavcodec/mediacodec.h"
+            test -s "app/src/main/cpp/ffmpeg/prebuilt/${abi}/lib/libavformat.a"
+            test -s "app/src/main/cpp/ffmpeg/prebuilt/${abi}/lib/libavcodec.a"
+            test -s "app/src/main/cpp/ffmpeg/prebuilt/${abi}/lib/libswscale.a"
+            test -s "app/src/main/cpp/ffmpeg/prebuilt/${abi}/lib/libavutil.a"
+            test -s "app/src/main/cpp/ffmpeg/prebuilt/${abi}/include/libavcodec/mediacodec.h"
           done
 
       - name: Build debug APK
-        run: gradle assembleDebug --no-daemon -PKINETIC_VERSION_CODE="\${KINETIC_VERSION_CODE}" -PKINETIC_VERSION_NAME="\${KINETIC_VERSION_NAME}"
+        run: gradle assembleDebug --no-daemon -PKINETIC_VERSION_CODE="${KINETIC_VERSION_CODE}" -PKINETIC_VERSION_NAME="${KINETIC_VERSION_NAME}"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
