@@ -158,6 +158,10 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
         val keys = layers.firstOrNull { it.id == selectedId }
             ?.effectStack?.firstOrNull { it.id == effectId }
             ?.parameterKeys?.get(parameter).orEmpty()
+        if (index < 0) {
+            selectedEffectKey = -1
+            return
+        }
         if (index !in keys.indices) return
         selectedEffectKey = index
         time = keys[index].t.coerceIn(0f, duration)
