@@ -81,6 +81,7 @@ class FfmpegVideoPlayer(
                 if (lastPlaying) NativeFfmpegDecoder.nativePlay(handle)
                 else NativeFfmpegDecoder.nativePause(handle)
                 pendingClockSync.getAndSet(null)?.let(::applyClockSync)
+            scheduleHealthCheck(next)
             decoderExecutor.schedule({
                 if (!released && attachedSurface === next && !receivedSurfaceFrame && fallback == null) {
                     val handleAtTimeout = nativeHandle
@@ -90,8 +91,10 @@ class FfmpegVideoPlayer(
                     } else {
                         "FFmpeg did not present a frame"
                     }
-                    Log.w(TAG, "$reason; switching to Android MediaCodec compatibility fallback")
-                    activateFallback(next)
+                    if (!receivedSurfaceFrame && fallback == null && attachedSurface === next) {
+                        Log.w(TAG, "$reason; switching to Android MediaCodec compatibility fallback")
+                        activateFallback(next)
+                    }
                 }
             }, FIRST_FRAME_TIMEOUT_SECONDS, TimeUnit.SECONDS)
                 Log.i(TAG, "Direct FFmpeg decoder attached to SurfaceTexture: $sourceUri")
@@ -191,7 +194,7 @@ class FfmpegVideoPlayer(
                 sourceDescriptor?.close()
                 sourceDescriptor = null
                 sourcePath = null
-                decoderExecutor.shutdown()
+                decoderExecutor.shutdownNow()
             }
         }.onFailure { decoderExecutor.shutdownNow() }
     }
@@ -257,6 +260,25 @@ class FfmpegVideoPlayer(
         )
     }
 
+
+    private fun scheduleHealthCheck(surface: Surface) {
+        if (released) return
+        decoderExecutor.schedule({
+            if (released || attachedSurface !== surface || fallback != null) return@schedule
+            val handle = nativeHandle
+            if (handle == 0L) return@schedule
+            val decoderState = runCatching { NativeFfmpegDecoder.nativeState(handle) }
+                .getOrDefault(-1)
+            if (decoderState < 0 || decoderState == 2) {
+                val reason = runCatching { NativeFfmpegDecoder.nativeError(handle) }
+                    .getOrDefault("FFmpeg decoder stopped unexpectedly")
+                Log.w(TAG, "$reason; switching to Android MediaCodec compatibility fallback")
+                activateFallback(surface)
+            } else {
+                scheduleHealthCheck(surface)
+            }
+        }, 1L, TimeUnit.SECONDS)
+    }
 
     private fun activateFallback(outputSurface: Surface) {
         if (released || fallback != null) return
