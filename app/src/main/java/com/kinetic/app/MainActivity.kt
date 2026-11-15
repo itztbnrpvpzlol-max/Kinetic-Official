@@ -16,11 +16,10 @@ import com.kinetic.app.data.ProjectStore
 import com.kinetic.app.model.EditorState
 import com.kinetic.app.ui.EditorScreen
 import com.kinetic.app.ui.HomeScreen
-import com.kinetic.app.ui.MpvTestScreen
 import com.kinetic.app.ui.KineticTheme
 import com.kinetic.app.ui.SettingsScreen
 
-private enum class Screen { HOME, EDITOR, SETTINGS, MPV_TEST }
+private enum class Screen { HOME, EDITOR, SETTINGS }
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -66,13 +65,9 @@ class MainActivity : ComponentActivity() {
                             onOpenSettings = { settingsFrom = Screen.EDITOR; screen = Screen.SETTINGS }
                         )
                     }
-                    Screen.MPV_TEST -> {
-                        BackHandler { screen = Screen.SETTINGS }
-                        MpvTestScreen(onBack = { screen = Screen.SETTINGS })
-                    }
                     Screen.SETTINGS -> {
                         BackHandler { screen = settingsFrom }
-                        SettingsScreen(settings, onBack = { screen = settingsFrom }, onOpenMpvTest = { screen = Screen.MPV_TEST })
+                        SettingsScreen(settings, onBack = { screen = settingsFrom })
                     }
                 }
             }

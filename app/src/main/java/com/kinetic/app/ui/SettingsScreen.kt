@@ -39,7 +39,7 @@ import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.launch
 
 @Composable
-fun SettingsScreen(settings: AppSettings, onBack: () -> Unit, onOpenMpvTest: () -> Unit) {
+fun SettingsScreen(settings: AppSettings, onBack: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var showClearCacheDialog by remember { mutableStateOf(false) }
@@ -64,16 +64,6 @@ fun SettingsScreen(settings: AppSettings, onBack: () -> Unit, onOpenMpvTest: () 
             Section("Preview & performance")
             ChoiceRow("Preview quality", AppSettings.PREVIEW_QUALITIES, settings.previewQualityIndex) { settings.updatePreviewQuality(it) }
             SwitchRow("Show preview stats / debug overlay", settings.showPreviewDiagnostics) { settings.updateShowPreviewDiagnostics(it) }
-            Row(
-                Modifier.fillMaxWidth().clickable(onClick = onOpenMpvTest).padding(vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text("MPV decoder test", color = KColors.Text, fontSize = 15.sp)
-                    Text("Compare MPV hardware and software decoding", color = KColors.Dim, fontSize = 12.sp)
-                }
-                Text("Open", color = KColors.Accent, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-            }
             Row(
                 Modifier.fillMaxWidth().clickable { showClearCacheDialog = true }.padding(vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically
