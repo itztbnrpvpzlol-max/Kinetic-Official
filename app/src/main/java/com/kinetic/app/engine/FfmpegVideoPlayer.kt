@@ -298,7 +298,7 @@ class FfmpegVideoPlayer(
             val descriptor = appContext.contentResolver.openFileDescriptor(sourceUri, "r")
                 ?: error("Android could not open the selected video")
             sourceDescriptor = descriptor
-            "/proc/self/fd/\${descriptor.fd}"
+            "/proc/self/fd/" + descriptor.fd
         }
         else -> sourceUri.toString()
     }
