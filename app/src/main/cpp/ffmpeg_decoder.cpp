@@ -324,7 +324,7 @@ static bool renderHardwareFrame(DecoderSession* session, AVFrame* frame) {
         seekTargetUs = session->seekTargetUs;
         expectedUs = expectedSourceUsLocked(session, monotonicNs());
         rate = session->clock.valid
-            ? std::max(0.1, session->clock.masterSpeed * session->clock.clipSpeed)
+            ? std::clamp(session->clock.masterSpeed * session->clock.clipSpeed, 0.1, 4.0)
             : std::max(0.1f, session->manualSpeed);
     }
     if (ptsUs < 0) ptsUs = expectedUs;
@@ -727,6 +727,7 @@ Java_com_kinetic_app_engine_NativeFfmpegDecoder_nativeSetClock(
     }
     session->clock = next;
     session->playing = next.playing;
+    if (next.playing) session->stepPending = false;
     session->condition.notify_all();
 }
 
