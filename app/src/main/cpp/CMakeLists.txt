@@ -52,5 +52,8 @@ target_link_libraries(kinetic_engine
     ${z-lib}
     ${dl-lib}
     ${m-lib}
-    ${atomic-lib}
 )
+
+if(atomic-lib)
+    target_link_libraries(kinetic_engine ${atomic-lib})
+endif()
