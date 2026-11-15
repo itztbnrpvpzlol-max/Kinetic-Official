@@ -5,10 +5,10 @@ set(FFMPEG_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/ffmpeg/prebuilt/${ANDROID_ABI}")
 foreach(required_file
     "${FFMPEG_ROOT}/include/libavcodec/avcodec.h"
     "${FFMPEG_ROOT}/include/libavcodec/mediacodec.h"
-    "${FFMPEG_ROOT}/lib/libavformat.a"
-    "${FFMPEG_ROOT}/lib/libavcodec.a"
-    "${FFMPEG_ROOT}/lib/libswscale.a"
-    "${FFMPEG_ROOT}/lib/libavutil.a")
+    "${FFMPEG_ROOT}/libavformat.so"
+    "${FFMPEG_ROOT}/libavcodec.so"
+    "${FFMPEG_ROOT}/libswscale.so"
+    "${FFMPEG_ROOT}/libavutil.so")
     if(NOT EXISTS "${required_file}")
         message(FATAL_ERROR
             "Missing bundled FFmpeg build: ${required_file}. Run app/src/main/cpp/build-ffmpeg-android.sh for ${ANDROID_ABI} before Gradle.")
@@ -22,9 +22,9 @@ add_library(kinetic_engine SHARED
 )
 
 foreach(ffmpeg_library avformat avcodec swscale avutil)
-    add_library(ffmpeg_${ffmpeg_library} STATIC IMPORTED GLOBAL)
+    add_library(ffmpeg_${ffmpeg_library} SHARED IMPORTED GLOBAL)
     set_target_properties(ffmpeg_${ffmpeg_library} PROPERTIES
-        IMPORTED_LOCATION "${FFMPEG_ROOT}/lib/lib${ffmpeg_library}.a")
+        IMPORTED_LOCATION "${FFMPEG_ROOT}/lib${ffmpeg_library}.so")
 endforeach()
 
 target_include_directories(kinetic_engine PRIVATE "${FFMPEG_ROOT}/include")
