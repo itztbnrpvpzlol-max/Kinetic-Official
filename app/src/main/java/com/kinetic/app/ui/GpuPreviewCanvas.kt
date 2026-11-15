@@ -475,7 +475,7 @@ private fun GpuVideoPlayerLayer(
         // Wait for the SurfaceTexture callback; otherwise a stalled FFmpeg
         // surface/output failure can leave the preview black indefinitely.
         var waitedMs = 0
-        while (waitedMs < 8_000 && !player.hasReceivedFrame()) {
+        while (waitedMs < 12_000 && !player.hasReceivedFrame()) {
             if (player.decoderState() == -1) {
                 Log.e("KineticVideo", "FFmpeg decoder failed for layer ${layer.id}; using bitmap fallback")
                 onDecoderFailed(layer.id)
