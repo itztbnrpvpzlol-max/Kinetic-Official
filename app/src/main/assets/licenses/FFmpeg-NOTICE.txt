@@ -1,0 +1,8 @@
+Kinetic bundles FFmpeg 9.0.2 as shared native libraries built from the official FFmpeg source release.
+
+FFmpeg project: https://ffmpeg.org/
+Source release: https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz
+Source build script: app/src/main/cpp/build-ffmpeg-android.sh
+License: GNU Lesser General Public License, version 2.1 or later (see FFmpeg-LGPLv2.1.txt).
+
+This Android build enables JNI and MediaCodec support and disables FFmpeg encoders, muxers, filters and device I/O that Kinetic does not use for its preview decoder. No GPL-only or nonfree external libraries are enabled by this build configuration.
