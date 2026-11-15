@@ -1,6 +1,11 @@
 package com.kinetic.app.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -194,6 +199,9 @@ fun EffectControlsPanel(editor: EditorState, layer: Layer, onBrowseEffects: () -
                             EffectParameterLine(editor, layer, liveEffect, spec, selected) {
                                 editor.selectEffectParameter(layer.id, effect.id, spec.key)
                             }
+                            if (liveEffect.parameterKeys[spec.key].orEmpty().isNotEmpty()) {
+                                EffectKeyframeRow(editor, liveEffect, spec)
+                            }
                         }
                     }
                 }
@@ -304,6 +312,56 @@ private fun EffectParameterLine(
                         editor.updateEffectParameter(layer.id, effect.id, spec.key, value.coerceIn(spec.min, spec.max))
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun EffectKeyframeRow(
+    editor: EditorState,
+    effect: EffectInstance,
+    spec: EffectControlSpec
+) {
+    val keys = effect.parameterKeys[spec.key].orEmpty()
+    if (keys.isEmpty()) return
+    val duration = editor.duration.coerceAtLeast(editor.frame)
+    Row(
+        Modifier.fillMaxWidth().height(25.dp)
+            .background(KColors.Bg.copy(alpha = 0.72f))
+            .padding(start = 10.dp, end = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text("KEYFRAMES", color = KColors.Muted, fontSize = 7.sp,
+            fontWeight = FontWeight.Bold, modifier = Modifier.width(62.dp))
+        Canvas(
+            Modifier.weight(1f).fillMaxHeight()
+                .pointerInput(effect.id, spec.key, keys, duration) {
+                    detectTapGestures { tap ->
+                        if (size.width <= 0) return@detectTapGestures
+                        val tappedTime = (tap.x / size.width).coerceIn(0f, 1f) * duration
+                        val nearest = keys.indices.minByOrNull { abs(keys[it].t - tappedTime) } ?: -1
+                        if (nearest >= 0) editor.selectEffectKey(nearest)
+                    }
+                }
+        ) {
+            val centerY = size.height / 2f
+            val selectedIndex = editor.selectedEffectKey
+            keys.forEachIndexed { index, key ->
+                val x = (key.t / duration).coerceIn(0f, 1f) * size.width
+                val selected = index == selectedIndex
+                val radius = if (selected) 4.dp.toPx() else 3.dp.toPx()
+                drawCircle(
+                    color = if (selected) KColors.Accent else KColors.ClipText,
+                    radius = radius,
+                    center = Offset(x, centerY)
+                )
+                if (selected) drawCircle(
+                    color = KColors.Accent.copy(alpha = 0.45f),
+                    radius = radius + 2.dp.toPx(),
+                    center = Offset(x, centerY),
+                    style = Stroke(width = 1.dp.toPx())
+                )
             }
         }
     }
