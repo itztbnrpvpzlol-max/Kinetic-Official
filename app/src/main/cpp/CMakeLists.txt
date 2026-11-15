@@ -44,12 +44,10 @@ target_compile_features(kinetic_engine PRIVATE cxx_std_17)
 target_compile_options(kinetic_engine PRIVATE -O3 -fno-exceptions -fno-rtti)
 target_link_options(kinetic_engine PRIVATE "-Wl,-z,max-page-size=16384")
 target_link_libraries(kinetic_engine
-    "-Wl,--start-group"
     ffmpeg_avformat
     ffmpeg_avcodec
     ffmpeg_swscale
     ffmpeg_avutil
-    "-Wl,--end-group"
     ${log-lib}
     ${android-lib}
     ${glesv3-lib}
