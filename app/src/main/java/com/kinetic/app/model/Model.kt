@@ -332,7 +332,7 @@ fun createEffect(name: String): EffectInstance? {
  * Serializes editable effect state only. Effect definitions, defaults, keyframe
  * evaluation, validation, and shader-uniform packing are owned by KRE in C++.
  */
-fun effectUniforms(effects: List<EffectInstance>, time: Float = 0f): FloatArray {
+fun buildNativeEffectUniforms(effects: List<EffectInstance>, time: Float = 0f): FloatArray {
     if (!NativeRenderEngine.available || effects.isEmpty()) return FloatArray(0)
     val effectNames = effects.map { it.name }.toTypedArray()
     val enabled = effects.map { it.enabled }.toBooleanArray()

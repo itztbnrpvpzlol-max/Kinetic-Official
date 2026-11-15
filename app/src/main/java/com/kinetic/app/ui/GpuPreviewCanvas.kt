@@ -56,7 +56,7 @@ import com.kinetic.app.model.EditorState
 import com.kinetic.app.model.LayerType
 import com.kinetic.app.model.PropId
 import com.kinetic.app.model.layerMatrix
-import com.kinetic.app.model.effectUniforms
+import com.kinetic.app.model.buildNativeEffectUniforms
 import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
 import android.net.Uri
@@ -388,7 +388,7 @@ private fun GpuCompositionPreviewCanvas(
             renderLayers += GpuLayer(
                 layer.id, null, Matrix(layerMatrix(layer, editor.time, byId)),
                 layer.width, layer.height, opacity, layer.maskEnabled,
-                "Grayscale" in layer.effects, layer.blendMode, true, effectUniforms(layer.effectStack, editor.time)
+                "Grayscale" in layer.effects, layer.blendMode, true, buildNativeEffectUniforms(layer.effectStack, editor.time)
             )
             continue
         }
