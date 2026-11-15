@@ -128,40 +128,18 @@ fun EffectControlsPanel(editor: EditorState, layer: Layer, onBrowseEffects: () -
     }
     Column(
         Modifier.fillMaxSize().background(KColors.Surface)
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 4.dp, vertical = 5.dp),
-        verticalArrangement = Arrangement.spacedBy(5.dp)
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(2.dp)
     ) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
-                Text("EFFECTS", color = KColors.Text, fontSize = 12.sp, fontWeight = FontWeight.Bold,
-                    letterSpacing = 1.0.sp)
-                Text("Build and animate this layer's look", color = KColors.Muted, fontSize = 8.sp)
-            }
-            Box(
-                Modifier.clip(RoundedCornerShape(20.dp))
-                    .background(KColors.Accent.copy(alpha = 0.13f))
-                    .border(1.dp, KColors.Accent.copy(alpha = 0.28f), RoundedCornerShape(20.dp))
-                    .padding(horizontal = 10.dp, vertical = 6.dp)
-            ) {
-                Text("${layer.effectStack.size} ACTIVE", color = KColors.Accent,
-                    fontSize = 8.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.6.sp)
-            }
-        }
-
-        if (layer.effectStack.isEmpty()) {
-            Column(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
-                    .background(KColors.Bg).border(1.dp, KColors.Line, RoundedCornerShape(14.dp))
-                    .padding(vertical = 22.dp, horizontal = 16.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(7.dp)
-            ) {
-                Text("◇", color = KColors.Accent, fontSize = 25.sp)
-                Text("Your effect stack is empty", color = KColors.Text, fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold)
-                Text("Add an effect to start shaping this layer.", color = KColors.Muted, fontSize = 9.sp)
-            }
+        Row(
+            Modifier.fillMaxWidth().height(32.dp).padding(horizontal = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("EFFECTS", color = KColors.Text, fontSize = 12.sp,
+                fontWeight = FontWeight.Bold, letterSpacing = 1.0.sp)
+            Spacer(Modifier.weight(1f))
+            Text("${layer.effectStack.size} ACTIVE", color = KColors.Accent,
+                fontSize = 8.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp)
         }
 
         layer.effectStack.forEachIndexed { index, effect ->
@@ -169,15 +147,14 @@ fun EffectControlsPanel(editor: EditorState, layer: Layer, onBrowseEffects: () -
             val keyedParameters = effect.parameterKeys.values.count { it.isNotEmpty() }
             val accent = if (effect.enabled) KColors.Accent else KColors.Dim
             Column(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
+                Modifier.fillMaxWidth()
                     .background(KColors.Bg)
-                    .border(1.dp, if (expanded) KColors.Accent.copy(alpha = 0.48f) else KColors.Line,
-                        RoundedCornerShape(8.dp))
+                    .border(1.dp, if (expanded) KColors.Accent.copy(alpha = 0.48f) else KColors.Line)
             ) {
                 Row(
-                    Modifier.fillMaxWidth().height(43.dp).clickable {
+                    Modifier.fillMaxWidth().height(42.dp).clickable {
                         expandedEffectId = if (expanded) null else effect.id
-                    }.padding(horizontal = 11.dp),
+                    }.padding(horizontal = 7.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Box(
@@ -211,7 +188,7 @@ fun EffectControlsPanel(editor: EditorState, layer: Layer, onBrowseEffects: () -
                 }
                 if (expanded) {
                     Column(
-                        Modifier.fillMaxWidth().padding(start = 5.dp, end = 5.dp, bottom = 5.dp, top = 1.dp),
+                        Modifier.fillMaxWidth().padding(start = 2.dp, end = 2.dp, bottom = 2.dp, top = 0.dp),
                         verticalArrangement = Arrangement.spacedBy(3.dp)
                     ) {
                         Box(Modifier.fillMaxWidth().height(1.dp).background(KColors.Line))
@@ -226,16 +203,16 @@ fun EffectControlsPanel(editor: EditorState, layer: Layer, onBrowseEffects: () -
         }
 
         Row(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(11.dp))
-                .background(KColors.Accent).clickable(onClick = onBrowseEffects)
-                .padding(vertical = 13.dp),
+            Modifier.fillMaxWidth().height(42.dp)
+                .background(KColors.Bg).border(1.dp, KColors.Line)
+                .clickable(onClick = onBrowseEffects),
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("+", color = androidx.compose.ui.graphics.Color.White, fontSize = 17.sp,
+            Text("+", color = KColors.Accent, fontSize = 17.sp,
                 fontWeight = FontWeight.Bold)
             Spacer(Modifier.width(7.dp))
-            Text("ADD EFFECT", color = androidx.compose.ui.graphics.Color.White,
+            Text("ADD EFFECT", color = KColors.Text,
                 fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp)
         }
     }
@@ -275,7 +252,7 @@ private fun EffectParameterLine(editor: EditorState, layer: Layer, effect: Effec
     Column(
         Modifier.fillMaxWidth()
             .background(KColors.Surface.copy(alpha = 0.32f))
-            .padding(horizontal = 4.dp, vertical = 4.dp),
+            .padding(horizontal = 2.dp, vertical = 2.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
