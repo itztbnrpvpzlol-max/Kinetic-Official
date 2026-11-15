@@ -4,6 +4,8 @@
 #include <cstdint>
 #include <cstring>
 #include <vector>
+#include <string>
+#include <cstdio>
 #include <cstddef>
 #include <android/log.h>
 
@@ -53,6 +55,197 @@ float evaluateCurveCached(float progress, float x1, float y1, float x2, float y2
     const float fraction = u - static_cast<float>(lower);
     return table[lower] + (table[lower + 1] - table[lower]) * fraction;
 }
+}
+
+
+namespace {
+struct EffectKey {
+    float t, v;
+    int type;
+    float x1, y1, x2, y2;
+};
+struct EffectParam {
+    int effect;
+    std::string name;
+    float base;
+    std::vector<EffectKey> keys;
+};
+struct EffectDefinition {
+    const char* name;
+    int id;
+    const char* keys[7];
+    float defaults[7], minimums[7], maximums[7];
+    int count;
+};
+static const EffectDefinition kEffectDefinitions[] = {
+    {"Motion Tile",1,{"Tile Width","Tile Height","Output Width","Output Height","Mirror Edges","Phase X","Phase Y"},{100,100,200,200,1,0,0},{10,10,100,100,0,-2,-2},{300,300,500,500,1,2,2},7},
+    {"Wave Warp",2,{"Wave Height","Wave Width","Wave Speed","Wave Type","Direction","Phase","Pinning"},{0.012f,4,1,0,0,0,0},{0,1,-8,0,0,0,0},{0.08f,24,8,3,360,360,3},7},
+    {"Warp Shake",3,{"X Amount","Y Amount","Frequency","Motion","Seed","Direction"},{0.008f,0.008f,8,0,0,0},{0,0,0.1f,0,0,0},{0.08f,0.08f,30,1,100,360},6},
+    {"RGB Split",4,{"Red Offset","Green Offset","Blue Offset","Angle","Radial Split","Center X","Center Y"},{0.006f,0,-0.006f,0,0,0.5f,0.5f},{-0.04f,-0.04f,-0.04f,0,0,0,0},{0.04f,0.04f,0.04f,360,1,1,1},7},
+    {"Oscillate",5,{"X Amplitude","Y Amplitude","Frequency","Wave Shape","Phase","Half Range"},{0.02f,0.02f,1,0,0,0},{0,0,0.1f,0,0,0},{0.15f,0.15f,12,3,360,1},6},
+    {"Deep Glow",6,{"Threshold","Radius","Intensity","Quality","Spread","Saturation","Glow Only"},{0.65f,0.012f,1.2f,0,1,1,0},{0,0.001f,0,0,0.25f,0,0},{1,0.08f,4,1,3,2,1},7},
+    {"Exposure And Gamma",7,{"Exposure","Gamma","Offset","Channel"},{0,1,0,0},{-5,0.1f,-1,0},{5,3,1,3},4}
+};
+const EffectDefinition* findEffect(const std::string& name) {
+    for (const auto& item : kEffectDefinitions) if (name == item.name) return &item;
+    return nullptr;
+}
+float evaluateEffectKeys(const EffectParam& parameter, float time, float fallback) {
+    if (parameter.keys.empty() || !std::isfinite(time)) return std::isfinite(parameter.base) ? parameter.base : fallback;
+    const auto& keys = parameter.keys;
+    if (time <= keys.front().t) return keys.front().v;
+    if (time >= keys.back().t) return keys.back().v;
+    std::size_t i = 0;
+    while (i + 1 < keys.size() - 1 && keys[i + 1].t <= time) ++i;
+    const EffectKey& a = keys[i];
+    const EffectKey& b = keys[i + 1];
+    const float span = b.t - a.t;
+    if (!std::isfinite(span) || span <= 0.000001f) return b.v;
+    const float u = std::clamp((time - a.t) / span, 0.f, 1.f);
+    float p = u;
+    if (a.type == 1) p = 0.f;
+    else if (a.type == 2) p = evaluateCurveCached(u, a.x1, a.y1, a.x2, a.y2);
+    else if (a.type == 3 && u > 0.f && u < 1.f) {
+        constexpr double pi = 3.14159265358979323846;
+        p = static_cast<float>(std::pow(2.0, -10.0*u) * std::sin((u*10.0-0.75)*(2.0*pi/3.0)) + 1.0);
+    } else if (a.type == 4) {
+        if (u < 1.f/2.75f) p=7.5625f*u*u;
+        else if (u < 2.f/2.75f) { float q=u-1.5f/2.75f; p=7.5625f*q*q+0.75f; }
+        else if (u < 2.5f/2.75f) { float q=u-2.25f/2.75f; p=7.5625f*q*q+0.9375f; }
+        else { float q=u-2.625f/2.75f; p=7.5625f*q*q+0.984375f; }
+    }
+    const float value = a.v + (b.v-a.v)*p;
+    return std::isfinite(value) ? value : a.v;
+}
+float effectValue(const std::vector<EffectParam>& params, int effect, const char* key,
+                  float fallback, float low, float high, float time) {
+    float value = fallback;
+    for (const auto& item : params) {
+        if (item.effect == effect && item.name == key) {
+            value = evaluateEffectKeys(item, time, fallback);
+            break;
+        }
+    }
+    if (!std::isfinite(value)) value = fallback;
+    return std::clamp(value, low, high);
+}
+}
+extern "C" JNIEXPORT jobjectArray JNICALL
+Java_com_kinetic_app_engine_NativeRenderEngine_nativeCreateEffect(JNIEnv* env, jobject, jstring name) {
+    if (!name) return nullptr;
+    const char* chars = env->GetStringUTFChars(name, nullptr);
+    if (!chars) return nullptr;
+    const EffectDefinition* definition = findEffect(chars);
+    env->ReleaseStringUTFChars(name, chars);
+    jclass stringClass = env->FindClass("java/lang/String");
+    if (!stringClass) return nullptr;
+    if (!definition) return env->NewObjectArray(0, stringClass, nullptr);
+    jobjectArray result = env->NewObjectArray(definition->count * 2, stringClass, nullptr);
+    if (!result) return nullptr;
+    for (int i = 0; i < definition->count; ++i) {
+        jstring key = env->NewStringUTF(definition->keys[i]);
+        char number[32];
+        std::snprintf(number, sizeof(number), "%.9g", static_cast<double>(definition->defaults[i]));
+        jstring value = env->NewStringUTF(number);
+        if (!key || !value) return nullptr;
+        env->SetObjectArrayElement(result, i*2, key);
+        env->SetObjectArrayElement(result, i*2+1, value);
+        env->DeleteLocalRef(key);
+        env->DeleteLocalRef(value);
+    }
+    return result;
+}
+extern "C" JNIEXPORT jfloatArray JNICALL
+Java_com_kinetic_app_engine_NativeRenderEngine_nativeBuildEffectUniforms(
+    JNIEnv* env, jobject, jobjectArray effectNames, jbooleanArray enabled,
+    jobjectArray parameterNames, jfloatArray parameterValues, jintArray parameterEffectIndices,
+    jintArray keyframeParameterIndices, jfloatArray keyframeData, jfloat time) {
+    if (!effectNames || !enabled || !parameterNames || !parameterValues ||
+        !parameterEffectIndices || !keyframeParameterIndices || !keyframeData) return nullptr;
+    const jsize effectCount = env->GetArrayLength(effectNames);
+    const jsize parameterCount = env->GetArrayLength(parameterNames);
+    const jsize keyCount = env->GetArrayLength(keyframeParameterIndices);
+    if (effectCount > 256 || parameterCount > 4096 || keyCount > 16384 ||
+        env->GetArrayLength(enabled) != effectCount ||
+        env->GetArrayLength(parameterValues) != parameterCount ||
+        env->GetArrayLength(parameterEffectIndices) != parameterCount ||
+        env->GetArrayLength(keyframeData) != keyCount*7) return nullptr;
+
+    std::vector<std::string> names(static_cast<std::size_t>(effectCount));
+    std::vector<std::string> keys(static_cast<std::size_t>(parameterCount));
+    std::vector<jboolean> active(static_cast<std::size_t>(effectCount));
+    std::vector<jfloat> bases(static_cast<std::size_t>(parameterCount));
+    std::vector<jint> owners(static_cast<std::size_t>(parameterCount));
+    std::vector<jint> keyOwners(static_cast<std::size_t>(keyCount));
+    std::vector<jfloat> keyData(static_cast<std::size_t>(keyCount)*7);
+    if (effectCount) env->GetBooleanArrayRegion(enabled,0,effectCount,active.data());
+    if (parameterCount) {
+        env->GetFloatArrayRegion(parameterValues,0,parameterCount,bases.data());
+        env->GetIntArrayRegion(parameterEffectIndices,0,parameterCount,owners.data());
+    }
+    if (keyCount) {
+        env->GetIntArrayRegion(keyframeParameterIndices,0,keyCount,keyOwners.data());
+        env->GetFloatArrayRegion(keyframeData,0,keyCount*7,keyData.data());
+    }
+    for (jsize i=0;i<effectCount;++i) {
+        jstring item=static_cast<jstring>(env->GetObjectArrayElement(effectNames,i));
+        if (item) { const char* s=env->GetStringUTFChars(item,nullptr); if(s){names[i]=s;env->ReleaseStringUTFChars(item,s);} env->DeleteLocalRef(item); }
+    }
+    for (jsize i=0;i<parameterCount;++i) {
+        jstring item=static_cast<jstring>(env->GetObjectArrayElement(parameterNames,i));
+        if (item) { const char* s=env->GetStringUTFChars(item,nullptr); if(s){keys[i]=s;env->ReleaseStringUTFChars(item,s);} env->DeleteLocalRef(item); }
+    }
+    std::vector<EffectParam> params;
+    params.reserve(static_cast<std::size_t>(parameterCount));
+    for (jsize i=0;i<parameterCount;++i) {
+        if (owners[i]<0 || owners[i]>=effectCount) continue;
+        params.push_back({owners[i],keys[i],bases[i],{}});
+    }
+    for (jsize i=0;i<keyCount;++i) {
+        const jint parameterIndex=keyOwners[i];
+        if (parameterIndex<0 || parameterIndex>=parameterCount) continue;
+        auto found=std::find_if(params.begin(),params.end(),[&](const EffectParam& p){
+            return p.effect==owners[parameterIndex] && p.name==keys[parameterIndex];
+        });
+        if(found==params.end()) continue;
+        const std::size_t o=static_cast<std::size_t>(i)*7;
+        EffectKey key{keyData[o],keyData[o+1],static_cast<int>(std::lround(keyData[o+2])),
+                      keyData[o+3],keyData[o+4],keyData[o+5],keyData[o+6]};
+        if(std::isfinite(key.t)&&std::isfinite(key.v)) found->keys.push_back(key);
+    }
+    for(auto& param:params) std::stable_sort(param.keys.begin(),param.keys.end(),
+        [](const EffectKey& a,const EffectKey& b){return a.t<b.t;});
+
+    std::vector<float> packed;
+    packed.reserve(64);
+    int count=0;
+    for(jsize e=0;e<effectCount && count<8;++e) {
+        if(active[e]!=JNI_TRUE) continue;
+        const EffectDefinition* def=findEffect(names[e]);
+        if(!def) continue;
+        float a[4]={static_cast<float>(def->id),0,0,0};
+        float b[4]={0,0,0,0};
+        for(int p=0;p<def->count;++p) {
+            const float v=effectValue(params,e,def->keys[p],def->defaults[p],
+                def->minimums[p],def->maximums[p],time);
+            switch(def->id) {
+                case 1: if(p==0)a[1]=v; else if(p==1)a[2]=v; else if(p==2)a[3]=v; else if(p==3)b[0]=v; else if(p==4)b[1]=v; else if(p==5)b[2]=v; else if(p==6)b[3]=v; break;
+                case 2: if(p==0)a[1]=v; else if(p==1)a[2]=v; else if(p==2)a[3]=v; else if(p==3)b[0]=v; else if(p==4)b[1]=v; else if(p==5)b[2]=v; else if(p==6)b[3]=v; break;
+                case 3: if(p==0)a[1]=v; else if(p==1)a[2]=v; else if(p==2)a[3]=v; else if(p==3)b[0]=v; else if(p==4)b[1]=v; else if(p==5)b[2]=v; break;
+                case 4: if(p==0)a[1]=v; else if(p==1)a[2]=v; else if(p==2)a[3]=v; else if(p==3)b[0]=v; else if(p==4)b[1]=v; else if(p==5)b[2]=v; else if(p==6)b[3]=v; break;
+                case 5: if(p==0)a[1]=v; else if(p==1)a[2]=v; else if(p==2)a[3]=v; else if(p==3)b[0]=v; else if(p==4)b[1]=v; else if(p==5)b[2]=v; break;
+                case 6: if(p==0)a[1]=v; else if(p==1)a[2]=v; else if(p==2)a[3]=v; else if(p==3)b[0]=v; else if(p==4)b[1]=v; else if(p==5)b[2]=v; else if(p==6)b[3]=v; break;
+                case 7: if(p==0)a[1]=v; else if(p==1)a[2]=v; else if(p==2)a[3]=v; else if(p==3)b[0]=v; break;
+                default: break;
+            }
+        }
+        packed.insert(packed.end(),a,a+4);
+        packed.insert(packed.end(),b,b+4);
+        ++count;
+    }
+    jfloatArray result=env->NewFloatArray(static_cast<jsize>(packed.size()));
+    if(result && !packed.empty()) env->SetFloatArrayRegion(result,0,static_cast<jsize>(packed.size()),packed.data());
+    return result;
 }
 
 extern "C" JNIEXPORT jfloat JNICALL
