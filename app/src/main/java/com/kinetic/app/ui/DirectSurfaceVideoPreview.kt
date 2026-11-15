@@ -60,8 +60,8 @@ internal fun canUseDirectSurfaceVideo(layer: Layer): Boolean {
         PropId.ROTATION to 0f,
         PropId.OPACITY to 100f
     )
-    // Transform and opacity keyframes are applied to the TextureView itself;
-    // they must not force a decoder handoff to the libmpv/OpenGL video path.
+    // TextureView is reserved for clips whose transforms and opacity remain
+    // static for the entire composition. Animated properties use GLES.
     return defaults.all { (id, expected) ->
         val prop = layer.p(id)
         // TextureView is reserved for truly static transforms. Keyframed
