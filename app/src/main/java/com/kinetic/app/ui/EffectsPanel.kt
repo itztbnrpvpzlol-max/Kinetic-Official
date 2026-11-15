@@ -47,7 +47,7 @@ import com.kinetic.app.model.Layer
 import kotlin.math.abs
 import kotlin.math.sqrt
 
-private data class EffectControlSpec(
+internal data class EffectControlSpec(
     val label: String, val key: String, val min: Float = 0f, val max: Float = 1f,
     val step: Float = 0.1f, val default: Float = 0f, val decimals: Int = 2,
     val suffix: String = "", val choices: List<Pair<String, Float>> = emptyList(),
@@ -60,7 +60,7 @@ private fun choice(label: String, key: String, values: List<String>) =
 private fun toggle(label: String, key: String, default: Boolean = false) =
     EffectControlSpec(label, key, default = if (default) 1f else 0f, toggle = true)
 
-private fun controlsFor(effect: EffectInstance): List<EffectControlSpec> = when (effect.name) {
+internal fun controlsFor(effect: EffectInstance): List<EffectControlSpec> = when (effect.name) {
     "Motion Tile" -> listOf(
         number("Tile Width", "Tile Width", 10f, 300f, 10f, 100f, 0, "%"),
         number("Tile Height", "Tile Height", 10f, 300f, 10f, 100f, 0, "%"),
@@ -315,29 +315,6 @@ private fun EffectParameterLine(
 }
 
 @Composable
-fun EffectGraphPanel(editor: EditorState, layer: Layer, modifier: Modifier = Modifier) {
-    val effect = layer.effectStack.firstOrNull { it.id == editor.selectedEffectId }
-    val spec = effect?.let { selected ->
-        controlsFor(selected).firstOrNull { it.key == editor.selectedEffectParameter }
-    }
-    if (effect == null || spec == null) {
-        Box(modifier.fillMaxSize().background(KColors.Surface), contentAlignment = Alignment.Center) {
-            Text("Select an effect property to edit its animation curve.",
-                color = KColors.Muted, fontSize = 10.sp)
-        }
-        return
-    }
-    val liveEffect = editor.layers.firstOrNull { it.id == layer.id }
-        ?.effectStack?.firstOrNull { it.id == effect.id } ?: effect
-    Column(modifier.fillMaxSize().background(KColors.Surface).padding(8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(effect.name + "  ·  " + spec.label, color = KColors.Text,
-            fontSize = 11.sp, fontWeight = FontWeight.Bold)
-        EffectParameterGraph(editor, layer, liveEffect, spec, graphHeight = 260.dp)
-    }
-}
-
-@Composable
 private fun EffectParameterGraph(
     editor: EditorState, layer: Layer, effect: EffectInstance, spec: EffectControlSpec,
     graphHeight: androidx.compose.ui.unit.Dp = 112.dp
@@ -357,7 +334,7 @@ private fun EffectParameterGraph(
             Text("${keys.size} keys", color = KColors.Accent, fontSize = 8.sp)
         }
         if (keys.isEmpty()) {
-            Text("Tap KEY at the current playhead to create the first point.",
+            Text("Select this property, then add a keyframe from the side rail.",
                 color = KColors.Muted, fontSize = 8.sp)
         } else {
             Canvas(
