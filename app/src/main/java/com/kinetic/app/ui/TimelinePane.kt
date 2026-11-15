@@ -56,6 +56,7 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.asImageBitmap
@@ -178,7 +179,7 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
                 Row(Modifier.fillMaxWidth().height(30.dp)) {
                     Spacer(
                         Modifier.width(leftW)
-                            .offset(x = (hScroll.value / dens).dp)
+                            .graphicsLayer { translationX = hScroll.value.toFloat() }
                             .zIndex(1f)
                     )
                     Ruler(editor, pps, contentW, leadingPad)
@@ -206,7 +207,7 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
                     Row(Modifier.fillMaxWidth().height(72.dp)) {
                         Spacer(
                             Modifier.width(leftW).fillMaxHeight()
-                                .offset(x = (hScroll.value / dens).dp).zIndex(1f)
+                                .graphicsLayer { translationX = hScroll.value.toFloat() }.zIndex(1f)
                         )
                         Box(
                             Modifier.width(contentW).fillMaxHeight().clickable(
@@ -354,7 +355,7 @@ private fun LayerRow(
         ) {
             Row(
                 Modifier.width(leftW).fillMaxHeight()
-                    .offset(x = (hScroll.value / dens).dp).zIndex(1f)
+                    .graphicsLayer { translationX = hScroll.value.toFloat() }.zIndex(1f)
                     .background(if (selected) KColors.RowSel else KColors.Row),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -433,7 +434,7 @@ private fun LayerRow(
         val parentName = layer.parentId?.let { id -> editor.layers.firstOrNull { it.id == id }?.name }
         if (parentName != null) {
             Row(Modifier.fillMaxWidth().height(20.dp).background(KColors.Row), verticalAlignment = Alignment.CenterVertically) {
-                Spacer(Modifier.width(leftW).offset(x = (hScroll.value / dens).dp).zIndex(1f))
+                Spacer(Modifier.width(leftW).graphicsLayer { translationX = hScroll.value.toFloat() }.zIndex(1f))
                 Text("╰── Parent: $parentName", color = KColors.Accent, fontSize = 10.sp, modifier = Modifier.padding(start = 14.dp))
             }
         }
@@ -463,7 +464,7 @@ private fun KeyframeTrackRow(
     ) {
         Box(
             Modifier.width(leftW).fillMaxHeight()
-                .offset(x = (hScroll.value / LocalDensity.current.density).dp).zIndex(1f)
+                .graphicsLayer { translationX = hScroll.value.toFloat() }.zIndex(1f)
                 .background(KColors.Bg).padding(start = 12.dp),
             contentAlignment = Alignment.CenterStart
         ) {
