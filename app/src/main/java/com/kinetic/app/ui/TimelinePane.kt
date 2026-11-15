@@ -197,8 +197,15 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
                     LayerRow(editor, layer, pps, hScroll, contentW, leftW, leadingPad)
                 }
                 item(key = "timeline-empty-scroll-space") {
-                    Box(Modifier.fillMaxWidth().height(72.dp).horizontalScroll(hScroll)) {
-                        Spacer(Modifier.width(contentW).fillMaxHeight())
+                    // Match LayerRow's exact scroll viewport: the fixed layer
+                    // controls column stays outside the shared horizontal scroller.
+                    // Sharing one ScrollState across different viewport widths
+                    // made empty-space drags feel like taps and caused uneven ranges.
+                    Row(Modifier.fillMaxWidth().height(72.dp)) {
+                        Spacer(Modifier.width(leftW))
+                        Box(Modifier.weight(1f).fillMaxHeight().horizontalScroll(hScroll)) {
+                            Spacer(Modifier.width(contentW).fillMaxHeight())
+                        }
                     }
                 }
             }
