@@ -130,7 +130,7 @@ fun EffectsBrowserScreen(onClose: () -> Unit, onAddEffect: (String) -> Unit) {
                 Text("No effects in this category yet.", color = KColors.Dim, fontSize = 12.sp,
                     modifier = Modifier.padding(vertical = 20.dp))
             } else {
-                category.effects.chunked(2).forEach { row ->
+                category.effects.chunked(3).forEach { row ->
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         row.forEach { effect ->
                             EffectChoice(effect, category.accent, Modifier.weight(1f)) { onAddEffect(effect) }
