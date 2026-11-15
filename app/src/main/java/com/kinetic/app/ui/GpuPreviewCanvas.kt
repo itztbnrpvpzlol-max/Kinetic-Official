@@ -241,6 +241,31 @@ private fun GpuCompositionPreviewCanvas(
     val compositionFps = editor.fps.coerceIn(1, 60)
     val latestTimelineTime = androidx.compose.runtime.rememberUpdatedState(editor.time)
     val latestPlaying = androidx.compose.runtime.rememberUpdatedState(editor.playing)
+
+    // Bound the CPU-side fallback/still bitmap cache as well as the GL texture
+    // cache. Keep frames for currently visible active layers; evict older
+    // inactive frames first when a project has many clips.
+    fun trimPreviewFrameCache(protectedId: String) {
+        val budget = if (MediaWorkers.isConstrainedDevice) {
+            3L * 1024L * 1024L
+        } else {
+            12L * 1024L * 1024L
+        }
+        var bytes = frames.values.sumOf { it.byteCount.toLong() }
+        if (bytes <= budget) return
+        val now = latestTimelineTime.value
+        val activeIds = editor.layers.asSequence()
+            .filter { it.visible && it.activeAt(now) }
+            .map { it.id }
+            .toHashSet()
+        for (id in frames.keys.toList()) {
+            if (bytes <= budget) break
+            if (id == protectedId || id in activeIds) continue
+            val removed = frames.remove(id) ?: continue
+            bytes = (bytes - removed.byteCount.toLong()).coerceAtLeast(0L)
+        }
+    }
+
     for (layer in editor.layers) {
         val uri = layer.uri
         val needsBitmap = layer.visible && (
@@ -272,6 +297,7 @@ private fun GpuCompositionPreviewCanvas(
                                     layer.activeAt(latestTimelineTime.value)
                                 ) {
                                     frames[layer.id] = bitmap
+                                    trimPreviewFrameCache(layer.id)
                                     break
                                 }
                                 // The playhead may leave this still while its
@@ -305,6 +331,7 @@ private fun GpuCompositionPreviewCanvas(
                                 val recent = recentVideoFrames[uri]
                                 if (recent != null && kotlin.math.abs(recent.sourceTime - sourceTime) <= 0.75f) {
                                     frames[layer.id] = recent.bitmap
+                                    trimPreviewFrameCache(layer.id)
                                 }
                             }
                             val requestedBucket = (sourceTime * compositionFps).toInt()
@@ -326,6 +353,7 @@ private fun GpuCompositionPreviewCanvas(
                                     kotlin.math.abs(currentBucket - requestedBucket) <= acceptableLag
                                 ) {
                                     frames[layer.id] = frame
+                                    trimPreviewFrameCache(layer.id)
                                     recentVideoFrames[uri] = RecentVideoPreviewFrame(sourceTime, frame)
                                     val recentFrameLimit = if (MediaWorkers.isConstrainedDevice) 3 else 8
                                     while (recentVideoFrames.size > recentFrameLimit) {
