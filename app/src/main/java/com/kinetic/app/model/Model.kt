@@ -532,7 +532,8 @@ fun layerMatrixInto(
     if (parent != null && parent.id != layer.id && depth < 16) {
         val parentMatrix = scratch.getOrPut(depth + 1) { Matrix() }
         layerMatrixInto(parent, t, byId, parentMatrix, scratch, depth + 1)
-        out.postTranslate(parent.p(PropId.ANCHOR_X).valueAt(t), parent.p(PropId.ANCHOR_Y).valueAt(t))
+        out.postTranslate(parent.transformValue(PropId.ANCHOR_X, t, parent.width / 2f),
+            parent.transformValue(PropId.ANCHOR_Y, t, parent.height / 2f))
         out.postConcat(parentMatrix)
     }
 }
@@ -551,7 +552,8 @@ fun layerMatrix(layer: Layer, t: Float, byId: Map<String, Layer>, depth: Int = 0
     if (parent != null && depth < 16) {
         val pm = layerMatrix(parent, t, byId, depth + 1)
         // child space has its origin at the parent's anchor point (same as After Effects)
-        m.postTranslate(parent.p(PropId.ANCHOR_X).valueAt(t), parent.p(PropId.ANCHOR_Y).valueAt(t))
+        m.postTranslate(parent.transformValue(PropId.ANCHOR_X, t, parent.width / 2f),
+            parent.transformValue(PropId.ANCHOR_Y, t, parent.height / 2f))
         m.postConcat(pm)
     }
     return m
