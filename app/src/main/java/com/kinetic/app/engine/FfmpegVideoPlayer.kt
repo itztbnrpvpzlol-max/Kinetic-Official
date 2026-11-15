@@ -6,6 +6,7 @@ import android.os.ParcelFileDescriptor
 import android.util.Log
 import android.view.Surface
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 
@@ -22,7 +23,7 @@ class FfmpegVideoPlayer(
     private val surfaceHeight: Int = 720
 ) {
     private val appContext = context.applicationContext
-    private val decoderExecutor = Executors.newSingleThreadExecutor { runnable ->
+    private val decoderExecutor = Executors.newSingleThreadScheduledExecutor { runnable ->
         Thread(runnable, "KineticFFmpegDecoder").apply { isDaemon = true }
     }
     private val pendingClockSync = AtomicReference<ClockSync?>(null)
@@ -38,7 +39,6 @@ class FfmpegVideoPlayer(
     @Volatile private var speed = 1f
     @Volatile private var lastPlaying = false
     @Volatile private var receivedSurfaceFrame = false
-    @Volatile private var firstFrameDeadlineNs = 0L
     @Volatile private var attachedSurface: Surface? = null
     private var sourceDescriptor: ParcelFileDescriptor? = null
     private var sourcePath: String? = null
@@ -56,7 +56,6 @@ class FfmpegVideoPlayer(
             stopNativeDecoder()
             attachedSurface = next
             receivedSurfaceFrame = false
-            firstFrameDeadlineNs = System.nanoTime() + FIRST_FRAME_TIMEOUT_NS
 
             val existingFallback = fallback
             if (existingFallback != null) {
@@ -82,6 +81,19 @@ class FfmpegVideoPlayer(
                 if (lastPlaying) NativeFfmpegDecoder.nativePlay(handle)
                 else NativeFfmpegDecoder.nativePause(handle)
                 pendingClockSync.getAndSet(null)?.let(::applyClockSync)
+            decoderExecutor.schedule({
+                if (!released && attachedSurface === next && !receivedSurfaceFrame && fallback == null) {
+                    val handleAtTimeout = nativeHandle
+                    val reason = if (handleAtTimeout != 0L) {
+                        runCatching { NativeFfmpegDecoder.nativeError(handleAtTimeout) }
+                            .getOrDefault("FFmpeg did not present a frame")
+                    } else {
+                        "FFmpeg did not present a frame"
+                    }
+                    Log.w(TAG, "$reason; switching to Android MediaCodec compatibility fallback")
+                    activateFallback(next)
+                }
+            }, FIRST_FRAME_TIMEOUT_SECONDS, TimeUnit.SECONDS)
                 Log.i(TAG, "Direct FFmpeg decoder attached to SurfaceTexture: $sourceUri")
             } catch (error: Throwable) {
                 Log.e(TAG, "Direct FFmpeg decoder could not start; using Android compatibility fallback", error)
@@ -96,34 +108,19 @@ class FfmpegVideoPlayer(
             stopNativeDecoder()
             attachedSurface = null
             receivedSurfaceFrame = false
-            firstFrameDeadlineNs = 0L
         }
     }
 
     fun markFrameAvailable() {
         receivedSurfaceFrame = true
-        firstFrameDeadlineNs = 0L
+        state = 1
     }
 
-    fun hasReceivedFrame(): Boolean {
-        if (!receivedSurfaceFrame && firstFrameDeadlineNs > 0L &&
-            System.nanoTime() >= firstFrameDeadlineNs
-        ) requestFallback("No FFmpeg frame reached the preview surface before the timeout")
-        return receivedSurfaceFrame
-    }
+    fun hasReceivedFrame(): Boolean = receivedSurfaceFrame
 
     fun decoderState(): Int {
         if (released) return 2
-        fallback?.let { return it.decoderState() }
-        val handle = nativeHandle
-        if (handle == 0L) return state
-        val nativeState = runCatching { NativeFfmpegDecoder.nativeState(handle) }.getOrDefault(-1)
-        if (nativeState < 0) {
-            val message = runCatching { NativeFfmpegDecoder.nativeError(handle) }
-                .getOrDefault("Unknown FFmpeg decoder error")
-            requestFallback(message)
-        }
-        return fallback?.decoderState() ?: if (nativeState < 0) 0 else nativeState
+        return fallback?.decoderState() ?: state
     }
 
     fun updatePositionHint(targetMs: Long) {
@@ -260,16 +257,6 @@ class FfmpegVideoPlayer(
         )
     }
 
-    private fun requestFallback(reason: String) {
-        if (released || fallback != null) return
-        val surface = attachedSurface ?: return
-        postToDecoder {
-            if (!released && fallback == null && attachedSurface === surface) {
-                Log.w(TAG, "$reason; switching to Android MediaCodec compatibility fallback")
-                activateFallback(surface)
-            }
-        }
-    }
 
     private fun activateFallback(outputSurface: Surface) {
         if (released || fallback != null) return
@@ -306,6 +293,6 @@ class FfmpegVideoPlayer(
 
     companion object {
         private const val TAG = "KineticFFmpeg"
-        private const val FIRST_FRAME_TIMEOUT_NS = 6_000_000_000L
+        private const val FIRST_FRAME_TIMEOUT_SECONDS = 10L
     }
 }
