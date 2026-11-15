@@ -619,7 +619,7 @@ private fun EffectKeyframeTrackRow(
                                 ) nearestIndex else -1
                                 if (draggingIndex >= 0) {
                                     editor.selectEffectParameter(layer.id, effect.id, parameter)
-                                    editor.selectEffectKey(draggingIndex)
+                                    editor.selectEffectKey(draggingIndex, seekTo = false)
                                     editor.beginEdit()
                                     dragPreviewIndex = draggingIndex
                                     dragPreviewTime = currentKeys[draggingIndex].t
@@ -662,7 +662,7 @@ private fun EffectKeyframeTrackRow(
                             val nearest = currentKeys.getOrNull(nearestIndex)
                             if (nearest != null && abs(nearest.t - time) <= 18f / pps) {
                                 editor.selectEffectParameter(layer.id, effect.id, parameter)
-                                editor.selectEffectKey(nearestIndex)
+                                editor.selectEffectKey(nearestIndex, seekTo = false)
                             }
                         }
                     }
