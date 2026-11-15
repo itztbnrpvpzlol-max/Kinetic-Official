@@ -129,14 +129,14 @@ fun EffectControlsPanel(editor: EditorState, layer: Layer, onBrowseEffects: () -
     Column(
         Modifier.fillMaxSize().background(KColors.Surface)
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 12.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(11.dp)
+            .padding(horizontal = 4.dp, vertical = 5.dp),
+        verticalArrangement = Arrangement.spacedBy(5.dp)
     ) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                Text("EFFECTS", color = KColors.Text, fontSize = 13.sp, fontWeight = FontWeight.Bold,
-                    letterSpacing = 1.15.sp)
-                Text("Build and animate this layer's look", color = KColors.Muted, fontSize = 9.sp)
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                Text("EFFECTS", color = KColors.Text, fontSize = 12.sp, fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.0.sp)
+                Text("Build and animate this layer's look", color = KColors.Muted, fontSize = 8.sp)
             }
             Box(
                 Modifier.clip(RoundedCornerShape(20.dp))
@@ -169,13 +169,13 @@ fun EffectControlsPanel(editor: EditorState, layer: Layer, onBrowseEffects: () -
             val keyedParameters = effect.parameterKeys.values.count { it.isNotEmpty() }
             val accent = if (effect.enabled) KColors.Accent else KColors.Dim
             Column(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(13.dp))
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
                     .background(KColors.Bg)
                     .border(1.dp, if (expanded) KColors.Accent.copy(alpha = 0.48f) else KColors.Line,
-                        RoundedCornerShape(13.dp))
+                        RoundedCornerShape(8.dp))
             ) {
                 Row(
-                    Modifier.fillMaxWidth().height(49.dp).clickable {
+                    Modifier.fillMaxWidth().height(43.dp).clickable {
                         expandedEffectId = if (expanded) null else effect.id
                     }.padding(horizontal = 11.dp),
                     verticalAlignment = Alignment.CenterVertically
@@ -211,8 +211,8 @@ fun EffectControlsPanel(editor: EditorState, layer: Layer, onBrowseEffects: () -
                 }
                 if (expanded) {
                     Column(
-                        Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 11.dp, top = 2.dp),
-                        verticalArrangement = Arrangement.spacedBy(7.dp)
+                        Modifier.fillMaxWidth().padding(start = 5.dp, end = 5.dp, bottom = 5.dp, top = 1.dp),
+                        verticalArrangement = Arrangement.spacedBy(3.dp)
                     ) {
                         Box(Modifier.fillMaxWidth().height(1.dp).background(KColors.Line))
                         controlsFor(effect).forEach { spec ->
@@ -273,10 +273,10 @@ private fun EffectParameterLine(editor: EditorState, layer: Layer, effect: Effec
     val keyAtTime = keys.any { abs(it.t - editor.time) <= editor.frame / 2f }
     var graphOpen by remember(effect.id, spec.key) { mutableStateOf(false) }
     Column(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(9.dp))
-            .background(KColors.Surface.copy(alpha = 0.62f))
-            .padding(horizontal = 9.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(7.dp)
+        Modifier.fillMaxWidth()
+            .background(KColors.Surface.copy(alpha = 0.32f))
+            .padding(horizontal = 4.dp, vertical = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(spec.label, color = KColors.Text, fontSize = 9.sp,
