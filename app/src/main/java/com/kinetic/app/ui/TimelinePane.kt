@@ -203,7 +203,7 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
                         Spacer(Modifier.width(leftW))
                         Box(
                             Modifier.weight(1f).fillMaxHeight()
-                                .pointerInput(hScroll) {
+                                .pointerInput(hScroll, pps, dens, paneW, leftPx, leadingPadPx) {
                                     detectHorizontalDragGestures { change, dragAmount ->
                                         change.consume()
                                         if (editor.playing) editor.playing = false
