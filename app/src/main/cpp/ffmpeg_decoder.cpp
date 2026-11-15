@@ -711,7 +711,7 @@ Java_com_kinetic_app_engine_NativeFfmpegDecoder_nativeSetClock(
     next.clipSpeed = std::clamp(static_cast<double>(clipSpeed), 0.1, 4.0);
     next.generation = generation;
 
-    if (session->clock.valid && session->clock.generation != generation) {
+    if (!session->clock.valid || session->clock.generation != generation) {
         const int64_t elapsedUs = next.playing
             ? static_cast<int64_t>(std::max<int64_t>(0, now - next.monotonicNs) / 1000.0 * next.masterSpeed)
             : 0;
