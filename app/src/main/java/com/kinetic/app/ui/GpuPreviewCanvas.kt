@@ -472,12 +472,12 @@ private fun GpuVideoPlayerLayer(
 
     LaunchedEffect(player, layer.id) {
         // A decoder being initialized is not proof that it produced a frame.
-        // Wait for the SurfaceTexture callback; otherwise a silent libmpv
+        // Wait for the SurfaceTexture callback; otherwise a stalled FFmpeg
         // surface/output failure can leave the preview black indefinitely.
         var waitedMs = 0
         while (waitedMs < 8_000 && !player.hasReceivedFrame()) {
             if (player.decoderState() == -1) {
-                Log.e("KineticVideo", "Hardware decoder failed for layer ${layer.id}; using bitmap fallback")
+                Log.e("KineticVideo", "FFmpeg decoder failed for layer ${layer.id}; using bitmap fallback")
                 onDecoderFailed(layer.id)
                 return@LaunchedEffect
             }
