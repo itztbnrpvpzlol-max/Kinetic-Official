@@ -31,6 +31,7 @@ import com.kinetic.app.model.KeyType
 import com.kinetic.app.model.Keyframe
 import com.kinetic.app.model.Layer
 import com.kinetic.app.model.PropId
+import com.kinetic.app.model.Prop
 import com.kinetic.app.model.cubicProgress
 import kotlin.math.abs
 import kotlin.math.max
@@ -151,7 +152,7 @@ fun GraphPanel(editor: EditorState, layer: Layer, modifier: Modifier = Modifier)
                     mode = mode,
                     keys = keys,
                     segment = segment,
-                    property = selected,
+                    valueAt = { t -> currentLayer.p(selected).valueAt(t) },
                     layer = currentLayer,
                     onBeginEdit = { editor.beginEdit() },
                     onHandleChange = { handle, x, y ->
@@ -221,6 +222,120 @@ fun GraphPanel(editor: EditorState, layer: Layer, modifier: Modifier = Modifier)
 }
 
 @Composable
+fun EffectGraphPanel(editor: EditorState, layer: Layer, modifier: Modifier = Modifier) {
+    val effect = layer.effectStack.firstOrNull { it.id == editor.selectedEffectId }
+    val spec = effect?.let { selected ->
+        controlsFor(selected).firstOrNull { it.key == editor.selectedEffectParameter }
+    }
+    if (effect == null || spec == null) {
+        Box(modifier.fillMaxSize().background(KColors.Surface), contentAlignment = Alignment.Center) {
+            Text("Select an effect property to edit its animation curve.",
+                color = KColors.Muted, fontSize = 10.sp)
+        }
+        return
+    }
+    val liveEffect = editor.layers.firstOrNull { it.id == layer.id }
+        ?.effectStack?.firstOrNull { it.id == effect.id } ?: effect
+    val keys = liveEffect.parameterKeys[spec.key].orEmpty()
+    var mode by remember(effect.id, spec.key) { mutableStateOf(GraphMode.EASE) }
+    val segment = graphSegment(keys, -1)
+    val segmentKey = keys.getOrNull(segment)
+    val hasBezier = segmentKey?.type == KeyType.BEZIER
+    val valueAt: (Float) -> Float = { t ->
+        Prop(liveEffect.parameters[spec.key] ?: spec.default, keys).valueAt(t)
+    }
+
+    Column(modifier.fillMaxSize().background(KColors.Surface)) {
+        Row(Modifier.fillMaxWidth().height(34.dp).padding(horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            Text(effect.name + " · " + spec.label, color = KColors.Text, fontSize = 10.sp,
+                fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f),
+                maxLines = 1)
+            GraphModeButton("Ease", mode == GraphMode.EASE) { mode = GraphMode.EASE }
+            Spacer(Modifier.width(4.dp))
+            GraphModeButton("Value", mode == GraphMode.VALUE) { mode = GraphMode.VALUE }
+            Spacer(Modifier.width(4.dp))
+            GraphModeButton("Speed", mode == GraphMode.SPEED) { mode = GraphMode.SPEED }
+        }
+
+        if (keys.size < 2) {
+            Box(Modifier.weight(1f).fillMaxWidth().padding(18.dp), contentAlignment = Alignment.Center) {
+                Text(if (keys.isEmpty()) "No keyframes on " + spec.label
+                    else "Add a second keyframe to shape a transition",
+                    color = KColors.Text, fontSize = 13.sp, textAlign = TextAlign.Center)
+            }
+        } else {
+            Row(Modifier.weight(1f).fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                GraphCanvas(
+                    modifier = Modifier.weight(1f).fillMaxHeight()
+                        .clip(RoundedCornerShape(10.dp)).background(KColors.Bg),
+                    mode = mode,
+                    keys = keys,
+                    segment = segment,
+                    valueAt = valueAt,
+                    layer = layer,
+                    onBeginEdit = { editor.beginEdit() },
+                    onHandleChange = { handle, x, y ->
+                        if (segment in 0 until keys.lastIndex) {
+                            val key = keys[segment]
+                            val updated = if (handle == 1) key.copy(type = KeyType.BEZIER,
+                                x1 = x.coerceIn(0f, 1f), y1 = y.coerceIn(0f, 1f))
+                            else key.copy(type = KeyType.BEZIER,
+                                x2 = x.coerceIn(0f, 1f), y2 = y.coerceIn(0f, 1f))
+                            editor.replaceEffectParameterKey(layer.id, effect.id, spec.key, segment, updated)
+                        }
+                    },
+                    onKeyValueChange = { index, value ->
+                        if (index in keys.indices) {
+                            editor.replaceEffectParameterKey(layer.id, effect.id, spec.key,
+                                index, keys[index].copy(v = value))
+                        }
+                    }
+                )
+                if (mode == GraphMode.EASE) {
+                    Column(
+                        Modifier.width(74.dp).fillMaxHeight().clip(RoundedCornerShape(9.dp))
+                            .background(KColors.Bg).border(1.dp, KColors.Line, RoundedCornerShape(9.dp))
+                            .verticalScroll(rememberScrollState()).padding(5.dp),
+                        verticalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        Text("PRESETS", color = KColors.Muted, fontSize = 8.sp,
+                            fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 3.dp, top = 2.dp))
+                        graphPresets.forEach { preset ->
+                            GraphPresetChip(preset, segmentKey?.let {
+                                it.type == preset.type &&
+                                    (preset.type == KeyType.LINEAR ||
+                                        (abs(it.x1 - preset.x1) < 0.025f && abs(it.y1 - preset.y1) < 0.025f &&
+                                         abs(it.x2 - preset.x2) < 0.025f && abs(it.y2 - preset.y2) < 0.025f))
+                            } == true) {
+                                if (segment >= 0) {
+                                    editor.beginEdit()
+                                    val updated = keys[segment].copy(type = preset.type,
+                                        x1 = preset.x1, y1 = preset.y1, x2 = preset.x2, y2 = preset.y2)
+                                    editor.replaceEffectParameterKey(layer.id, effect.id, spec.key, segment, updated)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Text(
+                when (mode) {
+                    GraphMode.EASE -> if (hasBezier) "Drag either control point to shape the curve."
+                        else "Choose a preset, then drag its control points."
+                    GraphMode.VALUE -> "Drag a keyframe point vertically to change its value."
+                    GraphMode.SPEED -> "Speed is derived from the selected segment's value curve."
+                },
+                color = KColors.Muted, fontSize = 9.sp,
+                modifier = Modifier.fillMaxWidth().height(20.dp).padding(horizontal = 10.dp, vertical = 2.dp),
+                maxLines = 1
+            )
+        }
+    }
+}
+
+@Composable
 private fun GraphModeButton(label: String, selected: Boolean, onClick: () -> Unit) {
     Box(
         Modifier.clip(RoundedCornerShape(7.dp))
@@ -269,7 +384,7 @@ private fun GraphCanvas(
     mode: GraphMode,
     keys: List<Keyframe>,
     segment: Int,
-    property: PropId,
+    valueAt: (Float) -> Float,
     layer: Layer,
     onBeginEdit: () -> Unit,
     onHandleChange: (Int, Float, Float) -> Unit,
@@ -279,6 +394,7 @@ private fun GraphCanvas(
     val latestValueChange by rememberUpdatedState(onKeyValueChange)
     val latestBeginEdit by rememberUpdatedState(onBeginEdit)
     val latestKeys by rememberUpdatedState(keys)
+    val latestValueAt by rememberUpdatedState(valueAt)
     val minValue = keys.minOfOrNull { it.v } ?: 0f
     val maxValue = keys.maxOfOrNull { it.v } ?: 1f
     val valueSpan = (maxValue - minValue).let { if (it < 0.0001f) max(abs(maxValue) * 0.2f, 1f) else it }
@@ -369,14 +485,14 @@ private fun GraphCanvas(
                     GraphMode.EASE -> if (a.type == KeyType.LINEAR) u else cubicProgress(u, a.x1, a.y1.coerceIn(0f, 1f), a.x2, a.y2.coerceIn(0f, 1f)).coerceIn(0f, 1f)
                     GraphMode.VALUE -> {
                         val t = a.t + (b.t - a.t) * u
-                        val value = layer.p(property).valueAt(t)
+                        val value = latestValueAt(t)
                         ((value - valueLow) / (valueHigh - valueLow)).coerceIn(-0.25f, 1.25f)
                     }
                     GraphMode.SPEED -> {
                         val t = a.t + (b.t - a.t) * u
                         val dt = max((b.t - a.t) / 500f, 0.0005f)
-                        val before = layer.p(property).valueAt((t - dt).coerceAtLeast(a.t))
-                        val after = layer.p(property).valueAt((t + dt).coerceAtMost(b.t))
+                        val before = latestValueAt((t - dt).coerceAtLeast(a.t))
+                        val after = latestValueAt((t + dt).coerceAtMost(b.t))
                         val speed = abs(after - before) / max(2f * dt, 0.0001f)
                         val base = abs(b.v - a.v) / max(b.t - a.t, 0.001f)
                         (speed / max(base * 3f, 1f)).coerceIn(0f, 1f)
