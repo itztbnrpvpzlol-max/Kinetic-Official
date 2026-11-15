@@ -254,7 +254,7 @@ private fun EffectParameterLine(
     editor: EditorState, layer: Layer, effect: EffectInstance, spec: EffectControlSpec,
     selected: Boolean, onSelect: () -> Unit
 ) {
-    val current = effect.parameterAt(spec.key, editor.time)
+    val current = effect.parameterAt(spec.key, editor.time, spec.default)
     Column(
         Modifier.fillMaxWidth()
             .background(if (selected) KColors.Accent.copy(alpha = 0.055f) else KColors.Surface.copy(alpha = 0.22f))
