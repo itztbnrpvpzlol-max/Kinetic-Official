@@ -64,7 +64,12 @@ internal fun canUseDirectSurfaceVideo(layer: Layer): Boolean {
     // they must not force a decoder handoff to the libmpv/OpenGL video path.
     return defaults.all { (id, expected) ->
         val prop = layer.p(id)
-        prop.expression == null && kotlin.math.abs(prop.base - expected) < 0.01f
+        // TextureView is reserved for truly static transforms. Keyframed
+        // transforms must go through the frame-synchronous GLES compositor;
+        // otherwise SurfaceView/TextureView presentation can lag the timeline
+        // and expose a black frame during scale/position transitions.
+        prop.keys.isEmpty() && prop.expression == null &&
+            kotlin.math.abs(prop.base - expected) < 0.01f
     }
 }
 
