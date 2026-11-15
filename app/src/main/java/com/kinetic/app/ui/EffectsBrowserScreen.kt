@@ -73,9 +73,9 @@ fun EffectsBrowserScreen(onClose: () -> Unit, onAddEffect: (String) -> Unit) {
 
     Column(
         Modifier.fillMaxSize().background(KColors.Bg).statusBarsPadding().navigationBarsPadding()
-            .verticalScroll(rememberScrollState()).padding(horizontal = 10.dp)
+            .verticalScroll(rememberScrollState()).padding(horizontal = 18.dp)
     ) {
-        Row(Modifier.fillMaxWidth().height(42.dp),
+        Row(Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 22.dp),
             verticalAlignment = Alignment.CenterVertically) {
             if (selectedCategory != null) {
                 Box(Modifier.size(38.dp).clip(CircleShape).clickable { selectedCategory = null },
@@ -85,13 +85,43 @@ fun EffectsBrowserScreen(onClose: () -> Unit, onAddEffect: (String) -> Unit) {
                 Spacer(Modifier.size(8.dp))
             }
             Text(selectedCategory?.title?.lowercase()?.replaceFirstChar { it.uppercase() } ?: "Effects",
-                Modifier.weight(1f), color = KColors.Text, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                Modifier.weight(1f), color = KColors.Text, fontSize = 25.sp, fontWeight = FontWeight.Bold)
             Box(Modifier.size(38.dp).clip(CircleShape).clickable(onClick = onClose),
                 contentAlignment = Alignment.Center) {
                 KIcon(IconKind.CLOSE, KColors.Muted, Modifier.size(20.dp))
             }
         }
 
+        if (selectedCategory == null) {
+            Row(Modifier.fillMaxWidth().padding(bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                SectionHeading("Suggested")
+                Spacer(Modifier.weight(1f))
+                KIcon(IconKind.EFFECTS, KColors.Dim, Modifier.size(17.dp))
+            }
+            Text("Suggestions will appear as you use effects.", color = KColors.Muted, fontSize = 11.sp)
+            Spacer(Modifier.height(22.dp))
+            HorizontalPager(state = shelfPager, modifier = Modifier.fillMaxWidth().height(88.dp), pageSpacing = 24.dp) { page ->
+                if (page == 0) ShelfSection("Recent", "Your recently used effects will appear here.", IconKind.STOPWATCH, Color(0xFF79B9FF))
+                else ShelfSection("Favourites", "Your saved effects will appear here.", IconKind.STAR, Color(0xFFFFC36B))
+            }
+            Row(Modifier.fillMaxWidth().padding(top = 7.dp, bottom = 22.dp),
+                horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                repeat(2) { page ->
+                    Box(Modifier.padding(horizontal = 3.dp)
+                        .size(if (shelfPager.currentPage == page) 15.dp else 5.dp, 5.dp)
+                        .clip(CircleShape)
+                        .background(if (shelfPager.currentPage == page) KColors.Text else KColors.Dim.copy(alpha = 0.55f)))
+                }
+            }
+            SectionHeading("Categories")
+            Spacer(Modifier.height(12.dp))
+            effectCategories.chunked(2).forEach { row ->
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    row.forEach { category -> CategoryTile(category, Modifier.weight(1f)) { selectedCategory = category } }
+                    repeat(4 - row.size) { Spacer(Modifier.weight(1f)) }
+                }
+                Spacer(Modifier.height(6.dp))
+            }
         } else {
             val category = selectedCategory!!
             Text("Choose an effect to add it to the selected layer.", color = KColors.Muted, fontSize = 11.sp)
@@ -101,13 +131,13 @@ fun EffectsBrowserScreen(onClose: () -> Unit, onAddEffect: (String) -> Unit) {
                     modifier = Modifier.padding(vertical = 20.dp))
             } else {
                 category.effects.chunked(4).forEach { row ->
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         row.forEach { effect ->
                             EffectChoice(effect, category.accent, Modifier.weight(1f)) { onAddEffect(effect) }
                         }
-                        repeat(4 - row.size) { Spacer(Modifier.weight(1f)) }
+                        if (row.size == 1) Spacer(Modifier.weight(1f))
                     }
-                    Spacer(Modifier.height(6.dp))
+                    Spacer(Modifier.height(10.dp))
                 }
             }
         }
