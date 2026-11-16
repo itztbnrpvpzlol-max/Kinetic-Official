@@ -57,6 +57,7 @@ fun CpuPreviewCanvas(
     val ctx = LocalContext.current
     val bitmaps = remember { mutableStateMapOf<String, Bitmap>() }
     val effectedBitmaps = remember { mutableStateMapOf<String, Bitmap>() }
+    val motionTileBitmaps = remember { mutableStateMapOf<String, Bitmap>() }
     val previewClock = remember(editor) { CpuPreviewClock() }
     val mediaLayers = editor.layers.filter {
         it.id != directVideoLayerId && it.uri != null && (it.type == LayerType.IMAGE || it.type == LayerType.VIDEO)
@@ -85,6 +86,9 @@ fun CpuPreviewCanvas(
             if (old != null && old !== source && !old.isRecycled) old.recycle()
         }
         bitmaps.keys.toList().filterNot { it in validIds }.forEach { bitmaps.remove(it) }
+        motionTileBitmaps.keys.toList().filterNot { it in validIds }.forEach { id ->
+            motionTileBitmaps.remove(id)?.let { if (!it.isRecycled) it.recycle() }
+        }
         val lastRequests = mutableMapOf<String, Pair<Int, Int>>()
         val retryAfterNs = mutableMapOf<String, Long>()
 
@@ -208,15 +212,28 @@ fun CpuPreviewCanvas(
                 key = (key * 31L) + activeEffects.hashCode().toLong()
                 key = (key * 31L) + timeBucket.toLong()
                 if (lastProcessed[layer.id] == key) continue
+                val motionTile = activeEffects.lastOrNull { it.name == "Motion Tile" }
+                val tileRendered = if (motionTile != null) {
+                    withContext(Dispatchers.Default) {
+                        NativeEffectsEngine.createMotionTileBackground(source, motionTile, timelineTime)
+                    }
+                } else null
                 val rendered = withContext(Dispatchers.Default) {
-                    NativeEffectsEngine.processBitmap(source, activeEffects, timelineTime)
+                    NativeEffectsEngine.processBitmap(source, activeEffects.filterNot { it.name == "Motion Tile" }, timelineTime)
                 }
-                if (bitmaps[layer.id] === source && previewClock.timeSec.let { !timeDependent || (it * MediaLoader.CPU_PREVIEW_SAMPLE_FPS).toInt() == timeBucket }) {
+                if (bitmaps[layer.id] === source && previewClock.timeSec.let { !timeDependent || (it * effectSampleFps).toInt() == timeBucket }) {
+                    if (motionTile == null) {
+                        motionTileBitmaps.remove(layer.id)?.let { if (!it.isRecycled) it.recycle() }
+                    } else if (tileRendered != null) {
+                        val oldTile = motionTileBitmaps.put(layer.id, tileRendered)
+                        if (oldTile != null && oldTile !== tileRendered && !oldTile.isRecycled) oldTile.recycle()
+                    }
                     val previous = effectedBitmaps.put(layer.id, rendered ?: source)
                     if (previous != null && previous !== source && previous !== rendered && !previous.isRecycled) previous.recycle()
                     lastProcessed[layer.id] = key
-                } else if (rendered != null && rendered !== source && !rendered.isRecycled) {
-                    rendered.recycle()
+                } else {
+                    if (rendered != null && rendered !== source && !rendered.isRecycled) rendered.recycle()
+                    if (tileRendered != null && !tileRendered.isRecycled) tileRendered.recycle()
                 }
             }
             delay(if (playing) 40L else 80L)
@@ -281,6 +298,23 @@ fun CpuPreviewCanvas(
                 val layerMatrix = layerMatrices.getOrPut(l.id) { Matrix() }
                 layerMatrixInto(l, time, byId, layerMatrix, matrixScratch)
                 nc.concat(layerMatrix)
+                val motionTile = motionTileBitmaps[l.id]
+                val sourceForTile = bitmaps[l.id]
+                if (motionTile != null && sourceForTile != null && !motionTile.isRecycled && !sourceForTile.isRecycled) {
+                    val sx = l.width / sourceForTile.width.toFloat()
+                    val sy = l.height / sourceForTile.height.toFloat()
+                    val marginX = (motionTile.width * sx - l.width) * 0.5f
+                    val marginY = (motionTile.height * sy - l.height) * 0.5f
+                    paint.alpha = alpha
+                    paint.color = android.graphics.Color.WHITE
+                    paint.xfermode = blendModes[l.blendMode]
+                    paint.colorFilter = if ("Grayscale" in l.effects) grayscaleFilter else null
+                    nc.drawBitmap(
+                        motionTile, null,
+                        RectF(-marginX, -marginY, l.width + marginX, l.height + marginY),
+                        paint
+                    )
+                }
                 val activeMask = l.maskAt(time).takeIf { l.maskEnabled }
                 if (activeMask != null) nc.saveLayer(RectF(0f, 0f, l.width, l.height), null)
                 paint.xfermode = blendModes[l.blendMode]
