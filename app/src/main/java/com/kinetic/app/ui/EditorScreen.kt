@@ -403,7 +403,8 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                             Toast.makeText(ctx, "Select a layer before adding an effect", Toast.LENGTH_SHORT).show()
                         }
                         !NativeEffectsEngine.available -> {
-                            Toast.makeText(ctx, "Native effects engine failed to load", Toast.LENGTH_LONG).show()
+                            val reason = NativeEffectsEngine.loadError?.take(96) ?: "unknown linker error"
+                            Toast.makeText(ctx, "CPU effects engine failed: $reason", Toast.LENGTH_LONG).show()
                         }
                         !editor.addEffect(layer.id, name) -> {
                             Toast.makeText(ctx, "The native engine could not create $name", Toast.LENGTH_LONG).show()

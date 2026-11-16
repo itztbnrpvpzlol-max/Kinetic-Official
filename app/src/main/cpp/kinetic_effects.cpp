@@ -4,7 +4,6 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
-#include <cstdio>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -78,7 +77,11 @@ float parameterValue(const std::vector<Parameter>& parameters,int effect,const c
     if(!std::isfinite(value)) value=fallback;
     return std::clamp(value,low,high);
 }
-struct RuntimeEffect { const Definition* definition; float p[7]; };
+struct RuntimeEffect {
+    const Definition* definition;
+    float p[7];
+    float cache0=0.0f, cache1=0.0f, cache2=0.0f, cache3=0.0f;
+};
 struct Color { float r,g,b,a; };
 float fract(float v) { return v-std::floor(v); }
 float waveShape(float t,float shape) {
@@ -88,6 +91,54 @@ float waveShape(float t,float shape) {
     const float c=fract(t/(2.0f*kPi));
     if(shape<2.5f) return 1.0f-4.0f*std::fabs(c-0.5f);
     return c*2.0f-1.0f;
+}
+
+float smoothStep(float edge0,float edge1,float value) {
+    const float t=std::clamp((value-edge0)/(edge1-edge0),0.0f,1.0f);
+    return t*t*(3.0f-2.0f*t);
+}
+void prepareRuntimeEffect(RuntimeEffect& effect,float time) {
+    const auto& p=effect.p;
+    switch(effect.definition->id) {
+        case 2: {
+            const float angle=p[4]*kPi/180.0f;
+            effect.cache0=std::cos(angle);
+            effect.cache1=std::sin(angle);
+            break;
+        }
+        case 3: {
+            const float t=time*p[2]+p[4]*17.17f;
+            float sx,sy;
+            if(p[3]>0.5f) {
+                sx=fract(std::sin(std::floor(t)*12.9898f+p[4]*78.233f)*43758.5453f)*2.0f-1.0f;
+                sy=fract(std::sin(std::floor(t+0.37f)*39.346f+p[4]*11.135f)*24634.6345f)*2.0f-1.0f;
+            } else {
+                sx=std::sin(t*2.0f*kPi);
+                sy=std::sin(t*2.0f*kPi+2.17f);
+            }
+            const float angle=p[5]*kPi/180.0f;
+            const float dx=std::cos(angle), dy=std::sin(angle);
+            effect.cache0=dx*sx;
+            effect.cache1=dy*sx;
+            effect.cache2=-dy*sy;
+            effect.cache3=dx*sy;
+            break;
+        }
+        case 4: {
+            const float angle=p[3]*kPi/180.0f;
+            effect.cache0=std::cos(angle);
+            effect.cache1=std::sin(angle);
+            break;
+        }
+        case 5: {
+            const float t=time*p[2]*2.0f*kPi+p[4]*kPi/180.0f;
+            effect.cache0=waveShape(t,p[3]);
+            if(p[5]>0.5f) effect.cache0=(effect.cache0+1.0f)*0.5f;
+            effect.cache1=std::sin(t+1.5708f);
+            break;
+        }
+        default: break;
+    }
 }
 Color sample(const std::vector<uint8_t>& pixels,int width,int height,float u,float v) {
     const float x=std::clamp(u,0.0f,1.0f)*static_cast<float>(width-1);
@@ -130,33 +181,21 @@ void applyWarp(float& u,float& v,const RuntimeEffect& effect,float time) {
             u=px; v=py; break;
         }
         case 2: {
-            const float angle=p[4]*kPi/180.0f;
-            const float ax=std::cos(angle), ay=std::sin(angle);
+            const float ax=effect.cache0, ay=effect.cache1;
             const float px=-ay, py=ax;
             const float t=((u-0.5f)*ax+(v-0.5f)*ay)*std::max(p[1],1.0f)*2.0f*kPi-time*p[2]*2.0f*kPi+p[5]*kPi/180.0f;
             const float wave=waveShape(t,p[3]);
             float edge=1.0f;
-            if(p[6]==1.0f || p[6]==3.0f) edge*=std::clamp(v/0.08f,0.0f,1.0f)*std::clamp((1.0f-v)/0.08f,0.0f,1.0f);
-            if(p[6]==2.0f || p[6]==3.0f) edge*=std::clamp(u/0.08f,0.0f,1.0f)*std::clamp((1.0f-u)/0.08f,0.0f,1.0f);
+            if(p[6]==1.0f || p[6]==3.0f) edge*=smoothStep(0.0f,0.08f,v)*smoothStep(0.0f,0.08f,1.0f-v);
+            if(p[6]==2.0f || p[6]==3.0f) edge*=smoothStep(0.0f,0.08f,u)*smoothStep(0.0f,0.08f,1.0f-u);
             u+=px*wave*p[0]*edge; v+=py*wave*p[0]*edge; break;
         }
         case 3: {
-            const float t=time*p[2]+p[4]*17.17f;
-            float sx,sy;
-            if(p[3]>0.5f) {
-                sx=fract(std::sin(std::floor(t)*12.9898f+p[4]*78.233f)*43758.5453f)*2.0f-1.0f;
-                sy=fract(std::sin(std::floor(t+0.37f)*39.346f+p[4]*11.135f)*24634.6345f)*2.0f-1.0f;
-            } else { sx=std::sin(t*2.0f*kPi); sy=std::sin(t*2.0f*kPi+2.17f); }
-            const float angle=p[5]*kPi/180.0f;
-            const float dx=std::cos(angle), dy=std::sin(angle);
-            u+=dx*(sx*p[0])-dy*(sy*p[1]);
-            v+=dy*(sx*p[0])+dx*(sy*p[1]); break;
+            u+=effect.cache0*p[0]+effect.cache2*p[1];
+            v+=effect.cache1*p[0]+effect.cache3*p[1]; break;
         }
         case 5: {
-            const float t=time*p[2]*2.0f*kPi+p[4]*kPi/180.0f;
-            float wave=waveShape(t,p[3]);
-            if(p[5]>0.5f) wave=(wave+1.0f)*0.5f;
-            u+=wave*p[0]; v+=std::sin(t+1.5708f)*p[1]; break;
+            u+=effect.cache0*p[0]; v+=effect.cache1*p[1]; break;
         }
         default: break;
     }
@@ -287,6 +326,7 @@ Java_com_kinetic_app_engine_NativeEffectsEngine_nativeProcessBitmap(
         for(int p=0;p<definition->count;++p)
             runtime.p[p]=parameterValue(parameters,e,definition->keys[p],definition->defaults[p],
                                         definition->minimums[p],definition->maximums[p],time);
+        prepareRuntimeEffect(runtime,time);
         effects.push_back(runtime);
     }
     if(effects.empty()) return JNI_TRUE;
@@ -312,7 +352,7 @@ Java_com_kinetic_app_engine_NativeEffectsEngine_nativeProcessBitmap(
                 const auto& p=effect.p;
                 switch(effect.definition->id) {
                     case 4: {
-                        float dx=std::cos(p[3]*kPi/180.0f), dy=std::sin(p[3]*kPi/180.0f);
+                        float dx=effect.cache0, dy=effect.cache1;
                         if(p[4]>0.5f) {
                             dx=u-p[5]; dy=v-p[6];
                             const float length=std::sqrt(dx*dx+dy*dy);

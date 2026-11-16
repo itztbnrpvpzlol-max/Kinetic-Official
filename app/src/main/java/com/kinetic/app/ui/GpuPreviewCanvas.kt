@@ -122,7 +122,7 @@ fun PreviewCanvas(
     // TextureView is a bottom-layer surface. Keep it only when the one active
     // video is the lowest visual layer; Canvas then draws stills/text/shapes
     // above it without ever copying the decoded video frame into a Bitmap.
-    val hasGpuEffects = activeVisualLayers.any { layer -> layer.effectStack.any { it.enabled } }
+    val hasEffects = activeVisualLayers.any { layer -> layer.effectStack.any { it.enabled } }
     val hasComplexMasks = activeVisualLayers.any { it.maskEnabled && it.maskPath != null }
     val directVideo = videoLayers.singleOrNull()
         ?.takeIf {
@@ -219,10 +219,9 @@ private fun GpuCompositionPreviewCanvas(
     val activeVideoLayers = editor.layers.filter {
         it.visible && it.activeAt(editor.time) && it.type == LayerType.VIDEO && it.uri != null
     }
-    // All healthy video decoders feed the GLES compositor through external
-    // textures. The external-OES fragment shader applies the same bounded
-    // effect uniforms as the 2D texture shader, avoiding per-frame bitmap
-    // extraction and uploads for effect-bearing footage on low-RAM devices.
+    // Video layers without enabled effects use SurfaceTexture external textures.
+    // Effect-bearing clips are intentionally excluded and decoded to bounded
+    // bitmaps so the independent native CPU engine can process their pixels.
     val videoLayers = activeVideoLayers
         .filter { failedVideoSources[it.id] != it.uri && it.effectStack.none { effect -> effect.enabled } }
         .take(decoderLimit)
@@ -236,10 +235,12 @@ private fun GpuCompositionPreviewCanvas(
             .forEach { failedVideoSources.remove(it) }
     }
 
-    // Video uses SurfaceTexture as a GPU source texture; GLSL processes the
-    // frame in the compositor before it is blended with the rest of the scene.
-    // Bitmap decoding is reserved for decoder fallback and still-image inputs.
-    val compositionFps = editor.fps.coerceIn(1, 60)
+    // Untouched video uses SurfaceTexture as a GPU source texture. Effect-bearing
+    // video uses the bitmap path above so effects never depend on a GPU shader.
+    val hasEffectVideo = activeVideoLayers.any { layer -> layer.effectStack.any { it.enabled } }
+    val compositionFps = if (MediaWorkers.isConstrainedDevice && hasEffectVideo) {
+        minOf(editor.fps, MediaLoader.CPU_PREVIEW_SAMPLE_FPS)
+    } else editor.fps.coerceIn(1, 60)
     val latestTimelineTime = androidx.compose.runtime.rememberUpdatedState(editor.time)
     val latestPlaying = androidx.compose.runtime.rememberUpdatedState(editor.playing)
 
