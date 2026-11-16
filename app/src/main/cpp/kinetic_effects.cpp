@@ -250,6 +250,66 @@ Java_com_kinetic_app_engine_NativeEffectsEngine_nativeEvaluateParameter(
     return std::isfinite(result)?result:base;
 }
 
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_kinetic_app_engine_NativeEffectsEngine_nativeRenderMotionTileBackground(
+    JNIEnv* env,jobject,jobject sourceBitmap,jobject targetBitmap,
+    jfloat tileWidth,jfloat tileHeight,jboolean mirrorEdges,jfloat phaseX,jfloat phaseY) {
+    void* sourcePixels=nullptr;
+    void* targetPixels=nullptr;
+    try {
+        if(!sourceBitmap||!targetBitmap||sourceBitmap==targetBitmap) return JNI_FALSE;
+        AndroidBitmapInfo sourceInfo{}, targetInfo{};
+        if(AndroidBitmap_getInfo(env,sourceBitmap,&sourceInfo)!=ANDROID_BITMAP_RESULT_SUCCESS ||
+           AndroidBitmap_getInfo(env,targetBitmap,&targetInfo)!=ANDROID_BITMAP_RESULT_SUCCESS) return JNI_FALSE;
+        if(sourceInfo.format!=ANDROID_BITMAP_FORMAT_RGBA_8888 ||
+           targetInfo.format!=ANDROID_BITMAP_FORMAT_RGBA_8888 ||
+           sourceInfo.width==0||sourceInfo.height==0||targetInfo.width==0||targetInfo.height==0 ||
+           sourceInfo.width>2048||sourceInfo.height>2048||targetInfo.width>2048||targetInfo.height>2048) return JNI_FALSE;
+        if(AndroidBitmap_lockPixels(env,sourceBitmap,&sourcePixels)!=ANDROID_BITMAP_RESULT_SUCCESS || !sourcePixels) return JNI_FALSE;
+        if(AndroidBitmap_lockPixels(env,targetBitmap,&targetPixels)!=ANDROID_BITMAP_RESULT_SUCCESS || !targetPixels) {
+            AndroidBitmap_unlockPixels(env,sourceBitmap);
+            sourcePixels=nullptr;
+            return JNI_FALSE;
+        }
+        const auto* src=static_cast<const uint8_t*>(sourcePixels);
+        auto* dst=static_cast<uint8_t*>(targetPixels);
+        const float tileW=std::max(tileWidth,10.0f)/100.0f;
+        const float tileH=std::max(tileHeight,10.0f)/100.0f;
+        for(uint32_t y=0;y<targetInfo.height;++y) {
+            const float qy=((static_cast<float>(y)+0.5f-static_cast<float>(targetInfo.height)*0.5f)/
+                (static_cast<float>(sourceInfo.height)*tileH))+0.5f+phaseY;
+            const float cy=std::floor(qy);
+            float py=fract(qy);
+            if(mirrorEdges==JNI_TRUE && std::fmod(std::fabs(cy),2.0f)>=1.0f) py=1.0f-py;
+            const uint32_t sy=static_cast<uint32_t>(std::clamp(
+                static_cast<int>(std::floor(py*static_cast<float>(sourceInfo.height))),0,
+                static_cast<int>(sourceInfo.height)-1));
+            const auto* srcRow=src+static_cast<std::size_t>(sy)*sourceInfo.stride;
+            auto* dstRow=dst+static_cast<std::size_t>(y)*targetInfo.stride;
+            for(uint32_t x=0;x<targetInfo.width;++x) {
+                const float qx=((static_cast<float>(x)+0.5f-static_cast<float>(targetInfo.width)*0.5f)/
+                    (static_cast<float>(sourceInfo.width)*tileW))+0.5f+phaseX;
+                const float cx=std::floor(qx);
+                float px=fract(qx);
+                if(mirrorEdges==JNI_TRUE && std::fmod(std::fabs(cx),2.0f)>=1.0f) px=1.0f-px;
+                const uint32_t sx=static_cast<uint32_t>(std::clamp(
+                    static_cast<int>(std::floor(px*static_cast<float>(sourceInfo.width))),0,
+                    static_cast<int>(sourceInfo.width)-1));
+                std::memcpy(dstRow+static_cast<std::size_t>(x)*4u,
+                    srcRow+static_cast<std::size_t>(sx)*4u,4u);
+            }
+        }
+        AndroidBitmap_unlockPixels(env,targetBitmap); targetPixels=nullptr;
+        AndroidBitmap_unlockPixels(env,sourceBitmap); sourcePixels=nullptr;
+        return JNI_TRUE;
+    } catch (...) {
+        if(targetPixels) AndroidBitmap_unlockPixels(env,targetBitmap);
+        if(sourcePixels) AndroidBitmap_unlockPixels(env,sourceBitmap);
+        return JNI_FALSE;
+    }
+}
+
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_kinetic_app_engine_NativeEffectsEngine_nativeProcessBitmap(
     JNIEnv* env,jobject,jobject bitmap,jobjectArray effectNames,jbooleanArray enabled,
@@ -324,7 +384,7 @@ Java_com_kinetic_app_engine_NativeEffectsEngine_nativeProcessBitmap(
     for(jsize e=0;e<effectCount&&effects.size()<8;++e) {
         if(active[e]!=JNI_TRUE) continue;
         const Definition* definition=findDefinition(names[e]);
-        if(!definition) continue;
+        if(!definition || definition->id==1) continue;
         RuntimeEffect runtime{}; runtime.definition=definition;
         for(int p=0;p<definition->count;++p)
             runtime.p[p]=parameterValue(parameters,e,definition->keys[p],definition->defaults[p],

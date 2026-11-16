@@ -32,6 +32,32 @@ object NativeEffectsEngine {
             .getOrDefault(base).takeIf { it.isFinite() } ?: base
     }
 
+    private external fun nativeRenderMotionTileBackground(source: Bitmap, target: Bitmap, tileWidth: Float, tileHeight: Float, mirrorEdges: Boolean, phaseX: Float, phaseY: Float): Boolean
+
+    fun createMotionTileBackground(source: Bitmap, effect: EffectInstance, time: Float): Bitmap? {
+        if (!available || source.isRecycled || effect.name != "Motion Tile") return null
+        val outputWidth = effect.parameterAt("Output Width", time, 200f).coerceIn(100f, 500f)
+        val outputHeight = effect.parameterAt("Output Height", time, 200f).coerceIn(100f, 500f)
+        val maxEdge = if (com.kinetic.app.data.MediaWorkers.isConstrainedDevice) 640 else 2048
+        val scale = minOf(1f, maxEdge.toFloat() / (maxOf(source.width * outputWidth, source.height * outputHeight) / 100f))
+        val width = (source.width * outputWidth / 100f * scale).toInt().coerceIn(1, maxEdge)
+        val height = (source.height * outputHeight / 100f * scale).toInt().coerceIn(1, maxEdge)
+        val output = runCatching { Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888) }.getOrNull() ?: return null
+        val success = runCatching {
+            nativeRenderMotionTileBackground(
+                source, output,
+                effect.parameterAt("Tile Width", time, 100f),
+                effect.parameterAt("Tile Height", time, 100f),
+                effect.parameterAt("Mirror Edges", time, 1f) >= 0.5f,
+                effect.parameterAt("Phase X", time, 0f),
+                effect.parameterAt("Phase Y", time, 0f)
+            )
+        }.getOrDefault(false)
+        if (success) return output
+        if (!output.isRecycled) output.recycle()
+        return null
+    }
+
     private external fun nativeProcessBitmap(
         bitmap: Bitmap,
         effectNames: Array<String>,
