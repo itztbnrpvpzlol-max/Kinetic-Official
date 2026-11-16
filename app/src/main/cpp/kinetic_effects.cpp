@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstdio>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -104,6 +105,10 @@ Color sample(const std::vector<uint8_t>& pixels,int width,int height,float u,flo
         const float bottom=at(x0,y1,ch)+(at(x1,y1,ch)-at(x0,y1,ch))*fx;
         *channels[ch]=top+(bottom-top)*fy;
     }
+    // Android ARGB_8888 bitmaps are stored premultiplied. Match the GPU
+    // shader's straight-alpha working space for effect math.
+    if(c.a>0.00001f) { c.r/=c.a; c.g/=c.a; c.b/=c.a; }
+    else { c.r=0.0f; c.g=0.0f; c.b=0.0f; }
     return c;
 }
 void applyWarp(float& u,float& v,const RuntimeEffect& effect,float time) {
@@ -334,10 +339,11 @@ Java_com_kinetic_app_engine_NativeEffectsEngine_nativeProcessBitmap(
                 }
             }
             const std::size_t offset=(static_cast<std::size_t>(y)*width+x)*4u;
-            output[offset]=static_cast<uint8_t>(std::lround(clamp01(color.r)*255.0f));
-            output[offset+1]=static_cast<uint8_t>(std::lround(clamp01(color.g)*255.0f));
-            output[offset+2]=static_cast<uint8_t>(std::lround(clamp01(color.b)*255.0f));
-            output[offset+3]=static_cast<uint8_t>(std::lround(clamp01(color.a)*255.0f));
+            const float alpha=clamp01(color.a);
+            output[offset]=static_cast<uint8_t>(std::lround(clamp01(color.r)*alpha*255.0f));
+            output[offset+1]=static_cast<uint8_t>(std::lround(clamp01(color.g)*alpha*255.0f));
+            output[offset+2]=static_cast<uint8_t>(std::lround(clamp01(color.b)*alpha*255.0f));
+            output[offset+3]=static_cast<uint8_t>(std::lround(alpha*255.0f));
         }
     }
     auto* destination=static_cast<uint8_t*>(locked);
