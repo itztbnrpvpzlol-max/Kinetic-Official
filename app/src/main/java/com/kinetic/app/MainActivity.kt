@@ -3,10 +3,13 @@ package com.kinetic.app
 import android.content.ComponentCallbacks2
 import android.graphics.Color
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -16,6 +19,7 @@ import com.kinetic.app.data.AppSettings
 import com.kinetic.app.data.MediaLoader
 import com.kinetic.app.data.ProjectStore
 import com.kinetic.app.model.EditorState
+import com.kinetic.app.plugins.EffectPluginManager
 import com.kinetic.app.ui.EditorScreen
 import com.kinetic.app.ui.HomeScreen
 import com.kinetic.app.ui.KineticTheme
@@ -41,6 +45,17 @@ class MainActivity : ComponentActivity() {
         val store = ProjectStore(applicationContext)
         setContent {
             KineticTheme {
+                val pluginManager = remember { EffectPluginManager(applicationContext) }
+                val pluginPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+                    if (uri != null) when (val result = pluginManager.install(uri)) {
+                        is com.kinetic.app.plugins.PluginInstallResult.Success -> {
+                            val verb = if (result.updated) "Updated" else "Installed"
+                            Toast.makeText(this@MainActivity, "$verb ${result.pack.name}", Toast.LENGTH_LONG).show()
+                        }
+                        is com.kinetic.app.plugins.PluginInstallResult.Failure ->
+                            Toast.makeText(this@MainActivity, result.message, Toast.LENGTH_LONG).show()
+                    }
+                }
                 var screen by remember { mutableStateOf(Screen.HOME) }
                 var settingsFrom by remember { mutableStateOf(Screen.HOME) }
                 var editor by remember { mutableStateOf<EditorState?>(null) }
@@ -49,7 +64,7 @@ class MainActivity : ComponentActivity() {
                 when (screen) {
                     Screen.HOME -> HomeScreen(
                         onNewComposition = { editor = EditorState(settings); screen = Screen.EDITOR },
-                        onImportProject = { }, onImportPlugin = { },
+                        onImportProject = { }, onImportPlugin = { pluginPicker.launch(arrayOf("*/*")) },
                         onOpenSettings = { settingsFrom = Screen.HOME; screen = Screen.SETTINGS },
                         projects = projects,
                         onOpenProject = { info ->
@@ -79,7 +94,7 @@ class MainActivity : ComponentActivity() {
                     }
                     Screen.SETTINGS -> {
                         BackHandler { screen = settingsFrom }
-                        SettingsScreen(settings, onBack = { screen = settingsFrom })
+                        SettingsScreen(settings, pluginManager, onImportPlugin = { pluginPicker.launch(arrayOf("*/*")) }, onBack = { screen = settingsFrom })
                     }
                 }
             }

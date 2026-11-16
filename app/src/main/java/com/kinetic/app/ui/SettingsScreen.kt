@@ -25,6 +25,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -35,15 +36,18 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kinetic.app.data.AppSettings
 import com.kinetic.app.data.MediaLoader
+import com.kinetic.app.plugins.EffectPluginManager
 import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.launch
 
 @Composable
-fun SettingsScreen(settings: AppSettings, onBack: () -> Unit) {
+fun SettingsScreen(settings: AppSettings, pluginManager: EffectPluginManager, onImportPlugin: () -> Unit, onBack: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var showClearCacheDialog by remember { mutableStateOf(false) }
     var cacheCleared by remember { mutableStateOf(false) }
+    var pluginRevision by remember { mutableIntStateOf(0) }
+    val installedPacks = remember(pluginRevision) { pluginManager.installedPacks() }
     Column(Modifier.fillMaxSize().background(KColors.Bg).statusBarsPadding().navigationBarsPadding()) {
         Row(Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) { KIcon(IconKind.BACK, KColors.Text) }
@@ -73,6 +77,31 @@ fun SettingsScreen(settings: AppSettings, onBack: () -> Unit) {
                     Text("Removes frames stored on this device", color = KColors.Dim, fontSize = 12.sp)
                 }
                 Text("Clear", color = KColors.Accent, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            }
+
+            Section("Effect plugins")
+            Text("Install .kplug packs to add shader-based effects. Packs are validated before installation.", color = KColors.Dim, fontSize = 12.sp)
+            Row(
+                Modifier.fillMaxWidth().clickable(onClick = onImportPlugin).padding(vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Install effect pack", color = KColors.Accent, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.weight(1f))
+                Text("IMPORT", color = KColors.Muted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            }
+            if (installedPacks.isEmpty()) {
+                Text("No effect packs installed.", color = KColors.Dim, fontSize = 12.sp, modifier = Modifier.padding(vertical = 6.dp))
+            } else installedPacks.forEach { pack ->
+                Row(Modifier.fillMaxWidth().padding(vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(pack.name, color = KColors.Text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        Text("v${pack.version} • ${pack.effects.size} effects • ${pack.author}", color = KColors.Dim, fontSize = 11.sp)
+                    }
+                    Text("REMOVE", color = KColors.Muted, fontSize = 10.sp, fontWeight = FontWeight.Bold,
+                        modifier = Modifier.clickable {
+                            if (pluginManager.remove(pack.id)) pluginRevision++
+                        }.padding(8.dp))
+                }
             }
 
             Spacer(Modifier.height(24.dp))
