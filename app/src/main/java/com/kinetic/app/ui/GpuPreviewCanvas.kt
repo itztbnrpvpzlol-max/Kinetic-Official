@@ -276,6 +276,9 @@ private fun GpuCompositionPreviewCanvas(
 
     LaunchedEffect(editor.layers.map { it.id to it.uri }) {
         val currentIds = editor.layers.mapTo(HashSet<String>()) { it.id }
+        // Drop removed segment entries; the tiny recent-by-source cache may
+        // still retain a shared frame for an adjacent split segment.
+        frames.keys.filter { it !in currentIds }.toList().forEach { frames.remove(it) }
         effectedFrames.keys.filter { it !in currentIds }.toList().forEach { id ->
             val old = effectedFrames.remove(id)
             if (old != null && !old.isRecycled) old.recycle()
