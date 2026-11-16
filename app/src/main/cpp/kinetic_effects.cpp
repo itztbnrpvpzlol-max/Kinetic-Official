@@ -255,11 +255,8 @@ Java_com_kinetic_app_engine_NativeEffectsEngine_nativeProcessBitmap(
     JNIEnv* env,jobject,jobject bitmap,jobjectArray effectNames,jbooleanArray enabled,
     jobjectArray parameterNames,jfloatArray parameterValues,jintArray parameterEffectIndices,
     jintArray keyframeParameterIndices,jfloatArray keyframeData,jfloat time) {
-    void* locked=nullptr;
-    try {
     if(!bitmap||!effectNames||!enabled||!parameterNames||!parameterValues||
        !parameterEffectIndices||!keyframeParameterIndices||!keyframeData) return JNI_FALSE;
-
     const jsize effectCount=env->GetArrayLength(effectNames);
     const jsize parameterCount=env->GetArrayLength(parameterNames);
     const jsize keyCount=env->GetArrayLength(keyframeParameterIndices);
@@ -334,6 +331,7 @@ Java_com_kinetic_app_engine_NativeEffectsEngine_nativeProcessBitmap(
     }
     if(effects.empty()) return JNI_TRUE;
 
+    void* locked=nullptr;
     if(AndroidBitmap_lockPixels(env,bitmap,&locked)!=ANDROID_BITMAP_RESULT_SUCCESS||!locked) return JNI_FALSE;
     const int width=static_cast<int>(info.width), height=static_cast<int>(info.height);
     const std::size_t pixelBytes=static_cast<std::size_t>(width)*height*4u;
@@ -415,11 +413,5 @@ Java_com_kinetic_app_engine_NativeEffectsEngine_nativeProcessBitmap(
         std::memcpy(destination+static_cast<std::size_t>(y)*info.stride,
                     output.data()+static_cast<std::size_t>(y)*width*4u,static_cast<std::size_t>(width)*4u);
     AndroidBitmap_unlockPixels(env,bitmap);
-    locked=nullptr;
     return JNI_TRUE;
-    } catch (...) {
-        // Never allow allocation or STL exceptions to escape through JNI.
-        if(locked) AndroidBitmap_unlockPixels(env,bitmap);
-        return JNI_FALSE;
-    }
 }

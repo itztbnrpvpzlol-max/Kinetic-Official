@@ -20,7 +20,7 @@ find_library(jnigraphics-lib jnigraphics)
 find_library(effects-log-lib log)
 find_library(effects-m-lib m)
 target_compile_features(kinetic_effects PRIVATE cxx_std_17)
-target_compile_options(kinetic_effects PRIVATE -O3 -fno-exceptions -fno-rtti)
+target_compile_options(kinetic_effects PRIVATE -O3 -fexceptions -fno-rtti)
 target_link_options(kinetic_effects PRIVATE "-Wl,-z,max-page-size=16384")
 target_link_libraries(kinetic_effects ${jnigraphics-lib} ${effects-log-lib} ${effects-m-lib})
 
