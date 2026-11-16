@@ -38,7 +38,7 @@ class ProjectStore(context: Context) {
         val layers = JSONArray()
         editor.layers.forEach { layer -> layers.put(layerToJson(layer)) }
         val json = JSONObject()
-            .put("version", 1)
+            .put("version", 2)
             .put("id", editor.projectId)
             .put("name", editor.projectName)
             .put("updatedAt", System.currentTimeMillis())
@@ -57,9 +57,22 @@ class ProjectStore(context: Context) {
 
     fun load(id: String): LoadedProject? = try {
         val json = JSONObject(File(root, "$id.kinetic").readText())
+        val projectVersion = json.optInt("version", 1)
         val layersJson = json.optJSONArray("layers") ?: JSONArray()
         val layers = (0 until layersJson.length()).mapNotNull { i ->
-            try { layerFromJson(layersJson.getJSONObject(i)) } catch (_: Exception) { null }
+            try {
+                val layerJson = layersJson.getJSONObject(i)
+                // Version 1 called the original ghost-trail treatment "Deep Glow".
+                // Preserve those saved projects by migrating it to Morphosis.
+                if (projectVersion < 2) {
+                    val stack = layerJson.optJSONArray("effectStack") ?: JSONArray()
+                    for (effectIndex in 0 until stack.length()) {
+                        val effect = stack.optJSONObject(effectIndex) ?: continue
+                        if (effect.optString("name") == "Deep Glow") effect.put("name", "Morphosis")
+                    }
+                }
+                layerFromJson(layerJson)
+            } catch (_: Exception) { null }
         }
         LoadedProject(json.optString("id", id), json.optString("name", "Untitled"),
             json.optDouble("duration", 5.0).toFloat().coerceAtLeast(0.1f),
