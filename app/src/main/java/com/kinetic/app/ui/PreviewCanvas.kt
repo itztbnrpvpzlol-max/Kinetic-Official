@@ -146,8 +146,9 @@ fun CpuPreviewCanvas(
                     (currentSourceTime * MediaLoader.CPU_PREVIEW_SAMPLE_FPS.toFloat()).toInt()
                 } else 0
                 val currentEdge = if (
-                    layer.type == LayerType.VIDEO &&
-                    (previewClock.playing || MediaWorkers.isConstrainedDevice)
+                    layer.effectStack.any { it.enabled } ||
+                    (layer.type == LayerType.VIDEO &&
+                        (previewClock.playing || MediaWorkers.isConstrainedDevice))
                 ) 320 else 640
                 // Decode on constrained devices can take several hundred milliseconds.
                 // Do not discard a successfully decoded frame just because the playhead
