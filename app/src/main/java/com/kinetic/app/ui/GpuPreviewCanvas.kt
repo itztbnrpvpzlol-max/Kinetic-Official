@@ -113,26 +113,36 @@ fun PreviewCanvas(
         editor.playing
     ) {
         if (!editor.playing) {
-            val sampleFps = MediaLoader.CPU_PREVIEW_SAMPLE_FPS
-            val maxEdge = if (MediaWorkers.isConstrainedDevice) 320 else 448
             val clipsToWarm = editor.layers
                 .filter { it.visible && it.type == LayerType.VIDEO && it.uri != null }
                 .sortedBy { it.start }
             for (clip in clipsToWarm) {
                 val source = clip.uri ?: continue
                 val sourceUri = Uri.parse(source)
-                if (MediaLoader.hasPersistentVideoFrame(
-                        context, sourceUri, clip.srcOffset, sampleFps, maxEdge
+                val sampleFps = if (
+                    MediaWorkers.isConstrainedDevice && clip.effectStack.any { it.enabled }
+                ) 12 else MediaLoader.CPU_PREVIEW_SAMPLE_FPS
+                // Playback paths use 320px frames. A 448px paused/direct preview
+                // sample is also retained on larger devices, without extra RAM use.
+                val edgeVariants = if (MediaWorkers.isConstrainedDevice || clip.effectStack.any { it.enabled }) {
+                    listOf(320)
+                } else {
+                    listOf(320, 448)
+                }
+                for (maxEdge in edgeVariants) {
+                    if (MediaLoader.hasPersistentVideoFrame(
+                            context, sourceUri, clip.srcOffset, sampleFps, maxEdge
+                        )
+                    ) continue
+                    val frame = MediaLoader.bitmapFor(
+                        context, sourceUri, LayerType.VIDEO, clip.srcOffset,
+                        sampleFps = sampleFps,
+                        maxEdge = maxEdge,
+                        persistToDisk = true,
+                        lowPriorityRequest = true
                     )
-                ) continue
-                val frame = MediaLoader.bitmapFor(
-                    context, sourceUri, LayerType.VIDEO, clip.srcOffset,
-                    sampleFps = sampleFps,
-                    maxEdge = maxEdge,
-                    persistToDisk = true,
-                    lowPriorityRequest = true
-                )
-                if (frame != null && !frame.isRecycled) frame.recycle()
+                    if (frame != null && !frame.isRecycled) frame.recycle()
+                }
             }
         }
     }

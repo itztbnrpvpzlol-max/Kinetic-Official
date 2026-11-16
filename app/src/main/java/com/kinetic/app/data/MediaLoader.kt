@@ -182,7 +182,7 @@ object MediaLoader {
             val sourceKey = mediaCacheIdentity(uri)
             val key = if (type == LayerType.IMAGE) "$sourceKey@image@$maxEdge" else "$sourceKey@$sampleFps@$maxEdge@$bucket"
             synchronized(key.intern()) {
-                val diskFile = if (persistToDisk) previewFrameFile(ctx, key, type) else null
+                val diskFile = if (type == LayerType.VIDEO || persistToDisk) previewFrameFile(ctx, key, type) else null
                 val diskBitmap = diskFile?.takeIf { hasValidPreviewFrame(it) }?.let { BitmapFactory.decodeFile(it.absolutePath) }
                 val decodeStartedNs = System.nanoTime()
                 val bmp = diskBitmap ?: try {
@@ -228,7 +228,7 @@ object MediaLoader {
                 }
 
                 if (bmp != null) {
-                    if (diskFile != null && diskBitmap == null) {
+                    if (persistToDisk && diskFile != null && diskBitmap == null) {
                         writePreviewFrame(diskFile, bmp, type)
                     }
                 }
