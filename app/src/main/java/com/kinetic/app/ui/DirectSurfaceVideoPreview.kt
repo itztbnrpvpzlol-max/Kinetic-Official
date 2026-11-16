@@ -4,6 +4,8 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.SurfaceTexture
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
 import android.view.Surface
 import android.view.TextureView
 import androidx.compose.foundation.Image
@@ -88,6 +90,7 @@ private class DirectVideoTextureView(
     private val player: FfmpegVideoPlayer,
     private val onFirstFrame: () -> Unit
 ) : TextureView(context), TextureView.SurfaceTextureListener {
+    private val mainHandler = Handler(Looper.getMainLooper())
     private var outputSurface: Surface? = null
 
     init {
@@ -111,16 +114,26 @@ private class DirectVideoTextureView(
     }
 
     override fun onSurfaceTextureDestroyed(surfaceTexture: SurfaceTexture): Boolean {
-        player.detachSurface()
-        outputSurface?.release()
+        val oldSurface = outputSurface
         outputSurface = null
-        return true
+        // TextureView must not destroy the consumer while FFmpeg/MediaCodec is
+        // still producing into it. Return false and release both sides only
+        // after the decoder executor confirms native teardown is complete.
+        player.detachSurface {
+            mainHandler.post {
+                runCatching { oldSurface?.release() }
+                runCatching { surfaceTexture.release() }
+            }
+        }
+        return false
     }
 
     fun releaseOutput() {
-        player.detachSurface()
-        outputSurface?.release()
+        val oldSurface = outputSurface ?: return
         outputSurface = null
+        player.detachSurface {
+            mainHandler.post { runCatching { oldSurface.release() } }
+        }
     }
 }
 
