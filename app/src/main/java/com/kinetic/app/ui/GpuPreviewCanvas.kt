@@ -451,7 +451,7 @@ private fun GpuCompositionPreviewCanvas(
         renderLayers += GpuLayer(
             layer.id, bitmap, Matrix(layerMatrix(layer, editor.time, byId)),
             layer.width, layer.height, opacity, layer.maskEnabled,
-            "Grayscale" in layer.effects, layer.blendMode, false, effectUniforms(layer.effectStack, editor.time)
+            "Grayscale" in layer.effects, layer.blendMode, false, buildNativeEffectUniforms(layer.effectStack, editor.time)
         )
     }
     // Keep only a small warm set of inactive text/vector bitmaps. Active
