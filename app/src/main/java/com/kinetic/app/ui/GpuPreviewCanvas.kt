@@ -408,6 +408,9 @@ private fun GpuCompositionPreviewCanvas(
                     val old = effectedFrames.remove(layer.id)
                     if (old != null && old !== source && !old.isRecycled) old.recycle()
                     effectFrameKeys.remove(layer.id)
+                    val oldTile = motionTileFrames.remove(layer.id)
+                    if (oldTile != null && !oldTile.isRecycled) oldTile.recycle()
+                    motionTileKeys.remove(layer.id)
                     continue
                 }
                 if (!layer.visible || !layer.activeAt(now)) continue

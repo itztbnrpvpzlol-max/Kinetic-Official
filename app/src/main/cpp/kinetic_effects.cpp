@@ -254,7 +254,8 @@ Java_com_kinetic_app_engine_NativeEffectsEngine_nativeEvaluateParameter(
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_kinetic_app_engine_NativeEffectsEngine_nativeRenderMotionTileBackground(
     JNIEnv* env,jobject,jobject sourceBitmap,jobject targetBitmap,
-    jfloat tileWidth,jfloat tileHeight,jboolean mirrorEdges,jfloat phaseX,jfloat phaseY) {
+    jfloat tileWidth,jfloat tileHeight,jboolean mirrorEdges,jfloat phaseX,jfloat phaseY,
+    jfloat foregroundWidth,jfloat foregroundHeight) {
     void* sourcePixels=nullptr;
     void* targetPixels=nullptr;
     try {
@@ -276,6 +277,8 @@ Java_com_kinetic_app_engine_NativeEffectsEngine_nativeRenderMotionTileBackground
         auto* dst=static_cast<uint8_t*>(targetPixels);
         const float tileW=std::max(tileWidth,10.0f)/100.0f;
         const float tileH=std::max(tileHeight,10.0f)/100.0f;
+        const float centerLeft=(static_cast<float>(targetInfo.width)-foregroundWidth)*0.5f;
+        const float centerTop=(static_cast<float>(targetInfo.height)-foregroundHeight)*0.5f;
         for(uint32_t y=0;y<targetInfo.height;++y) {
             const float qy=((static_cast<float>(y)+0.5f-static_cast<float>(targetInfo.height)*0.5f)/
                 (static_cast<float>(sourceInfo.height)*tileH))+0.5f+phaseY;
@@ -288,6 +291,15 @@ Java_com_kinetic_app_engine_NativeEffectsEngine_nativeRenderMotionTileBackground
             const auto* srcRow=src+static_cast<std::size_t>(sy)*sourceInfo.stride;
             auto* dstRow=dst+static_cast<std::size_t>(y)*targetInfo.stride;
             for(uint32_t x=0;x<targetInfo.width;++x) {
+                // Keep the original clip area transparent so the foreground
+                // clip is drawn exactly once at its normal opacity.
+                if(static_cast<float>(x)>=centerLeft &&
+                   static_cast<float>(x)<centerLeft+foregroundWidth &&
+                   static_cast<float>(y)>=centerTop &&
+                   static_cast<float>(y)<centerTop+foregroundHeight) {
+                    std::memset(dstRow+static_cast<std::size_t>(x)*4u,0,4u);
+                    continue;
+                }
                 const float qx=((static_cast<float>(x)+0.5f-static_cast<float>(targetInfo.width)*0.5f)/
                     (static_cast<float>(sourceInfo.width)*tileW))+0.5f+phaseX;
                 const float cx=std::floor(qx);

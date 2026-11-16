@@ -32,7 +32,7 @@ object NativeEffectsEngine {
             .getOrDefault(base).takeIf { it.isFinite() } ?: base
     }
 
-    private external fun nativeRenderMotionTileBackground(source: Bitmap, target: Bitmap, tileWidth: Float, tileHeight: Float, mirrorEdges: Boolean, phaseX: Float, phaseY: Float): Boolean
+    private external fun nativeRenderMotionTileBackground(source: Bitmap, target: Bitmap, tileWidth: Float, tileHeight: Float, mirrorEdges: Boolean, phaseX: Float, phaseY: Float, foregroundWidth: Float, foregroundHeight: Float): Boolean
 
     fun createMotionTileBackground(source: Bitmap, effect: EffectInstance, time: Float): Bitmap? {
         if (!available || source.isRecycled || effect.name != "Motion Tile") return null
@@ -50,7 +50,9 @@ object NativeEffectsEngine {
                 effect.parameterAt("Tile Height", time, 100f),
                 effect.parameterAt("Mirror Edges", time, 1f) >= 0.5f,
                 effect.parameterAt("Phase X", time, 0f),
-                effect.parameterAt("Phase Y", time, 0f)
+                effect.parameterAt("Phase Y", time, 0f),
+                source.width * scale,
+                source.height * scale
             )
         }.getOrDefault(false)
         if (success) return output

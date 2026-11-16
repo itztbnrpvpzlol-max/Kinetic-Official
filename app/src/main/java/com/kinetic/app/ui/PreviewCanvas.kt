@@ -198,6 +198,7 @@ fun CpuPreviewCanvas(
                 if (activeEffects.isEmpty()) {
                     val previous = effectedBitmaps.remove(layer.id)
                     if (previous != null && previous !== source && !previous.isRecycled) previous.recycle()
+                    motionTileBitmaps.remove(layer.id)?.let { if (!it.isRecycled) it.recycle() }
                     lastProcessed.remove(layer.id)
                     continue
                 }
