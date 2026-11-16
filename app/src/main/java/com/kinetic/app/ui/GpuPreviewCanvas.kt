@@ -211,6 +211,8 @@ private fun GpuCompositionPreviewCanvas(
     // CPU effects are prepared off the GL thread. The renderer only uploads ready bitmaps.
     val effectedFrames = remember { mutableStateMapOf<String, Bitmap>() }
     val effectFrameKeys = remember { mutableMapOf<String, Long>() }
+    val motionTileFrames = remember { mutableStateMapOf<String, Bitmap>() }
+    val motionTileKeys = remember { mutableMapOf<String, Long>() }
     // Preserve a recent decoded sample across adjacent split segments that share a source URI.
     val recentVideoFrames = remember { mutableStateMapOf<String, RecentVideoPreviewFrame>() }
     val textTextures = remember { mutableMapOf<String, Pair<Int, Bitmap>>() }
@@ -236,6 +238,9 @@ private fun GpuCompositionPreviewCanvas(
             val old = effectedFrames.remove(id)
             if (old != null && !old.isRecycled) old.recycle()
             effectFrameKeys.remove(id)
+            val tile = motionTileFrames.remove(id)
+            if (tile != null && !tile.isRecycled) tile.recycle()
+            motionTileKeys.remove(id)
         }
         val stale = textTextures.keys.filter { it !in currentIds }
         stale.forEach { textTextures.remove(it) }
@@ -418,21 +423,37 @@ private fun GpuCompositionPreviewCanvas(
                 keyValue = keyValue * 31L + timeBucket.toLong()
                 if (effectFrameKeys[layer.id] == keyValue) continue
 
+                val motionTile = activeEffects.lastOrNull { it.name == "Motion Tile" }
+                val tileRendered = if (motionTile != null) {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                        NativeEffectsEngine.createMotionTileBackground(source, motionTile, now)
+                    }
+                } else null
                 val rendered = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
-                    NativeEffectsEngine.processBitmap(source, activeEffects, now)
+                    NativeEffectsEngine.processBitmap(source, activeEffects.filterNot { it.name == "Motion Tile" }, now)
                 }
                 val stillCurrent = frames[layer.id] === source &&
                     (!timeDependent ||
-                        (latestTimelineTime.value * MediaLoader.CPU_PREVIEW_SAMPLE_FPS).toInt() == timeBucket)
+                        (latestTimelineTime.value * effectSampleFps).toInt() == timeBucket)
                 if (stillCurrent) {
+                    if (motionTile == null) {
+                        val oldTile = motionTileFrames.remove(layer.id)
+                        if (oldTile != null && !oldTile.isRecycled) oldTile.recycle()
+                        motionTileKeys.remove(layer.id)
+                    } else if (tileRendered != null) {
+                        val oldTile = motionTileFrames.put(layer.id, tileRendered)
+                        if (oldTile != null && oldTile !== tileRendered && !oldTile.isRecycled) oldTile.recycle()
+                        motionTileKeys[layer.id] = keyValue
+                    }
                     val next = rendered ?: source
                     val previous = effectedFrames.put(layer.id, next)
                     if (previous != null && previous !== source && previous !== next && !previous.isRecycled) {
                         previous.recycle()
                     }
                     effectFrameKeys[layer.id] = keyValue
-                } else if (rendered != null && rendered !== source && !rendered.isRecycled) {
-                    rendered.recycle()
+                } else {
+                    if (rendered != null && rendered !== source && !rendered.isRecycled) rendered.recycle()
+                    if (tileRendered != null && !tileRendered.isRecycled) tileRendered.recycle()
                 }
             }
             kotlinx.coroutines.delay(if (playing) 16L else 50L)
@@ -454,8 +475,29 @@ private fun GpuCompositionPreviewCanvas(
             )
             continue
         }
-        val bitmap = when (layer.type) {
+        val sourceBitmap = when (layer.type) {
             LayerType.IMAGE, LayerType.VIDEO -> effectedFrames[layer.id] ?: frames[layer.id]
+            else -> null
+        }
+        val tileBitmap = motionTileFrames[layer.id]
+        if (tileBitmap != null && sourceBitmap != null && !tileBitmap.isRecycled) {
+            val sx = layer.width / maxOf(1, frames[layer.id]?.width ?: tileBitmap.width).toFloat()
+            val sy = layer.height / maxOf(1, frames[layer.id]?.height ?: tileBitmap.height).toFloat()
+            val expandedWidth = tileBitmap.width * sx
+            val expandedHeight = tileBitmap.height * sy
+            val marginX = (expandedWidth - layer.width) * 0.5f
+            val marginY = (expandedHeight - layer.height) * 0.5f
+            val backdropMatrix = Matrix(layerMatrix(layer, editor.time, byId)).apply {
+                preTranslate(-marginX, -marginY)
+            }
+            renderLayers += GpuLayer(
+                "${layer.id}#motion-tile", tileBitmap, backdropMatrix,
+                expandedWidth, expandedHeight, (layer.p(PropId.OPACITY).valueAt(editor.time) / 100f).coerceIn(0f, 1f),
+                false, "Grayscale" in layer.effects, layer.blendMode, false, emptyList()
+            )
+        }
+        val bitmap = when (layer.type) {
+            LayerType.IMAGE, LayerType.VIDEO -> sourceBitmap
             LayerType.TEXT, LayerType.SHAPE -> {
                 activeTextTextureIds.add(layer.id)
                 val logicalWidth = layer.width.toInt().coerceIn(1, 4096)
@@ -1038,7 +1080,7 @@ private class CompositionGlRenderer(
     private fun drawLayer(layer: GpuLayer, scale: Float, ox: Float, oy: Float) {
         val bitmap = layer.bitmap ?: return
         if (bitmap.isRecycled || layer.opacity <= 0f) return
-        val texture = textureFor(layer.id, bitmap, layer.effectStack, scene.time) ?: return
+        val texture = textureFor(layer.id, bitmap) ?: return
         val right = if (layer.mask) layer.width * 0.8f else layer.width
         val bottom = if (layer.mask) layer.height * 0.8f else layer.height
         val uvMax = if (layer.mask) 0.8f else 1f
@@ -1082,14 +1124,10 @@ private class CompositionGlRenderer(
         )
     }
 
-    private fun textureFor(layerId: String, bitmap: Bitmap, effects: List<EffectInstance>, time: Float): Int? {
-        val activeEffects = effects.filter { it.enabled }.take(8)
-        val timeDependent = activeEffects.any { effect ->
-            effect.name == "Wave Warp" || effect.name == "Warp Shake" ||
-                effect.name == "Oscillate" || effect.parameterKeys.values.any { it.isNotEmpty() }
-        }
-        val timeBucket = if (timeDependent) (time * MediaLoader.CPU_PREVIEW_SAMPLE_FPS).toInt() else 0
-        val effectSignature = 31 * activeEffects.hashCode() + timeBucket
+    private fun textureFor(layerId: String, bitmap: Bitmap): Int? {
+        // All CPU effects are completed before texture upload. Never process
+        // pixels on the GL thread.
+        val effectSignature = 0
         val old = textures[layerId]
         if (old != null && old.bitmap === bitmap && old.effectSignature == effectSignature && old.id != 0) return old.id
         if (old != null) {
@@ -1105,13 +1143,7 @@ private class CompositionGlRenderer(
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
-        val uploadBitmap = if (activeEffects.isEmpty()) bitmap else
-            NativeEffectsEngine.processBitmap(bitmap, activeEffects, time) ?: bitmap
-        try {
-            GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, uploadBitmap, 0)
-        } finally {
-            if (uploadBitmap !== bitmap && !uploadBitmap.isRecycled) uploadBitmap.recycle()
-        }
+        GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, bitmap, 0)
         val bytes = bitmap.byteCount.toLong().coerceAtLeast(0L)
         textures[layerId] = TextureEntry(ids[0], bitmap, bytes, effectSignature)
         gpuTextureCacheBytes += bytes
