@@ -274,7 +274,7 @@ private fun GpuCompositionPreviewCanvas(
                 MediaWorkers.isConstrainedDevice -> 12
                 else -> 20
             }
-            delay(1500L)
+            kotlinx.coroutines.delay(1500L)
         }
     }
     val frames = remember { mutableStateMapOf<String, Bitmap>() }
