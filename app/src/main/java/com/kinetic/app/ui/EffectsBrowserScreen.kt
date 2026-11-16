@@ -51,9 +51,9 @@ private data class EffectCategory(
 )
 
 private val effectCategories = listOf(
-    EffectCategory("COLOR & LIGHT", IconKind.ADJ, Color(0xFFFF82B2), Color(0xFF281C2A), listOf("Exposure And Gamma")),
+    EffectCategory("COLOR & LIGHT", IconKind.ADJ, Color(0xFFFF82B2), Color(0xFF281C2A), listOf("Exposure And Gamma", "Deep Glow")),
     EffectCategory("STYLIZE", IconKind.EFFECTS, Color(0xFFC0A2FF), Color(0xFF241E35)),
-    EffectCategory("DRAWING & EDGE", IconKind.GRAPH, Color(0xFFFFC078), Color(0xFF30251D), listOf("Deep Glow")),
+    EffectCategory("DRAWING & EDGE", IconKind.GRAPH, Color(0xFFFFC078), Color(0xFF30251D), listOf("Morphosis")),
     EffectCategory("MOTION", IconKind.MOTION, Color(0xFF86B7FF), Color(0xFF1D2940), listOf("Oscillate")),
     EffectCategory("DISTORTION & WARP", IconKind.BLEND, Color(0xFF70DAD4), Color(0xFF1A2D32),
         listOf("Motion Tile", "Wave Warp", "Warp Shake", "RGB Split")),

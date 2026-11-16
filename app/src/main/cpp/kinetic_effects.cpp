@@ -22,7 +22,8 @@ static const Definition kDefinitions[] = {
     {"Warp Shake",3,{"X Amount","Y Amount","Frequency","Motion","Seed","Direction"},{0.008f,0.008f,8,0,0,0},{0,0,0.1f,0,0,0},{0.08f,0.08f,30,1,100,360},6},
     {"RGB Split",4,{"Red Offset","Green Offset","Blue Offset","Angle","Radial Split","Center X","Center Y"},{0.006f,0,-0.006f,0,0,0.5f,0.5f},{-0.04f,-0.04f,-0.04f,0,0,0,0},{0.04f,0.04f,0.04f,360,1,1,1},7},
     {"Oscillate",5,{"X Amplitude","Y Amplitude","Frequency","Wave Shape","Phase","Half Range"},{0.02f,0.02f,1,0,0,0},{0,0,0.1f,0,0,0},{0.15f,0.15f,12,3,360,1},6},
-    {"Deep Glow",6,{"Threshold","Radius","Intensity","Quality","Spread","Saturation","Glow Only"},{0.65f,0.012f,1.2f,0,1,1,0},{0,0.001f,0,0,0.25f,0,0},{1,0.08f,4,1,3,2,1},7},
+    {"Morphosis",6,{"Threshold","Radius","Intensity","Quality","Spread","Saturation","Glow Only"},{0.65f,0.012f,1.2f,0,1,1,0},{0,0.001f,0,0,0.25f,0,0},{1,0.08f,4,1,3,2,1},7},
+    {"Deep Glow",8,{"Threshold","Radius","Intensity","Quality","Spread","Saturation","Glow Only"},{0.65f,0.025f,1.5f,1,1.5f,1,0},{0,0.001f,0,0,0.25f,0,0},{1,0.12f,4,1,3,2,1},7},
     {"Exposure And Gamma",7,{"Exposure","Gamma","Offset","Channel"},{0,1,0,0},{-5,0.1f,-1,0},{5,3,1,3},4}
 };
 const Definition* findDefinition(const std::string& name) {
@@ -139,6 +140,67 @@ void prepareRuntimeEffect(RuntimeEffect& effect,float time) {
         }
         default: break;
     }
+}
+void boxBlurRgba(const std::vector<uint8_t>& input,std::vector<uint8_t>& output,
+                  int width,int height,int radius,bool horizontal) {
+    if(radius<=0) { output=input; return; }
+    const int major=horizontal?height:width;
+    const int minor=horizontal?width:height;
+    const int window=radius*2+1;
+    for(int line=0;line<major;++line) {
+        float sums[4]={0,0,0,0};
+        const auto pixel=[&](int position,int channel)->float {
+            const int clamped=std::clamp(position,0,minor-1);
+            const int x=horizontal?clamped:line;
+            const int y=horizontal?line:clamped;
+            return static_cast<float>(input[(static_cast<std::size_t>(y)*width+x)*4u+channel]);
+        };
+        for(int k=-radius;k<=radius;++k)
+            for(int c=0;c<4;++c) sums[c]+=pixel(k,c);
+        for(int position=0;position<minor;++position) {
+            const int x=horizontal?position:line;
+            const int y=horizontal?line:position;
+            const std::size_t offset=(static_cast<std::size_t>(y)*width+x)*4u;
+            for(int c=0;c<4;++c)
+                output[offset+static_cast<std::size_t>(c)]=static_cast<uint8_t>(
+                    std::clamp(std::lround(sums[c]/static_cast<float>(window)),0l,255l));
+            for(int c=0;c<4;++c) {
+                sums[c]-=pixel(position-radius,c);
+                sums[c]+=pixel(position+radius+1,c);
+            }
+        }
+    }
+}
+std::vector<uint8_t> buildDeepGlow(const std::vector<uint8_t>& source,int width,int height,
+                                   const RuntimeEffect& effect) {
+    const auto& p=effect.p;
+    const std::size_t bytes=source.size();
+    std::vector<uint8_t> glow(bytes,0), temp(bytes,0);
+    const float threshold=std::clamp(p[0],0.0f,0.99f);
+    for(std::size_t i=0;i<bytes;i+=4u) {
+        const float alpha=static_cast<float>(source[i+3])/255.0f;
+        if(alpha<=0.0001f) continue;
+        float channels[3];
+        float peak=0.0f;
+        for(int c=0;c<3;++c) {
+            const float straight=std::clamp((static_cast<float>(source[i+static_cast<std::size_t>(c)])/255.0f)/alpha,0.0f,1.0f);
+            channels[c]=std::max(straight-threshold,0.0f)/std::max(1.0f-threshold,0.001f);
+            peak=std::max(peak,channels[c]);
+        }
+        for(int c=0;c<3;++c)
+            glow[i+static_cast<std::size_t>(c)]=static_cast<uint8_t>(std::lround(
+                std::clamp(channels[c]*alpha,0.0f,1.0f)*255.0f));
+        glow[i+3]=static_cast<uint8_t>(std::lround(std::clamp(peak*alpha,0.0f,1.0f)*255.0f));
+    }
+    const int radius=std::clamp(static_cast<int>(std::lround(
+        p[1]*p[4]*static_cast<float>(std::min(width,height)))),1,64);
+    // Two separable box passes approximate a soft Gaussian while keeping the
+    // work linear in pixel count, even on constrained Android devices.
+    boxBlurRgba(glow,temp,width,height,radius,true);
+    boxBlurRgba(temp,glow,width,height,radius,false);
+    boxBlurRgba(glow,temp,width,height,radius,true);
+    boxBlurRgba(temp,glow,width,height,radius,false);
+    return glow;
 }
 Color sample(const std::vector<uint8_t>& pixels,int width,int height,float u,float v) {
     const float x=std::clamp(u,0.0f,1.0f)*static_cast<float>(width-1);
@@ -406,6 +468,10 @@ Java_com_kinetic_app_engine_NativeEffectsEngine_nativeProcessBitmap(
     }
     if(effects.empty()) return JNI_TRUE;
 
+    const RuntimeEffect* deepGlowEffect=nullptr;
+    for(const auto& effect:effects) if(effect.definition->id==8) deepGlowEffect=&effect;
+    std::vector<uint8_t> deepGlowPixels;
+
     if(AndroidBitmap_lockPixels(env,bitmap,&locked)!=ANDROID_BITMAP_RESULT_SUCCESS||!locked) return JNI_FALSE;
     const int width=static_cast<int>(info.width), height=static_cast<int>(info.height);
     const std::size_t pixelBytes=static_cast<std::size_t>(width)*height*4u;
@@ -414,6 +480,7 @@ Java_com_kinetic_app_engine_NativeEffectsEngine_nativeProcessBitmap(
     for(int y=0;y<height;++y)
         std::memcpy(source.data()+static_cast<std::size_t>(y)*width*4u,
                     input+static_cast<std::size_t>(y)*info.stride,static_cast<std::size_t>(width)*4u);
+    if(deepGlowEffect) deepGlowPixels=buildDeepGlow(source,width,height,*deepGlowEffect);
 
     for(int y=0;y<height;++y) {
         for(int x=0;x<width;++x) {
@@ -456,6 +523,28 @@ Java_com_kinetic_app_engine_NativeEffectsEngine_nativeProcessBitmap(
                         gb=luminance+(gb-luminance)*p[5];
                         if(p[6]>0.5f) { color.r=gr*p[2]; color.g=gg*p[2]; color.b=gb*p[2]; }
                         else { color.r+=gr*p[2]; color.g+=gg*p[2]; color.b+=gb*p[2]; }
+                        break;
+                    }
+                    case 8: {
+                        const std::size_t glowOffset=(static_cast<std::size_t>(y)*width+x)*4u;
+                        const float intensity=std::clamp(p[2],0.0f,4.0f);
+                        float glowR=static_cast<float>(deepGlowPixels[glowOffset])/255.0f*intensity;
+                        float glowG=static_cast<float>(deepGlowPixels[glowOffset+1])/255.0f*intensity;
+                        float glowB=static_cast<float>(deepGlowPixels[glowOffset+2])/255.0f*intensity;
+                        const float glowA=static_cast<float>(deepGlowPixels[glowOffset+3])/255.0f*intensity;
+                        const float glowLuma=glowR*0.299f+glowG*0.587f+glowB*0.114f;
+                        glowR=glowLuma+(glowR-glowLuma)*p[5];
+                        glowG=glowLuma+(glowG-glowLuma)*p[5];
+                        glowB=glowLuma+(glowB-glowLuma)*p[5];
+                        const float baseA=p[6]>0.5f?0.0f:color.a;
+                        const float outA=clamp01(std::max(baseA,glowA));
+                        const float baseR=p[6]>0.5f?0.0f:color.r*color.a;
+                        const float baseG=p[6]>0.5f?0.0f:color.g*color.a;
+                        const float baseB=p[6]>0.5f?0.0f:color.b*color.a;
+                        color.r=outA>0.00001f?(baseR+glowR)/outA:0.0f;
+                        color.g=outA>0.00001f?(baseG+glowG)/outA:0.0f;
+                        color.b=outA>0.00001f?(baseB+glowB)/outA:0.0f;
+                        color.a=outA;
                         break;
                     }
                     case 7: {

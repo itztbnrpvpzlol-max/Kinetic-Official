@@ -96,7 +96,7 @@ internal fun controlsFor(effect: EffectInstance): List<EffectControlSpec> = when
         number("Phase", "Phase", 0f, 360f, 15f, 0f, 0, "°"),
         toggle("Half Range", "Half Range")
     )
-    "Deep Glow" -> listOf(
+    "Morphosis", "Deep Glow" -> listOf(
         number("Threshold", "Threshold", 0f, 1f, 0.05f, 0.65f),
         number("Radius", "Radius", 0.001f, 0.08f, 0.002f, 0.012f, 3),
         number("Intensity", "Intensity", 0f, 4f, 0.1f, 1.2f),
