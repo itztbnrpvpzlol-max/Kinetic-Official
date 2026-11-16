@@ -105,13 +105,25 @@ class FfmpegVideoPlayer(
         }
     }
 
-    fun detachSurface() {
-        postToDecoder {
-            fallback?.detachSurface()
+    /**
+     * Detach is asynchronous because native FFmpeg shutdown joins its decode
+     * thread. Callers that own the SurfaceTexture must wait for this callback
+     * before releasing the producer/consumer surface pair.
+     */
+    fun detachSurface(onDetached: (() -> Unit)? = null) {
+        val detachTask = {
+            runCatching { fallback?.detachSurface() }
             stopNativeDecoder()
             attachedSurface = null
             receivedSurfaceFrame = false
+            onDetached?.invoke()
         }
+        runCatching { decoderExecutor.execute(detachTask) }
+            .onFailure {
+                // If the executor has already shut down, release() has already
+                // completed its queued native teardown before shutting it down.
+                onDetached?.invoke()
+            }
     }
 
     fun markFrameAvailable() {

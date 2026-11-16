@@ -829,6 +829,8 @@ private class GpuPreviewSurfaceView(
     private val mainHandler = Handler(Looper.getMainLooper())
     private val attachedPlayers = ConcurrentHashMap<String, com.kinetic.app.engine.FfmpegVideoPlayer>()
     private val frameNotifications = AtomicInteger(0)
+    private val pendingSurfaceDetaches = AtomicInteger(0)
+    @Volatile private var rendererReleaseRequested = false
     @Volatile private var videoLayerIds: Set<String> = emptySet()
     private val gpuRenderer = CompositionGlRenderer(
         videoOutputWidth = videoOutputWidth,
@@ -871,13 +873,35 @@ private class GpuPreviewSurfaceView(
     }
     fun detachVideo(id: String, player: com.kinetic.app.engine.FfmpegVideoPlayer) {
         attachedPlayers.remove(id, player)
-        mainHandler.post { player.detachSurface() }
-        queueEvent { gpuRenderer.releaseVideoOutput(id) }
+        pendingSurfaceDetaches.incrementAndGet()
+        player.detachSurface {
+            val remaining = pendingSurfaceDetaches.decrementAndGet()
+            if (rendererReleaseRequested) {
+                if (remaining == 0) queueEvent { gpuRenderer.release() }
+            } else {
+                queueEvent {
+                    // A new player may already have claimed this layer ID.
+                    if (attachedPlayers[id] == null) gpuRenderer.releaseVideoOutput(id)
+                }
+            }
+        }
     }
     fun releaseRenderer() {
-        attachedPlayers.values.forEach { player -> mainHandler.post { player.detachSurface() } }
+        rendererReleaseRequested = true
+        val players = attachedPlayers.values.toList()
         attachedPlayers.clear()
-        queueEvent { gpuRenderer.release() }
+        if (players.isEmpty()) {
+            if (pendingSurfaceDetaches.get() == 0) queueEvent { gpuRenderer.release() }
+            return
+        }
+        players.forEach { player ->
+            pendingSurfaceDetaches.incrementAndGet()
+            player.detachSurface {
+                if (pendingSurfaceDetaches.decrementAndGet() == 0) {
+                    queueEvent { gpuRenderer.release() }
+                }
+            }
+        }
     }
 }
 
@@ -948,7 +972,9 @@ private class CompositionGlRenderer(
     )
     fun submit(next: GpuScene) { scene = next }
     fun updateVideoLayers(ids: Set<String>) {
-        videoOutputs.keys.filter { it !in ids }.toList().forEach(::releaseVideoOutput)
+        // Do not destroy outputs merely because the playhead left a clip.
+        // GpuVideoPlayerLayer owns the decoder lifetime and releases its output
+        // only after FFmpeg has detached from the Surface.
         ids.forEach(::ensureVideoOutput)
     }
     fun ensureVideoOutput(id: String) {
