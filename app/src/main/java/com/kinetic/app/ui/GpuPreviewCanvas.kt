@@ -332,22 +332,24 @@ private fun GpuCompositionPreviewCanvas(
             layer.type == LayerType.IMAGE ||
                 (layer.type == LayerType.VIDEO && layer.id !in textureVideoIds)
         )
-        if (uri != null && layer.type == LayerType.VIDEO && layer.id in textureVideoIds) {
+        if (uri != null && layer.type == LayerType.VIDEO &&
+            layer.id in textureVideoIds && layer.visible && layer.activeAt(editor.time)
+        ) {
             key("${layer.id}#warm-start") {
                 LaunchedEffect(uri, layer.srcOffset, layer.visible, compositionFps) {
-                    while (true) {
-                        if (layer.visible && layer.activeAt(latestTimelineTime.value)) {
-                            val warmFrame = MediaLoader.bitmapFor(
-                                context, Uri.parse(uri), LayerType.VIDEO, layer.srcOffset,
-                                sampleFps = MediaLoader.CPU_PREVIEW_SAMPLE_FPS,
-                                maxEdge = if (MediaWorkers.isConstrainedDevice) 320 else 448,
-                                persistToDisk = true
-                            )
-                            if (warmFrame != null) {
-                                frames[layer.id] = warmFrame
-                                trimPreviewFrameCache(layer.id)
-                                break
-                            }
+                    while (layer.visible && layer.activeAt(latestTimelineTime.value) &&
+                        frames[layer.id] == null
+                    ) {
+                        val warmFrame = MediaLoader.bitmapFor(
+                            context, Uri.parse(uri), LayerType.VIDEO, layer.srcOffset,
+                            sampleFps = MediaLoader.CPU_PREVIEW_SAMPLE_FPS,
+                            maxEdge = if (MediaWorkers.isConstrainedDevice) 320 else 448,
+                            persistToDisk = true
+                        )
+                        if (warmFrame != null) {
+                            frames[layer.id] = warmFrame
+                            trimPreviewFrameCache(layer.id)
+                            break
                         }
                         kotlinx.coroutines.delay(80L)
                     }
