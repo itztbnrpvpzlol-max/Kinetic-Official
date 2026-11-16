@@ -23,7 +23,7 @@ static const Definition kDefinitions[] = {
     {"RGB Split",4,{"Red Offset","Green Offset","Blue Offset","Angle","Radial Split","Center X","Center Y"},{0.006f,0,-0.006f,0,0,0.5f,0.5f},{-0.04f,-0.04f,-0.04f,0,0,0,0},{0.04f,0.04f,0.04f,360,1,1,1},7},
     {"Oscillate",5,{"X Amplitude","Y Amplitude","Frequency","Wave Shape","Phase","Half Range"},{0.02f,0.02f,1,0,0,0},{0,0,0.1f,0,0,0},{0.15f,0.15f,12,3,360,1},6},
     {"Morphosis",6,{"Threshold","Radius","Intensity","Quality","Spread","Saturation","Glow Only"},{0.65f,0.012f,1.2f,0,1,1,0},{0,0.001f,0,0,0.25f,0,0},{1,0.08f,4,1,3,2,1},7},
-    {"Deep Glow",8,{"Threshold","Radius","Intensity","Quality","Spread","Saturation","Glow Only"},{0.65f,0.025f,1.5f,1,1.5f,1,0},{0,0.001f,0,0,0.25f,0,0},{1,0.12f,4,1,3,2,1},7},
+    {"Deep Glow",8,{"Threshold","Radius","Intensity","Quality","Spread","Saturation","Glow Only"},{0.65f,0.025f,1.5f,0,1.5f,1,0},{0,0.001f,0,0,0.25f,0,0},{1,0.12f,4,1,3,2,1},7},
     {"Exposure And Gamma",7,{"Exposure","Gamma","Offset","Channel"},{0,1,0,0},{-5,0.1f,-1,0},{5,3,1,3},4}
 };
 const Definition* findDefinition(const std::string& name) {
@@ -194,12 +194,13 @@ std::vector<uint8_t> buildDeepGlow(const std::vector<uint8_t>& source,int width,
     }
     const int radius=std::clamp(static_cast<int>(std::lround(
         p[1]*p[4]*static_cast<float>(std::min(width,height)))),1,64);
-    // Two separable box passes approximate a soft Gaussian while keeping the
+    // Separable box passes approximate a soft Gaussian while keeping the
     // work linear in pixel count, even on constrained Android devices.
-    boxBlurRgba(glow,temp,width,height,radius,true);
-    boxBlurRgba(temp,glow,width,height,radius,false);
-    boxBlurRgba(glow,temp,width,height,radius,true);
-    boxBlurRgba(temp,glow,width,height,radius,false);
+    const int passes=p[3]>0.5f?2:1;
+    for(int pass=0;pass<passes;++pass) {
+        boxBlurRgba(glow,temp,width,height,radius,true);
+        boxBlurRgba(temp,glow,width,height,radius,false);
+    }
     return glow;
 }
 Color sample(const std::vector<uint8_t>& pixels,int width,int height,float u,float v) {
