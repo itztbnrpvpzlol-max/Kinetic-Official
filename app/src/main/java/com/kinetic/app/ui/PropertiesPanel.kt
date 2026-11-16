@@ -1,5 +1,6 @@
 package com.kinetic.app.ui
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -154,6 +155,7 @@ private fun VectorPointLine(editor: EditorState, layer: Layer, index: Int, point
 }
 
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ScrubValueBar(
     label: String, value: Float, modifier: Modifier = Modifier, step: Float = 0.5f,
