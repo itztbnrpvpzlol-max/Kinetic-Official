@@ -54,13 +54,13 @@ private fun toggle(label: String, key: String, default: Boolean = false) =
 
 internal fun controlsFor(effect: EffectInstance): List<EffectControlSpec> = when (effect.name) {
     "Motion Tile" -> listOf(
-        number("Tile Width", "Tile Width", 10f, 300f, 10f, 100f, 0, "%"),
-        number("Tile Height", "Tile Height", 10f, 300f, 10f, 100f, 0, "%"),
-        number("Output Width", "Output Width", 100f, 2000f, 100f, 2000f, 0, "%"),
-        number("Output Height", "Output Height", 100f, 2000f, 100f, 2000f, 0, "%"),
+        number("Tile Width", "Tile Width", 10f, 300f, 1f, 100f, 0, "%"),
+        number("Tile Height", "Tile Height", 10f, 300f, 1f, 100f, 0, "%"),
+        number("Output Width", "Output Width", 100f, 2000f, 5f, 2000f, 0, "%"),
+        number("Output Height", "Output Height", 100f, 2000f, 5f, 2000f, 0, "%"),
         toggle("Mirror Edges", "Mirror Edges", true),
-        number("Phase X", "Phase X", -2f, 2f, 0.05f, 0f),
-        number("Phase Y", "Phase Y", -2f, 2f, 0.05f, 0f)
+        number("Phase X", "Phase X", -2f, 2f, 0.01f, 0f, 2),
+        number("Phase Y", "Phase Y", -2f, 2f, 0.01f, 0f, 2)
     )
     "Wave Warp" -> listOf(
         choice("Wave Type", "Wave Type", listOf("Sine", "Square", "Triangle", "Sawtooth")),
@@ -106,7 +106,7 @@ internal fun controlsFor(effect: EffectInstance): List<EffectControlSpec> = when
         toggle("Glow Only", "Glow Only")
     )
     "Exposure And Gamma" -> listOf(
-        number("Exposure", "Exposure", -5f, 5f, 0.25f, 0f, 2, " stops"),
+        number("Exposure", "Exposure", -5f, 5f, 0.4f, 0f, 2, " stops"),
         number("Gamma", "Gamma", 0.1f, 3f, 0.05f, 1f),
         number("Offset", "Offset", -1f, 1f, 0.05f, 0f),
         choice("Channel", "Channel", listOf("Master", "Red", "Green", "Blue"))
@@ -299,7 +299,7 @@ private fun EffectParameterLine(
                 else -> {
                     val safeSuffix = spec.suffix.replace("%", "%%")
                     val valueFormat = "%." + spec.decimals + "f" + safeSuffix
-                    ScrubValueBar(spec.label, current, Modifier.weight(1f), step = spec.step,
+                    ScrubValueBar(spec.label, current, Modifier.weight(1f), step = spec.step / 10f, snapStep = spec.step,
                         selected = selected, onSelect = onSelect,
                         minValue = spec.min, maxValue = spec.max, valueFormat = valueFormat,
                         onScrubStart = { onSelect(); editor.beginEdit() }) { value ->

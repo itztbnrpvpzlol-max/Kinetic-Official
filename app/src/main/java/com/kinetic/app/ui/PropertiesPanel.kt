@@ -3,6 +3,7 @@ package com.kinetic.app.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
@@ -156,27 +157,49 @@ private fun VectorPointLine(editor: EditorState, layer: Layer, index: Int, point
 @Composable
 fun ScrubValueBar(
     label: String, value: Float, modifier: Modifier = Modifier, step: Float = 0.5f,
+    snapStep: Float? = null,
     selected: Boolean = false, onSelect: () -> Unit = {}, minValue: Float = 0f, maxValue: Float = 1f,
     valueFormat: String? = null, onScrubStart: () -> Unit = {}, onValueChange: (Float) -> Unit
 ) {
     val density = LocalDensity.current.density
     val latestValue by rememberUpdatedState(value)
     val latestChange by rememberUpdatedState(onValueChange)
+    var editingValue by remember(label) { mutableStateOf(false) }
     Box(
         modifier.height(30.dp).clip(RoundedCornerShape(6.dp))
             .background(if (selected) KColors.Accent.copy(alpha = 0.14f) else KColors.Bg)
             .border(1.dp, if (selected) KColors.Accent.copy(alpha = 0.75f) else KColors.Line, RoundedCornerShape(6.dp))
-            .clickable(onClick = onSelect)
-            .pointerInput(step) {
-                var scrubValue = latestValue
-                detectHorizontalDragGestures(onDragStart = { scrubValue = latestValue; onScrubStart() }) { change, drag ->
+            .combinedClickable(
+                onClick = onSelect,
+                onLongClick = { onSelect(); onScrubStart(); editingValue = true }
+            )
+            .pointerInput(step, snapStep) {
+                var dragTotal = 0f
+                var dragStartValue = latestValue
+                detectHorizontalDragGestures(
+                    onDragStart = { dragStartValue = latestValue; dragTotal = 0f; onScrubStart() }
+                ) { change, drag ->
                     change.consume()
-                    scrubValue = (scrubValue + drag / density * step).coerceIn(minValue, maxValue)
-                    latestChange(scrubValue)
+                    dragTotal += drag / density
+                    val raw = dragStartValue + dragTotal * step
+                    val increment = snapStep?.takeIf { it.isFinite() && it > 0f }
+                    val next = if (increment != null) kotlin.math.round(raw / increment) * increment else raw
+                    latestChange(next.coerceIn(minValue, maxValue))
                 }
             },
         contentAlignment = Alignment.Center
     ) {
         Text("$label  " + (valueFormat?.let { String.format(java.util.Locale.US, it, value) } ?: "${(value * 100f).toInt()}%"), color = if (selected) KColors.Accent else KColors.Text, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+    }
+    if (editingValue) {
+        TextInputDialog(
+            title = label.ifBlank { "Value" },
+            initial = fmt("%.4f", value),
+            onDone = { input ->
+                input.trim().toFloatOrNull()?.takeIf { it.isFinite() }?.let { latestChange(it.coerceIn(minValue, maxValue)) }
+                editingValue = false
+            },
+            onDismiss = { editingValue = false }
+        )
     }
 }
