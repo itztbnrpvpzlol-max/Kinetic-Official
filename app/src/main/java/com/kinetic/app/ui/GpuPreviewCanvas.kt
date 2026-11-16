@@ -15,6 +15,8 @@ import android.opengl.GLUtils
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.os.Build
+import android.os.PowerManager
 import android.util.Log
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -249,6 +251,32 @@ private fun GpuCompositionPreviewCanvas(
     }
 
     val context = LocalContext.current
+    var adaptiveEffectFps by remember {
+        androidx.compose.runtime.mutableIntStateOf(if (MediaWorkers.isConstrainedDevice) 12 else 20)
+    }
+    // Thermal and memory pressure only throttle expensive bitmap/effect sampling.
+    // The SurfaceTexture decoder and native playback clock remain uninterrupted.
+    LaunchedEffect(context) {
+        val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+        val powerManager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
+        while (true) {
+            val memory = ActivityManager.MemoryInfo()
+            activityManager?.getMemoryInfo(memory)
+            val availableBytes = memory.availMem
+            val thermalStatus = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                powerManager?.currentThermalStatus ?: PowerManager.THERMAL_STATUS_NONE
+            } else PowerManager.THERMAL_STATUS_NONE
+            adaptiveEffectFps = when {
+                memory.lowMemory || availableBytes < 128L * 1024L * 1024L -> 6
+                thermalStatus >= PowerManager.THERMAL_STATUS_SEVERE -> 6
+                thermalStatus >= PowerManager.THERMAL_STATUS_MODERATE ->
+                    if (MediaWorkers.isConstrainedDevice) 8 else 12
+                MediaWorkers.isConstrainedDevice -> 12
+                else -> 20
+            }
+            delay(1500L)
+        }
+    }
     val frames = remember { mutableStateMapOf<String, Bitmap>() }
     // CPU effects are prepared off the GL thread. The renderer only uploads ready bitmaps.
     val effectedFrames = remember { mutableStateMapOf<String, Bitmap>() }
@@ -298,10 +326,10 @@ private fun GpuCompositionPreviewCanvas(
     val hasEffectVideo = activeVideoLayers.any { layer -> layer.effectStack.any { it.enabled } }
     // Keep native CPU effects below the decoder's maximum sample rate on
     // constrained devices; the GL thread remains free to composite each frame.
-    val compositionFps = if (MediaWorkers.isConstrainedDevice && hasEffectVideo) {
-        minOf(editor.fps, 12)
+    val compositionFps = if (hasEffectVideo) {
+        minOf(editor.fps, adaptiveEffectFps)
     } else editor.fps.coerceIn(1, 60)
-    val effectSampleFps = if (MediaWorkers.isConstrainedDevice) 12 else MediaLoader.CPU_PREVIEW_SAMPLE_FPS
+    val effectSampleFps = adaptiveEffectFps
     val latestTimelineTime = androidx.compose.runtime.rememberUpdatedState(editor.time)
     val latestPlaying = androidx.compose.runtime.rememberUpdatedState(editor.playing)
 
@@ -879,6 +907,8 @@ private class CompositionGlRenderer(
     // churn and garbage-collection pauses during composition playback.
     private val pointScratch = FloatArray(8)
     private val selectionScratch = FloatArray(8)
+    private val textureIdScratch = IntArray(1)
+    private val deleteTextureScratch = IntArray(1)
     private val activeTextureIds = HashSet<String>()
     private val fingerprintMatrixScratch = FloatArray(9)
     // Keep the original per-layer quad path rather than batching scene draws.
@@ -1042,6 +1072,7 @@ private class CompositionGlRenderer(
         // A recreated EGL context invalidates every texture/program from the old context.
         textures.clear()
         gpuTextureCacheBytes = 0L
+        PreviewDiagnostics.setGpuTextureCacheBytes(0L)
         // The previous EGL context is gone; its GL names must not be deleted in
         // the new context, only forgotten.
         compositionCacheAllocated = false
@@ -1156,6 +1187,10 @@ private class CompositionGlRenderer(
 
     private fun drawLayer(layer: GpuLayer, scale: Float, ox: Float, oy: Float) {
         val bitmap = layer.bitmap ?: return
+        drawBitmapLayer(layer, bitmap, scale, ox, oy)
+    }
+
+    private fun drawBitmapLayer(layer: GpuLayer, bitmap: Bitmap, scale: Float, ox: Float, oy: Float) {
         if (bitmap.isRecycled || layer.opacity <= 0f) return
         val texture = textureFor(layer.id, bitmap) ?: return
         val right = if (layer.mask) layer.width * 0.8f else layer.width
@@ -1183,7 +1218,7 @@ private class CompositionGlRenderer(
         if (layer.opacity <= 0f) return
         if (output == null || !output.hasFrame || externalProgram == 0) {
             // Show the cached segment-start frame while FFmpeg opens the clip.
-            if (layer.bitmap != null) drawLayer(layer.copy(isVideo = false), scale, ox, oy)
+            if (layer.bitmap != null) drawBitmapLayer(layer, layer.bitmap, scale, ox, oy)
             return
         }
         val right = if (layer.mask) layer.width * 0.8f else layer.width
@@ -1217,19 +1252,23 @@ private class CompositionGlRenderer(
             gpuTextureCacheBytes = (gpuTextureCacheBytes - old.bytes).coerceAtLeast(0L)
             textures.remove(layerId)
         }
-        val ids = IntArray(1)
-        GLES20.glGenTextures(1, ids, 0)
-        if (ids[0] == 0) return null
-        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, ids[0])
+        textureIdScratch[0] = 0
+        GLES20.glGenTextures(1, textureIdScratch, 0)
+        val textureId = textureIdScratch[0]
+        if (textureId == 0) return null
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureId)
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
+        val uploadStartedNs = System.nanoTime()
         GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, bitmap, 0)
+        PreviewDiagnostics.recordGpuTextureUpload(System.nanoTime() - uploadStartedNs)
         val bytes = bitmap.byteCount.toLong().coerceAtLeast(0L)
-        textures[layerId] = TextureEntry(ids[0], bitmap, bytes, effectSignature)
+        textures[layerId] = TextureEntry(textureId, bitmap, bytes, effectSignature)
         gpuTextureCacheBytes += bytes
-        return ids[0]
+        PreviewDiagnostics.setGpuTextureCacheBytes(gpuTextureCacheBytes)
+        return textureId
     }
 
     private fun trimGpuTextureCache(protectedIds: Set<String>) {
@@ -1238,10 +1277,12 @@ private class CompositionGlRenderer(
         while (iterator.hasNext() && gpuTextureCacheBytes > gpuTextureCacheBudgetBytes) {
             val entry = iterator.next()
             if (entry.key in protectedIds) continue
-            GLES20.glDeleteTextures(1, intArrayOf(entry.value.id), 0)
+            deleteTextureScratch[0] = entry.value.id
+            GLES20.glDeleteTextures(1, deleteTextureScratch, 0)
             gpuTextureCacheBytes = (gpuTextureCacheBytes - entry.value.bytes).coerceAtLeast(0L)
             iterator.remove()
         }
+        PreviewDiagnostics.setGpuTextureCacheBytes(gpuTextureCacheBytes)
     }
 
     private fun drawSelection(layer: GpuLayer, scale: Float, ox: Float, oy: Float) {
@@ -1276,6 +1317,7 @@ private class CompositionGlRenderer(
             GLES20.glDeleteTextures(textures.size, textures.values.map { it.id }.toIntArray(), 0)
             textures.clear()
             gpuTextureCacheBytes = 0L
+            PreviewDiagnostics.setGpuTextureCacheBytes(0L)
         }
         NativeRenderEngine.nativeGlRelease()
         program = 0; solidProgram = 0; externalProgram = 0

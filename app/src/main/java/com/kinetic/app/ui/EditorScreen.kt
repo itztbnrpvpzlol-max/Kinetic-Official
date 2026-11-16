@@ -982,18 +982,18 @@ private fun PreviewDiagnosticsBadge(playing: Boolean, modifier: Modifier = Modif
     if (playing) {
         val previewLabel = when {
             snapshot.surfaceActive -> {
-                "SURFACE ${snapshot.surfaceFps.toInt()}fps · frames ${snapshot.surfaceFrames}"
+                "SURFACE ${snapshot.surfaceFps.toInt()}fps · GL ${"%.1f".format(snapshot.glFrameMs)}ms"
             }
             snapshot.cpuDrawFps > 0f -> {
-                "CPU ${snapshot.cpuDrawFps.toInt()}fps · draw ${"%.1f".format(snapshot.cpuDrawMs)}ms · dec ${"%.1f".format(snapshot.cpuDecodeMs)}ms · q ${"%.1f".format(snapshot.cpuQueueMs)}ms · RAM hit ${snapshot.cpuRamHitPercent}%"
+                "CPU ${snapshot.cpuDrawFps.toInt()}fps · draw ${"%.1f".format(snapshot.cpuDrawMs)}ms · dec ${"%.1f".format(snapshot.cpuDecodeMs)}ms · RAM ${snapshot.cpuRamHitPercent}%"
             }
             snapshot.glFps > 0f -> {
-                "GL ${snapshot.glFps.toInt()}fps · submit ${"%.1f".format(snapshot.glSubmitMs)}ms"
+                "GL ${snapshot.glFps.toInt()}fps · frame ${"%.1f".format(snapshot.glFrameMs)}ms · upload ${"%.1f".format(snapshot.gpuTextureUploadMs)}ms"
             }
-            else -> "CPU preview starting"
+            else -> "Preview starting"
         }
         Text(
-            "$previewLabel · dropped ${snapshot.droppedVideoFrames}",
+            "$previewLabel · tex ${"%.1f".format(snapshot.gpuTextureCacheMb)}MB · RAM ${"%.1f".format(snapshot.ramFrameCacheMb)}MB · dropped ${snapshot.droppedVideoFrames}",
             modifier = modifier.clip(RoundedCornerShape(7.dp))
                 .background(KColors.Row.copy(alpha = 0.92f))
                 .padding(horizontal = 8.dp, vertical = 5.dp),

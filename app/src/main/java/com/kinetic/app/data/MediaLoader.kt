@@ -40,6 +40,14 @@ object MediaLoader {
     private val retrieverRegistryLock = Any()
     private val retrieverLru = LinkedHashMap<String, Unit>(8, 0.75f, true)
     @Volatile private var maxCachedRetrievers = if (MediaWorkers.isConstrainedDevice) 2 else 4
+    // Keep a tiny compressed-frame working set in RAM. Returning freshly decoded
+    // Bitmaps avoids shared-bitmap ownership/recycle races between Compose layers.
+    // Compressed entries are much smaller than ARGB frames and survive split/seek revisits.
+    private val compressedPreviewFrameCache = object : LruCache<String, ByteArray>(
+        if (MediaWorkers.isConstrainedDevice) 1024 * 1024 else 4 * 1024 * 1024
+    ) {
+        override fun sizeOf(key: String, value: ByteArray): Int = value.size
+    }
     private val waveformCache = object : LruCache<String, FloatArray>(if (MediaWorkers.isConstrainedDevice) 2 * 1024 * 1024 else 8 * 1024 * 1024) {
         override fun sizeOf(key: String, value: FloatArray): Int = value.size * 4
     }
@@ -56,6 +64,12 @@ object MediaLoader {
             level >= android.content.ComponentCallbacks2.TRIM_MEMORY_BACKGROUND -> trimRetrieverCache(0)
             level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW ->
                 trimRetrieverCache(if (MediaWorkers.isConstrainedDevice) 1 else 2)
+        }
+        when {
+            level >= android.content.ComponentCallbacks2.TRIM_MEMORY_BACKGROUND ->
+                compressedPreviewFrameCache.evictAll()
+            level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW ->
+                compressedPreviewFrameCache.trimToSize(compressedPreviewFrameCache.maxSize() / 2)
         }
         if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_BACKGROUND) {
             waveformCache.evictAll()
@@ -77,6 +91,7 @@ object MediaLoader {
         }
         retrieverLocks.clear()
         videoFrameSpecs.clear()
+        compressedPreviewFrameCache.evictAll()
         waveformCache.evictAll()
     }
 
@@ -183,9 +198,16 @@ object MediaLoader {
             val key = if (type == LayerType.IMAGE) "$sourceKey@image@$maxEdge" else "$sourceKey@$sampleFps@$maxEdge@$bucket"
             synchronized(key.intern()) {
                 val diskFile = if (type == LayerType.VIDEO || persistToDisk) previewFrameFile(ctx, key, type) else null
-                val diskBitmap = diskFile?.takeIf { hasValidPreviewFrame(it) }?.let { BitmapFactory.decodeFile(it.absolutePath) }
+                val memoryBytes = compressedPreviewFrameCache.get(key)
+                val ramBitmap = memoryBytes?.let { BitmapFactory.decodeByteArray(it, 0, it.size) }
+                val diskBytes = if (ramBitmap == null) {
+                    diskFile?.takeIf { hasValidPreviewFrame(it) }?.let { runCatching { it.readBytes() }.getOrNull() }
+                } else null
+                if (diskBytes != null) compressedPreviewFrameCache.put(key, diskBytes)
+                val diskBitmap = diskBytes?.let { BitmapFactory.decodeByteArray(it, 0, it.size) }
+                val cacheHit = ramBitmap != null || diskBitmap != null
                 val decodeStartedNs = System.nanoTime()
-                val bmp = diskBitmap ?: try {
+                val bmp = ramBitmap ?: diskBitmap ?: try {
                     if (type == LayerType.IMAGE) decodeImage(ctx, uri, maxEdge)
                     else {
                         if (lowPriorityRequest) {
@@ -220,9 +242,9 @@ object MediaLoader {
 
                 if (!lowPriorityRequest) {
                     PreviewDiagnostics.recordCpuFrameRequest(
-                        ramHit = false,
+                        ramHit = ramBitmap != null,
                         diskHit = diskBitmap != null,
-                        decodeNs = decodeDurationNs,
+                        decodeNs = if (cacheHit) 0L else decodeDurationNs,
                         queueNs = workerStartNs - requestNs
                     )
                 }
@@ -230,6 +252,9 @@ object MediaLoader {
                 if (bmp != null) {
                     if (persistToDisk && diskFile != null && diskBitmap == null) {
                         writePreviewFrame(diskFile, bmp, type)
+                        if (diskFile.isFile) {
+                            runCatching { compressedPreviewFrameCache.put(key, diskFile.readBytes()) }
+                        }
                     }
                 }
                 bmp
@@ -328,8 +353,12 @@ object MediaLoader {
         }
     }
 
+    /** Current compressed RAM-cache residency for the optional performance overlay. */
+    fun compressedPreviewFrameCacheBytes(): Int = compressedPreviewFrameCache.size()
+
     /** Remove the durable preview store only after an explicit user request. */
     suspend fun clearPersistentPreviewCache(ctx: Context) = withContext(Dispatchers.IO) {
+        compressedPreviewFrameCache.evictAll()
         File(ctx.filesDir, "preview-frames").deleteRecursively()
         File(ctx.cacheDir, "preview-frames").deleteRecursively()
     }

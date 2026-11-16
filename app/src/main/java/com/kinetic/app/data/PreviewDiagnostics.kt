@@ -14,6 +14,11 @@ object PreviewDiagnostics {
     data class Snapshot(
         val glFps: Float,
         val glSubmitMs: Float,
+        val glFrameMs: Float,
+        val gpuTextureUploadMs: Float,
+        val gpuTextureUploads: Long,
+        val gpuTextureCacheMb: Float,
+        val ramFrameCacheMb: Float,
         val droppedVideoFrames: Long,
         val cpuDrawFps: Float,
         val cpuDrawMs: Float,
@@ -43,6 +48,11 @@ object PreviewDiagnostics {
 
     @Volatile private var glFps = 0f
     @Volatile private var glSubmitMs = 0f
+    @Volatile private var glFrameMs = 0f
+    @Volatile private var gpuTextureUploadMs = 0f
+    @Volatile private var gpuTextureCacheMb = 0f
+    private val gpuTextureUploads = AtomicLong(0L)
+    private val gpuTextureUploadTotalNs = AtomicLong(0L)
     @Volatile private var cpuDrawFps = 0f
     @Volatile private var cpuDrawMs = 0f
     private var glWindowStartNs = 0L
@@ -87,8 +97,20 @@ object PreviewDiagnostics {
         })
     }
 
+    fun recordGpuTextureUpload(durationNs: Long) {
+        gpuTextureUploads.incrementAndGet()
+        gpuTextureUploadTotalNs.addAndGet(durationNs.coerceAtLeast(0L))
+        gpuTextureUploadMs = gpuTextureUploadTotalNs.get() /
+            gpuTextureUploads.get().coerceAtLeast(1L) / 1_000_000f
+    }
+
+    fun setGpuTextureCacheBytes(bytes: Long) {
+        gpuTextureCacheMb = bytes.coerceAtLeast(0L) / (1024f * 1024f)
+    }
+
     @Synchronized
     fun recordGlFrame(submitDurationNs: Long) {
+        glFrameMs = submitDurationNs.coerceAtLeast(0L) / 1_000_000f
         val now = System.nanoTime()
         if (glWindowStartNs == 0L) glWindowStartNs = now
         glWindowFrames++
@@ -136,6 +158,11 @@ object PreviewDiagnostics {
         return Snapshot(
             glFps = glFps,
             glSubmitMs = glSubmitMs,
+            glFrameMs = glFrameMs,
+            gpuTextureUploadMs = gpuTextureUploadMs,
+            gpuTextureUploads = gpuTextureUploads.get(),
+            gpuTextureCacheMb = gpuTextureCacheMb,
+            ramFrameCacheMb = MediaLoader.compressedPreviewFrameCacheBytes() / (1024f * 1024f),
             droppedVideoFrames = droppedFrames.get(),
             cpuDrawFps = cpuDrawFps,
             cpuDrawMs = cpuDrawMs,
@@ -166,6 +193,11 @@ object PreviewDiagnostics {
         cpuQueueTotalNs.set(0L)
         glFps = 0f
         glSubmitMs = 0f
+        glFrameMs = 0f
+        gpuTextureUploadMs = 0f
+        gpuTextureUploads.set(0L)
+        gpuTextureUploadTotalNs.set(0L)
+        gpuTextureCacheMb = 0f
         cpuDrawFps = 0f
         cpuDrawMs = 0f
         glWindowStartNs = 0L
