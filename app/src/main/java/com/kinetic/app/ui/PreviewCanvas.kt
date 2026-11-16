@@ -308,8 +308,8 @@ fun CpuPreviewCanvas(
                 val sourceForTile = bitmaps[l.id]
                 if (motionTile != null && sourceForTile != null && !motionTile.isRecycled && !sourceForTile.isRecycled) {
                     val tileEffect = l.effectStack.lastOrNull { it.enabled && it.name == "Motion Tile" }
-                    val expandedWidth = l.width * ((tileEffect?.parameterAt("Output Width", time, 200f) ?: 200f).coerceIn(100f, 500f) / 100f)
-                    val expandedHeight = l.height * ((tileEffect?.parameterAt("Output Height", time, 200f) ?: 200f).coerceIn(100f, 500f) / 100f)
+                    val expandedWidth = l.width * ((tileEffect?.parameterAt("Output Width", time, 2000f) ?: 2000f).coerceIn(100f, 2000f) / 100f)
+                    val expandedHeight = l.height * ((tileEffect?.parameterAt("Output Height", time, 2000f) ?: 2000f).coerceIn(100f, 2000f) / 100f)
                     val marginX = (expandedWidth - l.width) * 0.5f
                     val marginY = (expandedHeight - l.height) * 0.5f
                     paint.alpha = alpha

@@ -36,8 +36,8 @@ object NativeEffectsEngine {
 
     fun createMotionTileBackground(source: Bitmap, effect: EffectInstance, time: Float): Bitmap? {
         if (!available || source.isRecycled || effect.name != "Motion Tile") return null
-        val outputWidth = effect.parameterAt("Output Width", time, 200f).coerceIn(100f, 500f)
-        val outputHeight = effect.parameterAt("Output Height", time, 200f).coerceIn(100f, 500f)
+        val outputWidth = effect.parameterAt("Output Width", time, 2000f).coerceIn(100f, 2000f)
+        val outputHeight = effect.parameterAt("Output Height", time, 2000f).coerceIn(100f, 2000f)
         val maxEdge = if (com.kinetic.app.data.MediaWorkers.isConstrainedDevice) 640 else 2048
         val scale = minOf(1f, maxEdge.toFloat() / (maxOf(source.width * outputWidth, source.height * outputHeight) / 100f))
         val width = (source.width * outputWidth / 100f * scale).toInt().coerceIn(1, maxEdge)

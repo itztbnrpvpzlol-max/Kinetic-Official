@@ -491,8 +491,8 @@ private fun GpuCompositionPreviewCanvas(
         val tileBitmap = motionTileFrames[layer.id]
         if (tileBitmap != null && sourceBitmap != null && !tileBitmap.isRecycled) {
             val tileEffect = layer.effectStack.lastOrNull { it.enabled && it.name == "Motion Tile" }
-            val expandedWidth = layer.width * ((tileEffect?.parameterAt("Output Width", editor.time, 200f) ?: 200f).coerceIn(100f, 500f) / 100f)
-            val expandedHeight = layer.height * ((tileEffect?.parameterAt("Output Height", editor.time, 200f) ?: 200f).coerceIn(100f, 500f) / 100f)
+            val expandedWidth = layer.width * ((tileEffect?.parameterAt("Output Width", editor.time, 2000f) ?: 2000f).coerceIn(100f, 2000f) / 100f)
+            val expandedHeight = layer.height * ((tileEffect?.parameterAt("Output Height", editor.time, 2000f) ?: 2000f).coerceIn(100f, 2000f) / 100f)
             val marginX = (expandedWidth - layer.width) * 0.5f
             val marginY = (expandedHeight - layer.height) * 0.5f
             val backdropMatrix = Matrix(layerMatrix(layer, editor.time, byId)).apply {

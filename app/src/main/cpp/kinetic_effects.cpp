@@ -17,7 +17,7 @@ struct Definition {
     float defaults[7], minimums[7], maximums[7]; int count;
 };
 static const Definition kDefinitions[] = {
-    {"Motion Tile",1,{"Tile Width","Tile Height","Output Width","Output Height","Mirror Edges","Phase X","Phase Y"},{100,100,200,200,1,0,0},{10,10,100,100,0,-2,-2},{300,300,500,500,1,2,2},7},
+    {"Motion Tile",1,{"Tile Width","Tile Height","Output Width","Output Height","Mirror Edges","Phase X","Phase Y"},{100,100,2000,2000,1,0,0},{10,10,100,100,0,-2,-2},{300,300,2000,2000,1,2,2},7},
     {"Wave Warp",2,{"Wave Height","Wave Width","Wave Speed","Wave Type","Direction","Phase","Pinning"},{0.012f,4,1,0,0,0,0},{0,1,-8,0,0,0,0},{0.08f,24,8,3,360,360,3},7},
     {"Warp Shake",3,{"X Amount","Y Amount","Frequency","Motion","Seed","Direction"},{0.008f,0.008f,8,0,0,0},{0,0,0.1f,0,0,0},{0.08f,0.08f,30,1,100,360},6},
     {"RGB Split",4,{"Red Offset","Green Offset","Blue Offset","Angle","Radial Split","Center X","Center Y"},{0.006f,0,-0.006f,0,0,0.5f,0.5f},{-0.04f,-0.04f,-0.04f,0,0,0,0},{0.04f,0.04f,0.04f,360,1,1,1},7},

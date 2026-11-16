@@ -56,8 +56,8 @@ internal fun controlsFor(effect: EffectInstance): List<EffectControlSpec> = when
     "Motion Tile" -> listOf(
         number("Tile Width", "Tile Width", 10f, 300f, 10f, 100f, 0, "%"),
         number("Tile Height", "Tile Height", 10f, 300f, 10f, 100f, 0, "%"),
-        number("Output Width", "Output Width", 100f, 500f, 25f, 200f, 0, "%"),
-        number("Output Height", "Output Height", 100f, 500f, 25f, 200f, 0, "%"),
+        number("Output Width", "Output Width", 100f, 2000f, 100f, 2000f, 0, "%"),
+        number("Output Height", "Output Height", 100f, 2000f, 100f, 2000f, 0, "%"),
         toggle("Mirror Edges", "Mirror Edges", true),
         number("Phase X", "Phase X", -2f, 2f, 0.05f, 0f),
         number("Phase Y", "Phase Y", -2f, 2f, 0.05f, 0f)
