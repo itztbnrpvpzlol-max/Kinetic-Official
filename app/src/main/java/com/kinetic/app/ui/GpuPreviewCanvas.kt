@@ -127,7 +127,7 @@ fun PreviewCanvas(
     val directVideo = videoLayers.singleOrNull()
         ?.takeIf {
             activeVisualLayers.lastOrNull()?.id == it.id && !it.maskEnabled &&
-                !hasGpuEffects && canUseDirectSurfaceVideo(it)
+                !hasEffects && canUseDirectSurfaceVideo(it)
         }
 
     if (directVideo != null) {
@@ -135,10 +135,10 @@ fun PreviewCanvas(
             DirectSurfaceVideoPreview(editor, directVideo, Modifier.fillMaxSize(), playback)
             CpuPreviewCanvas(editor, Modifier.fillMaxSize(), directVideoLayerId = directVideo.id)
         }
-    } else if ((videoLayers.isNotEmpty() || hasGpuEffects) && supportsGles3(context) && !hasComplexMasks) {
-        // All transformed, multi-layer and effect-bearing footage enters the
-        // GLSurfaceView compositor. Video frames remain external-OES textures
-        // from SurfaceTexture through the final GPU draw.
+    } else if ((videoLayers.isNotEmpty() || hasEffects) && supportsGles3(context) && !hasComplexMasks) {
+        // The GLES compositor handles layer composition. Untouched clips stay
+        // on external-OES textures; effect-bearing clips arrive as CPU-processed
+        // bitmap textures before the final composition draw.
         val qualityScale = resolvePreviewScale(context, qualityIndex, activeVisualLayers.size)
         GpuCompositionPreviewCanvas(editor, modifier, qualityScale, playback)
     } else if (videoLayers.isNotEmpty() || hasComplexMasks || !supportsGles3(context)) {
