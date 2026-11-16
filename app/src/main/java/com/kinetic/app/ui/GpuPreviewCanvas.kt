@@ -208,6 +208,9 @@ private fun GpuCompositionPreviewCanvas(
 
     val context = LocalContext.current
     val frames = remember { mutableStateMapOf<String, Bitmap>() }
+    // CPU effects are prepared off the GL thread. The renderer only uploads ready bitmaps.
+    val effectedFrames = remember { mutableStateMapOf<String, Bitmap>() }
+    val effectFrameKeys = remember { mutableMapOf<String, Long>() }
     // Preserve a recent decoded sample across adjacent split segments that share a source URI.
     val recentVideoFrames = remember { mutableStateMapOf<String, RecentVideoPreviewFrame>() }
     val textTextures = remember { mutableMapOf<String, Pair<Int, Bitmap>>() }
@@ -229,6 +232,11 @@ private fun GpuCompositionPreviewCanvas(
 
     LaunchedEffect(editor.layers.map { it.id to it.uri }) {
         val currentIds = editor.layers.mapTo(HashSet<String>()) { it.id }
+        effectedFrames.keys.filter { it !in currentIds }.toList().forEach { id ->
+            val old = effectedFrames.remove(id)
+            if (old != null && !old.isRecycled) old.recycle()
+            effectFrameKeys.remove(id)
+        }
         val stale = textTextures.keys.filter { it !in currentIds }
         stale.forEach { textTextures.remove(it) }
         failedVideoSources.keys.filter { it !in currentIds }.toList()
@@ -379,6 +387,55 @@ private fun GpuCompositionPreviewCanvas(
         }
     }
 
+    // Effect processing can be substantially more expensive than texture upload.
+    // Keep it on a latest-only worker so Deep Glow / warps never stall the GL thread.
+    LaunchedEffect(editor.layers.map { it.id to it.effectStack.hashCode() }) {
+        while (true) {
+            val now = latestTimelineTime.value
+            val playing = latestPlaying.value
+            for (layer in editor.layers) {
+                val source = frames[layer.id] ?: continue
+                val activeEffects = layer.effectStack.filter { it.enabled }.take(8)
+                if (activeEffects.isEmpty()) {
+                    val old = effectedFrames.remove(layer.id)
+                    if (old != null && old !== source && !old.isRecycled) old.recycle()
+                    effectFrameKeys.remove(layer.id)
+                    continue
+                }
+                if (!layer.visible || !layer.activeAt(now)) continue
+                val timeDependent = activeEffects.any { effect ->
+                    effect.name == "Wave Warp" || effect.name == "Warp Shake" ||
+                        effect.name == "Oscillate" || effect.parameterKeys.values.any { it.isNotEmpty() }
+                }
+                val timeBucket = if (timeDependent) {
+                    (now * MediaLoader.CPU_PREVIEW_SAMPLE_FPS).toInt()
+                } else 0
+                var keyValue = System.identityHashCode(source).toLong()
+                keyValue = keyValue * 31L + activeEffects.hashCode().toLong()
+                keyValue = keyValue * 31L + timeBucket.toLong()
+                if (effectFrameKeys[layer.id] == keyValue) continue
+
+                val rendered = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                    NativeEffectsEngine.processBitmap(source, activeEffects, now)
+                }
+                val stillCurrent = frames[layer.id] === source &&
+                    (!timeDependent ||
+                        (latestTimelineTime.value * MediaLoader.CPU_PREVIEW_SAMPLE_FPS).toInt() == timeBucket)
+                if (stillCurrent) {
+                    val next = rendered ?: source
+                    val previous = effectedFrames.put(layer.id, next)
+                    if (previous != null && previous !== source && previous !== next && !previous.isRecycled) {
+                        previous.recycle()
+                    }
+                    effectFrameKeys[layer.id] = keyValue
+                } else if (rendered != null && rendered !== source && !rendered.isRecycled) {
+                    rendered.recycle()
+                }
+            }
+            kotlinx.coroutines.delay(if (playing) 16L else 50L)
+        }
+    }
+
     val byId = editor.layers.associateBy { it.id }
     val renderLayers = ArrayList<GpuLayer>()
     val activeTextTextureIds = HashSet<String>()
@@ -395,7 +452,7 @@ private fun GpuCompositionPreviewCanvas(
             continue
         }
         val bitmap = when (layer.type) {
-            LayerType.IMAGE, LayerType.VIDEO -> frames[layer.id]
+            LayerType.IMAGE, LayerType.VIDEO -> effectedFrames[layer.id] ?: frames[layer.id]
             LayerType.TEXT, LayerType.SHAPE -> {
                 activeTextTextureIds.add(layer.id)
                 val logicalWidth = layer.width.toInt().coerceIn(1, 4096)
@@ -453,7 +510,7 @@ private fun GpuCompositionPreviewCanvas(
         renderLayers += GpuLayer(
             layer.id, bitmap, Matrix(layerMatrix(layer, editor.time, byId)),
             layer.width, layer.height, opacity, layer.maskEnabled,
-            "Grayscale" in layer.effects, layer.blendMode, false, layer.effectStack
+            "Grayscale" in layer.effects, layer.blendMode, false, emptyList()
         )
     }
     // Keep only a small warm set of inactive text/vector bitmaps. Active
