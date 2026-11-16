@@ -265,6 +265,24 @@ object MediaLoader {
         return valid
     }
 
+    /** Fast cache check used before background clip-start prewarming. */
+    suspend fun hasPersistentVideoFrame(
+        ctx: Context,
+        uri: Uri,
+        timeSec: Float,
+        sampleFps: Int,
+        maxEdge: Int
+    ): Boolean = withContext(MediaWorkers.cacheDispatcher) {
+        val bucket = (timeSec * sampleFps.toFloat()).toInt()
+        val sourceKey = mediaCacheIdentity(uri)
+        val key = "$sourceKey@$sampleFps@$maxEdge@$bucket"
+        val file = previewFrameFile(ctx, key, LayerType.VIDEO)
+        if (!hasValidPreviewFrame(file)) return@withContext false
+        file.setLastModified(System.currentTimeMillis())
+        true
+    }
+
+
     private fun writePreviewFrame(file: File, bitmap: Bitmap, type: LayerType) {
         runCatching {
             if (hasValidPreviewFrame(file)) return
@@ -285,8 +303,28 @@ object MediaLoader {
                     temp.copyTo(file, overwrite = true)
                     temp.delete()
                 }
+                trimPreviewFrameDiskCache(file.parentFile, file)
                 Unit
             }
+        }
+    }
+
+    private fun trimPreviewFrameDiskCache(directory: File?, keep: File) {
+        if (directory == null || !directory.isDirectory) return
+        val files = directory.listFiles()?.filter { it.isFile } ?: return
+        var total = files.sumOf { it.length() }
+        val maxBytes = if (MediaWorkers.isConstrainedDevice) {
+            96L * 1024L * 1024L
+        } else {
+            256L * 1024L * 1024L
+        }
+        val targetBytes = maxBytes * 3L / 4L
+        if (total <= maxBytes) return
+        for (candidate in files.filter { it.absolutePath != keep.absolutePath }
+            .sortedBy { it.lastModified() }) {
+            if (total <= targetBytes) break
+            val size = candidate.length()
+            if (candidate.delete()) total -= size
         }
     }
 
