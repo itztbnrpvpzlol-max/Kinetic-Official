@@ -344,7 +344,7 @@ Java_com_kinetic_app_engine_NativeEffectsEngine_nativeRenderMotionTileBackground
         const float centerTop=(static_cast<float>(targetInfo.height)-foregroundHeight)*0.5f;
         for(uint32_t y=0;y<targetInfo.height;++y) {
             const float qy=((static_cast<float>(y)+0.5f-static_cast<float>(targetInfo.height)*0.5f)/
-                (static_cast<float>(sourceInfo.height)*tileH))+0.5f+phaseY;
+                (foregroundHeight*tileH))+0.5f+phaseY;
             const float cy=std::floor(qy);
             float py=fract(qy);
             if(mirrorEdges==JNI_TRUE && std::fmod(std::fabs(cy),2.0f)>=1.0f) py=1.0f-py;
@@ -364,7 +364,7 @@ Java_com_kinetic_app_engine_NativeEffectsEngine_nativeRenderMotionTileBackground
                     continue;
                 }
                 const float qx=((static_cast<float>(x)+0.5f-static_cast<float>(targetInfo.width)*0.5f)/
-                    (static_cast<float>(sourceInfo.width)*tileW))+0.5f+phaseX;
+                    (foregroundWidth*tileW))+0.5f+phaseX;
                 const float cx=std::floor(qx);
                 float px=fract(qx);
                 if(mirrorEdges==JNI_TRUE && std::fmod(std::fabs(cx),2.0f)>=1.0f) px=1.0f-px;
