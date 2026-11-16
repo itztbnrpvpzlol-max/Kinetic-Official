@@ -887,6 +887,7 @@ private class GpuPreviewSurfaceView(
         }
     }
     fun releaseRenderer() {
+        if (rendererReleaseRequested) return
         rendererReleaseRequested = true
         val players = attachedPlayers.values.toList()
         attachedPlayers.clear()
