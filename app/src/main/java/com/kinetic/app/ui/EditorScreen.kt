@@ -58,6 +58,7 @@ import androidx.compose.runtime.snapshotFlow
 import android.os.SystemClock
 import com.kinetic.app.engine.NativePlaybackEngine
 import com.kinetic.app.engine.KreEngine
+import com.kinetic.app.engine.NativeRenderEngine
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -396,11 +397,24 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
             EffectsBrowserScreen(
                 onClose = { showEffectsScreen = false },
                 onAddEffect = { name ->
-                    editor.selected?.let { editor.addEffect(it.id, name) }
-                    showEffectsScreen = false
-                    showPropertiesPanel = false
-                    showToolPanel = true
-                    dockTool = "Effects"
+                    val layer = editor.selected
+                    when {
+                        layer == null -> {
+                            Toast.makeText(ctx, "Select a layer before adding an effect", Toast.LENGTH_SHORT).show()
+                        }
+                        !NativeRenderEngine.available -> {
+                            Toast.makeText(ctx, "Native effects engine failed to load", Toast.LENGTH_LONG).show()
+                        }
+                        !editor.addEffect(layer.id, name) -> {
+                            Toast.makeText(ctx, "The native engine could not create $name", Toast.LENGTH_LONG).show()
+                        }
+                        else -> {
+                            showEffectsScreen = false
+                            showPropertiesPanel = false
+                            showToolPanel = true
+                            dockTool = "Effects"
+                        }
+                    }
                 }
             )
         }
