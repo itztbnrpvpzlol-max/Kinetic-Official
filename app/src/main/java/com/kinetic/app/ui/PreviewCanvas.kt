@@ -38,6 +38,9 @@ import com.kinetic.app.model.PropId
 import com.kinetic.app.model.VectorPoint
 import com.kinetic.app.model.sourceElapsedAt
 import com.kinetic.app.model.layerMatrixInto
+import com.kinetic.app.engine.NativeEffectsEngine
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import android.graphics.Path as AndroidPath
 
 private class CpuPreviewClock {
@@ -53,12 +56,13 @@ fun CpuPreviewCanvas(
 ) {
     val ctx = LocalContext.current
     val bitmaps = remember { mutableStateMapOf<String, Bitmap>() }
+    val effectedBitmaps = remember { mutableStateMapOf<String, Bitmap>() }
     val previewClock = remember(editor) { CpuPreviewClock() }
     val mediaLayers = editor.layers.filter {
         it.id != directVideoLayerId && it.uri != null && (it.type == LayerType.IMAGE || it.type == LayerType.VIDEO)
     }
     val mediaLayerSignature = mediaLayers.map {
-        "${it.id}|${it.uri}|${it.type}|${it.start}|${it.duration}|${it.srcOffset}|${it.p(PropId.SPEED)}|${it.visible}"
+        "${it.id}|${it.uri}|${it.type}|${it.start}|${it.duration}|${it.srcOffset}|${it.p(PropId.SPEED)}|${it.visible}|${it.effectStack.hashCode()}"
     }
 
     // Observe the master clock outside composition. Updating this volatile
@@ -76,6 +80,9 @@ fun CpuPreviewCanvas(
     LaunchedEffect(mediaLayerSignature) {
         val validIds = mediaLayers.map { it.id }.toSet()
         bitmaps.keys.toList().filterNot { it in validIds }.forEach { bitmaps.remove(it) }
+        effectedBitmaps.keys.toList().filterNot { it in validIds }.forEach { id ->
+            effectedBitmaps.remove(id)?.takeIf { it !== bitmaps[id] }?.let { if (!it.isRecycled) it.recycle() }
+        }
         val lastRequests = mutableMapOf<String, Pair<Int, Int>>()
         val retryAfterNs = mutableMapOf<String, Long>()
 
@@ -102,8 +109,8 @@ fun CpuPreviewCanvas(
                     (sourceTime * MediaLoader.CPU_PREVIEW_SAMPLE_FPS.toFloat()).toInt()
                 } else 0
                 val frameEdge = if (
-                    layer.type == LayerType.VIDEO &&
-                    (playing || MediaWorkers.isConstrainedDevice)
+                    layer.effectStack.any { it.enabled } ||
+                    (layer.type == LayerType.VIDEO && (playing || MediaWorkers.isConstrainedDevice))
                 ) 320 else 640
                 val requestKey = bucket to frameEdge
                 if (lastRequests[layer.id] == requestKey) {
@@ -163,6 +170,48 @@ fun CpuPreviewCanvas(
     }
 
     // No runtime warmup: imported video frames are read from the persistent disk cache.
+
+    // Effect pixels are processed by the independent native CPU engine. This
+    // worker is latest-only and samples animated effects at the preview rate;
+    // no effect shader or Kotlin pixel-processing fallback is involved.
+    LaunchedEffect(mediaLayerSignature) {
+        val lastProcessed = mutableMapOf<String, Long>()
+        while (true) {
+            val timelineTime = previewClock.timeSec
+            val playing = previewClock.playing
+            for (layer in mediaLayers) {
+                val source = bitmaps[layer.id] ?: continue
+                val activeEffects = layer.effectStack.filter { it.enabled }.take(8)
+                if (activeEffects.isEmpty()) {
+                    val previous = effectedBitmaps.remove(layer.id)
+                    if (previous != null && previous !== source && !previous.isRecycled) previous.recycle()
+                    lastProcessed.remove(layer.id)
+                    continue
+                }
+                if (!layer.visible || !layer.activeAt(timelineTime)) continue
+                val timeDependent = playing || activeEffects.any { effect ->
+                    effect.name == "Wave Warp" || effect.name == "Warp Shake" ||
+                        effect.name == "Oscillate" || effect.parameterKeys.values.any { it.isNotEmpty() }
+                }
+                val timeBucket = if (timeDependent) (timelineTime * MediaLoader.CPU_PREVIEW_SAMPLE_FPS).toInt() else 0
+                var key = System.identityHashCode(source).toLong()
+                key = (key * 31L) + activeEffects.hashCode().toLong()
+                key = (key * 31L) + timeBucket.toLong()
+                if (lastProcessed[layer.id] == key) continue
+                val rendered = withContext(Dispatchers.Default) {
+                    NativeEffectsEngine.processBitmap(source, activeEffects, timelineTime)
+                }
+                if (bitmaps[layer.id] === source && previewClock.timeSec.let { !timeDependent || (it * MediaLoader.CPU_PREVIEW_SAMPLE_FPS).toInt() == timeBucket }) {
+                    val previous = effectedBitmaps.put(layer.id, rendered ?: source)
+                    if (previous != null && previous !== source && previous !== rendered && !previous.isRecycled) previous.recycle()
+                    lastProcessed[layer.id] = key
+                } else if (rendered != null && rendered !== source && !rendered.isRecycled) {
+                    rendered.recycle()
+                }
+            }
+            delay(if (playing) 40L else 80L)
+        }
+    }
 
     val shapePaths = remember { mutableMapOf<String, android.graphics.Path>() }
     val layerSnapshot = editor.layers
@@ -228,7 +277,7 @@ fun CpuPreviewCanvas(
                 paint.colorFilter = if ("Grayscale" in l.effects) grayscaleFilter else null
                 when (l.type) {
                     LayerType.IMAGE, LayerType.VIDEO -> {
-                        val bmp = bitmaps[l.id]
+                        val bmp = effectedBitmaps[l.id] ?: bitmaps[l.id]
                         paint.alpha = alpha
                         if (bmp != null) {
                             paint.color = android.graphics.Color.WHITE

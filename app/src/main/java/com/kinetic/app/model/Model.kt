@@ -4,6 +4,7 @@ import android.graphics.Matrix
 import java.util.Locale
 import java.util.UUID
 import com.kinetic.app.engine.NativeRenderEngine
+import com.kinetic.app.engine.NativeEffectsEngine
 import kotlin.math.abs
 import kotlin.math.pow
 
@@ -315,8 +316,8 @@ data class EffectInstance(
 }
 
 fun createEffect(name: String): EffectInstance? {
-    if (!NativeRenderEngine.available) return null
-    val encoded = runCatching { NativeRenderEngine.nativeCreateEffect(name) }.getOrNull() ?: return null
+    if (!NativeEffectsEngine.available) return null
+    val encoded = runCatching { NativeEffectsEngine.nativeCreateEffect(name) }.getOrNull() ?: return null
     if (encoded.isEmpty() || encoded.size % 2 != 0) return null
     val parameters = LinkedHashMap<String, Float>(encoded.size / 2)
     var index = 0
@@ -326,49 +327,6 @@ fun createEffect(name: String): EffectInstance? {
         index += 2
     }
     return EffectInstance(name = name, parameters = parameters)
-}
-
-/**
- * Serializes editable effect state only. Effect definitions, defaults, keyframe
- * evaluation, validation, and shader-uniform packing are owned by KRE in C++.
- */
-fun buildNativeEffectUniforms(effects: List<EffectInstance>, time: Float = 0f): FloatArray {
-    if (!NativeRenderEngine.available || effects.isEmpty()) return FloatArray(0)
-    val effectNames = effects.map { it.name }.toTypedArray()
-    val enabled = effects.map { it.enabled }.toBooleanArray()
-    val parameterNames = ArrayList<String>()
-    val parameterValues = ArrayList<Float>()
-    val parameterEffectIndices = ArrayList<Int>()
-    val keyframeParameterIndices = ArrayList<Int>()
-    val keyframeData = ArrayList<Float>()
-
-    effects.forEachIndexed { effectIndex, effect ->
-        val names = (effect.parameters.keys + effect.parameterKeys.keys).distinct()
-        for (name in names) {
-            val parameterIndex = parameterNames.size
-            parameterNames += name
-            parameterValues += (effect.parameters[name] ?: 0f)
-            parameterEffectIndices += effectIndex
-            effect.parameterKeys[name].orEmpty().forEach { key ->
-                keyframeParameterIndices += parameterIndex
-                keyframeData += key.t
-                keyframeData += key.v
-                keyframeData += key.type.ordinal.toFloat()
-                keyframeData += key.x1
-                keyframeData += key.y1
-                keyframeData += key.x2
-                keyframeData += key.y2
-            }
-        }
-    }
-
-    return runCatching {
-        NativeRenderEngine.nativeBuildEffectUniforms(
-            effectNames, enabled, parameterNames.toTypedArray(),
-            parameterValues.toFloatArray(), parameterEffectIndices.toIntArray(),
-            keyframeParameterIndices.toIntArray(), keyframeData.toFloatArray(), time
-        )
-    }.getOrElse { FloatArray(0) }
 }
 
 data class Layer(

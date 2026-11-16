@@ -56,7 +56,8 @@ import com.kinetic.app.model.EditorState
 import com.kinetic.app.model.LayerType
 import com.kinetic.app.model.PropId
 import com.kinetic.app.model.layerMatrix
-import com.kinetic.app.model.buildNativeEffectUniforms
+import com.kinetic.app.model.EffectInstance
+import com.kinetic.app.engine.NativeEffectsEngine
 import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
 import android.net.Uri
@@ -72,7 +73,7 @@ private data class GpuLayer(
     val grayscale: Boolean,
     val blend: String,
     val isVideo: Boolean = false,
-    val effects: FloatArray = FloatArray(0)
+    val effectStack: List<EffectInstance> = emptyList()
 )
 
 private data class GpuScene(
@@ -223,7 +224,7 @@ private fun GpuCompositionPreviewCanvas(
     // effect uniforms as the 2D texture shader, avoiding per-frame bitmap
     // extraction and uploads for effect-bearing footage on low-RAM devices.
     val videoLayers = activeVideoLayers
-        .filter { failedVideoSources[it.id] != it.uri }
+        .filter { failedVideoSources[it.id] != it.uri && it.effectStack.none { effect -> effect.enabled } }
         .take(decoderLimit)
     val textureVideoIds = videoLayers.mapTo(HashSet<String>()) { it.id }
 
@@ -388,7 +389,7 @@ private fun GpuCompositionPreviewCanvas(
             renderLayers += GpuLayer(
                 layer.id, null, Matrix(layerMatrix(layer, editor.time, byId)),
                 layer.width, layer.height, opacity, layer.maskEnabled,
-                "Grayscale" in layer.effects, layer.blendMode, true, buildNativeEffectUniforms(layer.effectStack, editor.time)
+                "Grayscale" in layer.effects, layer.blendMode, true, layer.effectStack
             )
             continue
         }
@@ -451,7 +452,7 @@ private fun GpuCompositionPreviewCanvas(
         renderLayers += GpuLayer(
             layer.id, bitmap, Matrix(layerMatrix(layer, editor.time, byId)),
             layer.width, layer.height, opacity, layer.maskEnabled,
-            "Grayscale" in layer.effects, layer.blendMode, false, buildNativeEffectUniforms(layer.effectStack, editor.time)
+            "Grayscale" in layer.effects, layer.blendMode, false, layer.effectStack
         )
     }
     // Keep only a small warm set of inactive text/vector bitmaps. Active
@@ -727,7 +728,7 @@ private class CompositionGlRenderer(
         throw IllegalStateException("OpenGL error during $stage: ${errors.joinToString()}")
     }
 
-    private data class TextureEntry(val id: Int, val bitmap: Bitmap, val bytes: Long)
+    private data class TextureEntry(val id: Int, val bitmap: Bitmap, val bytes: Long, val effectSignature: Int)
     private data class VideoOutput(
         val textureId: Int,
         val texture: SurfaceTexture,
@@ -976,7 +977,7 @@ private class CompositionGlRenderer(
     private fun drawLayer(layer: GpuLayer, scale: Float, ox: Float, oy: Float) {
         val bitmap = layer.bitmap ?: return
         if (bitmap.isRecycled || layer.opacity <= 0f) return
-        val texture = textureFor(layer.id, bitmap) ?: return
+        val texture = textureFor(layer.id, bitmap, layer.effectStack, scene.time) ?: return
         val right = if (layer.mask) layer.width * 0.8f else layer.width
         val bottom = if (layer.mask) layer.height * 0.8f else layer.height
         val uvMax = if (layer.mask) 0.8f else 1f
@@ -1016,13 +1017,20 @@ private class CompositionGlRenderer(
         data[12] = ndcX(points[6], scale, ox); data[13] = ndcY(points[7], scale, oy); data[14] = uvMax; data[15] = uvMax
         NativeRenderEngine.nativeGlDrawExternalTexture(
             output.textureId, data, layer.opacity, if (layer.grayscale) 1f else 0f,
-            output.transform, blendModeCode(layer.blend), layer.effects, scene.time
+            output.transform, blendModeCode(layer.blend), FloatArray(0), scene.time
         )
     }
 
-    private fun textureFor(layerId: String, bitmap: Bitmap): Int? {
+    private fun textureFor(layerId: String, bitmap: Bitmap, effects: List<EffectInstance>, time: Float): Int? {
+        val activeEffects = effects.filter { it.enabled }.take(8)
+        val timeDependent = activeEffects.any { effect ->
+            effect.name == "Wave Warp" || effect.name == "Warp Shake" ||
+                effect.name == "Oscillate" || effect.parameterKeys.values.any { it.isNotEmpty() }
+        }
+        val timeBucket = if (timeDependent) (time * MediaLoader.CPU_PREVIEW_SAMPLE_FPS).toInt() else 0
+        val effectSignature = 31 * activeEffects.hashCode() + timeBucket
         val old = textures[layerId]
-        if (old != null && old.bitmap === bitmap && old.id != 0) return old.id
+        if (old != null && old.bitmap === bitmap && old.effectSignature == effectSignature && old.id != 0) return old.id
         if (old != null) {
             GLES20.glDeleteTextures(1, intArrayOf(old.id), 0)
             gpuTextureCacheBytes = (gpuTextureCacheBytes - old.bytes).coerceAtLeast(0L)
@@ -1036,9 +1044,15 @@ private class CompositionGlRenderer(
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
-        GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, bitmap, 0)
+        val uploadBitmap = if (activeEffects.isEmpty()) bitmap else
+            NativeEffectsEngine.processBitmap(bitmap, activeEffects, time) ?: bitmap
+        try {
+            GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, uploadBitmap, 0)
+        } finally {
+            if (uploadBitmap !== bitmap && !uploadBitmap.isRecycled) uploadBitmap.recycle()
+        }
         val bytes = bitmap.byteCount.toLong().coerceAtLeast(0L)
-        textures[layerId] = TextureEntry(ids[0], bitmap, bytes)
+        textures[layerId] = TextureEntry(ids[0], bitmap, bytes, effectSignature)
         gpuTextureCacheBytes += bytes
         return ids[0]
     }
