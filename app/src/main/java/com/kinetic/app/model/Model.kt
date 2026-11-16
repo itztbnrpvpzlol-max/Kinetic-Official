@@ -310,7 +310,7 @@ data class EffectInstance(
 ) {
     fun parameterAt(key: String, time: Float, fallback: Float = 0f): Float {
         val base = parameters[key] ?: fallback
-        return Prop(base, parameterKeys[key].orEmpty()).valueAt(time)
+        return NativeEffectsEngine.evaluateParameter(base, parameterKeys[key].orEmpty(), time)
             .takeIf { it.isFinite() } ?: fallback
     }
 }

@@ -24,21 +24,6 @@ object NativeRenderEngine {
     /** Each input tuple is [progress, x1, y1, x2, y2]. */
     external fun nativeEvaluateCurves(input: FloatArray): FloatArray
 
-    /** Native effect factory returns alternating parameter-name/default-value strings. */
-    external fun nativeCreateEffect(name: String): Array<String>
-
-    /** Evaluates effect parameters/keyframes and packs native shader uniforms. */
-    external fun nativeBuildEffectUniforms(
-        effectNames: Array<String>,
-        enabled: BooleanArray,
-        parameterNames: Array<String>,
-        parameterValues: FloatArray,
-        parameterEffectIndices: IntArray,
-        keyframeParameterIndices: IntArray,
-        keyframeData: FloatArray,
-        time: Float
-    ): FloatArray
-
     /** Initializes the native OpenGL ES 3.x composition renderer on the GL thread. */
     external fun nativeGlInit(): Boolean
     external fun nativeGlEnsureCompositionCache(width: Int, height: Int, budgetBytes: Long): Boolean
@@ -48,8 +33,7 @@ object NativeRenderEngine {
         backgroundArgb: Int, width: Int, height: Int, useCompositionCache: Boolean
     )
     external fun nativeGlDrawTexture(
-        textureId: Int, vertices: FloatArray, alpha: Float, gray: Float, blendMode: Int,
-        effects: FloatArray, time: Float
+        textureId: Int, vertices: FloatArray, alpha: Float, gray: Float, blendMode: Int
     )
     /** Draws a complete ordered scene in one JNI call on the current GLES3 context. */
     external fun nativeGlDrawComposition(
@@ -63,7 +47,7 @@ object NativeRenderEngine {
     )
     external fun nativeGlDrawExternalTexture(
         textureId: Int, vertices: FloatArray, alpha: Float, gray: Float,
-        textureMatrix: FloatArray, blendMode: Int, effects: FloatArray, time: Float
+        textureMatrix: FloatArray, blendMode: Int
     )
     external fun nativeGlDrawSelection(vertices: FloatArray)
     external fun nativeGlRelease()

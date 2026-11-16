@@ -189,6 +189,28 @@ Java_com_kinetic_app_engine_NativeEffectsEngine_nativeCreateEffect(JNIEnv* env,j
     return result;
 }
 
+extern "C" JNIEXPORT jfloat JNICALL
+Java_com_kinetic_app_engine_NativeEffectsEngine_nativeEvaluateParameter(
+    JNIEnv* env,jobject,jfloat base,jfloatArray keyframeData,jfloat time) {
+    if(!keyframeData) return base;
+    const jsize length=env->GetArrayLength(keyframeData);
+    if(length%7!=0||length>7*16384) return base;
+    std::vector<jfloat> values(static_cast<std::size_t>(length));
+    if(length) env->GetFloatArrayRegion(keyframeData,0,length,values.data());
+    if(env->ExceptionCheck()) { env->ExceptionClear(); return base; }
+    Parameter parameter{}; parameter.base=base;
+    for(jsize i=0;i<length/7;++i) {
+        const std::size_t o=static_cast<std::size_t>(i)*7;
+        Key key{values[o],values[o+1],static_cast<int>(std::lround(values[o+2])),
+                values[o+3],values[o+4],values[o+5],values[o+6]};
+        if(std::isfinite(key.t)&&std::isfinite(key.v)) parameter.keys.push_back(key);
+    }
+    std::stable_sort(parameter.keys.begin(),parameter.keys.end(),
+        [](const Key& a,const Key& b){return a.t<b.t;});
+    const float result=evaluateKeys(parameter,time,base);
+    return std::isfinite(result)?result:base;
+}
+
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_kinetic_app_engine_NativeEffectsEngine_nativeProcessBitmap(
     JNIEnv* env,jobject,jobject bitmap,jobjectArray effectNames,jbooleanArray enabled,

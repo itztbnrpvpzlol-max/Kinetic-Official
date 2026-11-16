@@ -994,7 +994,7 @@ private class CompositionGlRenderer(
         data[12] = ndcX(points[6], scale, ox); data[13] = ndcY(points[7], scale, oy); data[14] = uvMax; data[15] = uvMax
         NativeRenderEngine.nativeGlDrawTexture(
             texture, data, layer.opacity, if (layer.grayscale) 1f else 0f,
-            blendModeCode(layer.blend), FloatArray(0), scene.time
+            blendModeCode(layer.blend)
         )
     }
 
@@ -1017,7 +1017,7 @@ private class CompositionGlRenderer(
         data[12] = ndcX(points[6], scale, ox); data[13] = ndcY(points[7], scale, oy); data[14] = uvMax; data[15] = uvMax
         NativeRenderEngine.nativeGlDrawExternalTexture(
             output.textureId, data, layer.opacity, if (layer.grayscale) 1f else 0f,
-            output.transform, blendModeCode(layer.blend), FloatArray(0), scene.time
+            output.transform, blendModeCode(layer.blend)
         )
     }
 

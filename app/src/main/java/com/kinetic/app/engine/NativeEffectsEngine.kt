@@ -13,6 +13,24 @@ object NativeEffectsEngine {
     val loadError: String? = loadResult.exceptionOrNull()?.let { it.message ?: it.javaClass.simpleName }
 
     external fun nativeCreateEffect(name: String): Array<String>
+    private external fun nativeEvaluateParameter(base: Float, keyframeData: FloatArray, time: Float): Float
+
+    fun evaluateParameter(base: Float, keys: List<com.kinetic.app.model.Keyframe>, time: Float): Float {
+        if (!available || keys.isEmpty()) return base
+        val data = FloatArray(keys.size * 7)
+        keys.forEachIndexed { index, key ->
+            val offset = index * 7
+            data[offset] = key.t
+            data[offset + 1] = key.v
+            data[offset + 2] = key.type.ordinal.toFloat()
+            data[offset + 3] = key.x1
+            data[offset + 4] = key.y1
+            data[offset + 5] = key.x2
+            data[offset + 6] = key.y2
+        }
+        return runCatching { nativeEvaluateParameter(base, data, time) }
+            .getOrDefault(base).takeIf { it.isFinite() } ?: base
+    }
 
     private external fun nativeProcessBitmap(
         bitmap: Bitmap,

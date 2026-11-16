@@ -79,10 +79,12 @@ fun CpuPreviewCanvas(
     // to queue obsolete frame requests behind blocking native decodes.
     LaunchedEffect(mediaLayerSignature) {
         val validIds = mediaLayers.map { it.id }.toSet()
-        bitmaps.keys.toList().filterNot { it in validIds }.forEach { bitmaps.remove(it) }
         effectedBitmaps.keys.toList().filterNot { it in validIds }.forEach { id ->
-            effectedBitmaps.remove(id)?.takeIf { it !== bitmaps[id] }?.let { if (!it.isRecycled) it.recycle() }
+            val source = bitmaps[id]
+            val old = effectedBitmaps.remove(id)
+            if (old != null && old !== source && !old.isRecycled) old.recycle()
         }
+        bitmaps.keys.toList().filterNot { it in validIds }.forEach { bitmaps.remove(it) }
         val lastRequests = mutableMapOf<String, Pair<Int, Int>>()
         val retryAfterNs = mutableMapOf<String, Long>()
 
@@ -175,6 +177,7 @@ fun CpuPreviewCanvas(
     // worker is latest-only and samples animated effects at the preview rate;
     // no effect shader or Kotlin pixel-processing fallback is involved.
     LaunchedEffect(mediaLayerSignature) {
+        if (mediaLayers.none { layer -> layer.effectStack.any { it.enabled } }) return@LaunchedEffect
         val lastProcessed = mutableMapOf<String, Long>()
         while (true) {
             val timelineTime = previewClock.timeSec
