@@ -118,7 +118,7 @@ class FfmpegVideoPlayer(
             receivedSurfaceFrame = false
             onDetached?.invoke()
         }
-        runCatching { decoderExecutor.execute(detachTask) }
+        runCatching { decoderExecutor.execute { detachTask() } }
             .onFailure {
                 // If the executor has already shut down, release() has already
                 // completed its queued native teardown before shutting it down.
