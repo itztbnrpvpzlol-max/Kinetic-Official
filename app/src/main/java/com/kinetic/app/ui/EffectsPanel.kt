@@ -297,7 +297,8 @@ private fun EffectParameterLine(
                     }
                 }
                 else -> {
-                    val valueFormat = "%." + spec.decimals + "f" + spec.suffix
+                    val safeSuffix = spec.suffix.replace("%", "%%")
+                    val valueFormat = "%." + spec.decimals + "f" + safeSuffix
                     ScrubValueBar(spec.label, current, Modifier.weight(1f), step = spec.step,
                         selected = selected, onSelect = onSelect,
                         minValue = spec.min, maxValue = spec.max, valueFormat = valueFormat,
