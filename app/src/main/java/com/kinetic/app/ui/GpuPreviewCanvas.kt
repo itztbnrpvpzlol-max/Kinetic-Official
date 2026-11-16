@@ -432,14 +432,15 @@ private fun GpuCompositionPreviewCanvas(
                 if (effectFrameKeys[layer.id] == keyValue) continue
 
                 val motionTile = activeEffects.lastOrNull { it.name == "Motion Tile" }
-                val tileRendered = if (motionTile != null) {
-                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
-                        NativeEffectsEngine.createMotionTileBackground(source, motionTile, now)
-                    }
-                } else null
                 val rendered = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
                     NativeEffectsEngine.processBitmap(source, activeEffects.filterNot { it.name == "Motion Tile" }, now)
                 }
+                val tileSource = rendered ?: source
+                val tileRendered = if (motionTile != null) {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                        NativeEffectsEngine.createMotionTileBackground(tileSource, motionTile, now)
+                    }
+                } else null
                 val stillCurrent = frames[layer.id] === source &&
                     (!timeDependent ||
                         (latestTimelineTime.value * effectSampleFps).toInt() == timeBucket)

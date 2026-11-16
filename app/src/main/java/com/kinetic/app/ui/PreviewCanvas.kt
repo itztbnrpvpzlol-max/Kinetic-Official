@@ -218,14 +218,15 @@ fun CpuPreviewCanvas(
                 key = (key * 31L) + timeBucket.toLong()
                 if (lastProcessed[layer.id] == key) continue
                 val motionTile = activeEffects.lastOrNull { it.name == "Motion Tile" }
-                val tileRendered = if (motionTile != null) {
-                    withContext(Dispatchers.Default) {
-                        NativeEffectsEngine.createMotionTileBackground(source, motionTile, timelineTime)
-                    }
-                } else null
                 val rendered = withContext(Dispatchers.Default) {
                     NativeEffectsEngine.processBitmap(source, activeEffects.filterNot { it.name == "Motion Tile" }, timelineTime)
                 }
+                val tileSource = rendered ?: source
+                val tileRendered = if (motionTile != null) {
+                    withContext(Dispatchers.Default) {
+                        NativeEffectsEngine.createMotionTileBackground(tileSource, motionTile, timelineTime)
+                    }
+                } else null
                 if (bitmaps[layer.id] === source && previewClock.timeSec.let { !timeDependent || (it * effectSampleFps).toInt() == timeBucket }) {
                     if (motionTile == null) {
                         motionTileBitmaps.remove(layer.id)?.let { if (!it.isRecycled) it.recycle() }
