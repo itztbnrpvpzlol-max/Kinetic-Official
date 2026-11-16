@@ -402,6 +402,11 @@ private fun GpuCompositionPreviewCanvas(
             val now = latestTimelineTime.value
             val playing = latestPlaying.value
             for (layer in editor.layers) {
+                if (!layer.visible || !layer.activeAt(now)) {
+                    motionTileFrames.remove(layer.id)?.let { if (!it.isRecycled) it.recycle() }
+                    motionTileKeys.remove(layer.id)
+                    continue
+                }
                 val source = frames[layer.id] ?: continue
                 val activeEffects = layer.effectStack.filter { it.enabled }.take(8)
                 if (activeEffects.isEmpty()) {

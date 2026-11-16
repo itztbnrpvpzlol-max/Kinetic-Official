@@ -193,6 +193,10 @@ fun CpuPreviewCanvas(
             val timelineTime = previewClock.timeSec
             val playing = previewClock.playing
             for (layer in mediaLayers) {
+                if (!layer.visible || !layer.activeAt(timelineTime)) {
+                    motionTileBitmaps.remove(layer.id)?.let { if (!it.isRecycled) it.recycle() }
+                    continue
+                }
                 val source = bitmaps[layer.id] ?: continue
                 val activeEffects = layer.effectStack.filter { it.enabled }.take(8)
                 if (activeEffects.isEmpty()) {
