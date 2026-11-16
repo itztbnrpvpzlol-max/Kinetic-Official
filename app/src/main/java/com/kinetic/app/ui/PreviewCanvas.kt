@@ -306,10 +306,11 @@ fun CpuPreviewCanvas(
                 val motionTile = motionTileBitmaps[l.id]
                 val sourceForTile = bitmaps[l.id]
                 if (motionTile != null && sourceForTile != null && !motionTile.isRecycled && !sourceForTile.isRecycled) {
-                    val sx = l.width / sourceForTile.width.toFloat()
-                    val sy = l.height / sourceForTile.height.toFloat()
-                    val marginX = (motionTile.width * sx - l.width) * 0.5f
-                    val marginY = (motionTile.height * sy - l.height) * 0.5f
+                    val tileEffect = l.effectStack.lastOrNull { it.enabled && it.name == "Motion Tile" }
+                    val expandedWidth = l.width * ((tileEffect?.parameterAt("Output Width", time, 200f) ?: 200f).coerceIn(100f, 500f) / 100f)
+                    val expandedHeight = l.height * ((tileEffect?.parameterAt("Output Height", time, 200f) ?: 200f).coerceIn(100f, 500f) / 100f)
+                    val marginX = (expandedWidth - l.width) * 0.5f
+                    val marginY = (expandedHeight - l.height) * 0.5f
                     paint.alpha = alpha
                     paint.color = android.graphics.Color.WHITE
                     paint.xfermode = blendModes[l.blendMode]
