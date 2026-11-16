@@ -246,9 +246,12 @@ private fun GpuCompositionPreviewCanvas(
     // Untouched video uses SurfaceTexture as a GPU source texture. Effect-bearing
     // video uses the bitmap path above so effects never depend on a GPU shader.
     val hasEffectVideo = activeVideoLayers.any { layer -> layer.effectStack.any { it.enabled } }
+    // Keep native CPU effects below the decoder's maximum sample rate on
+    // constrained devices; the GL thread remains free to composite each frame.
     val compositionFps = if (MediaWorkers.isConstrainedDevice && hasEffectVideo) {
-        minOf(editor.fps, MediaLoader.CPU_PREVIEW_SAMPLE_FPS)
+        minOf(editor.fps, 12)
     } else editor.fps.coerceIn(1, 60)
+    val effectSampleFps = if (MediaWorkers.isConstrainedDevice) 12 else MediaLoader.CPU_PREVIEW_SAMPLE_FPS
     val latestTimelineTime = androidx.compose.runtime.rememberUpdatedState(editor.time)
     val latestPlaying = androidx.compose.runtime.rememberUpdatedState(editor.playing)
 
@@ -408,7 +411,7 @@ private fun GpuCompositionPreviewCanvas(
                         effect.name == "Oscillate" || effect.parameterKeys.values.any { it.isNotEmpty() }
                 }
                 val timeBucket = if (timeDependent) {
-                    (now * MediaLoader.CPU_PREVIEW_SAMPLE_FPS).toInt()
+                    (now * effectSampleFps).toInt()
                 } else 0
                 var keyValue = System.identityHashCode(source).toLong()
                 keyValue = keyValue * 31L + activeEffects.hashCode().toLong()

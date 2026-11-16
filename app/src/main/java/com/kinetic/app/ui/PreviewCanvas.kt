@@ -107,8 +107,13 @@ fun CpuPreviewCanvas(
                 val sourceTime = if (layer.type == LayerType.VIDEO) {
                     (layer.sourceElapsedAt(timelineTime) + layer.srcOffset).coerceAtLeast(0f)
                 } else 0f
+                // CPU effects are expensive on low-memory phones. Limit effect-bearing
+                // preview frames to 12 fps instead of queuing 20 fps of native work.
+                val sampleFps = if (MediaWorkers.isConstrainedDevice && layer.effectStack.any { it.enabled }) {
+                    12
+                } else MediaLoader.CPU_PREVIEW_SAMPLE_FPS
                 val bucket = if (layer.type == LayerType.VIDEO) {
-                    (sourceTime * MediaLoader.CPU_PREVIEW_SAMPLE_FPS.toFloat()).toInt()
+                    (sourceTime * sampleFps.toFloat()).toInt()
                 } else 0
                 val frameEdge = if (
                     layer.effectStack.any { it.enabled } ||
@@ -128,7 +133,7 @@ fun CpuPreviewCanvas(
                     Uri.parse(rawUri),
                     layer.type,
                     sourceTime,
-                    sampleFps = MediaLoader.CPU_PREVIEW_SAMPLE_FPS,
+                    sampleFps = sampleFps,
                     maxEdge = frameEdge,
                     // Playback frames stay RAM-only: synchronous JPEG compression and
                     // app-private file writes must never sit on the frame delivery path.
@@ -143,7 +148,7 @@ fun CpuPreviewCanvas(
                     (layer.sourceElapsedAt(currentTime) + layer.srcOffset).coerceAtLeast(0f)
                 } else 0f
                 val currentBucket = if (layer.type == LayerType.VIDEO) {
-                    (currentSourceTime * MediaLoader.CPU_PREVIEW_SAMPLE_FPS.toFloat()).toInt()
+                    (currentSourceTime * sampleFps.toFloat()).toInt()
                 } else 0
                 val currentEdge = if (
                     layer.effectStack.any { it.enabled } ||
@@ -197,7 +202,8 @@ fun CpuPreviewCanvas(
                     effect.name == "Wave Warp" || effect.name == "Warp Shake" ||
                         effect.name == "Oscillate" || effect.parameterKeys.values.any { it.isNotEmpty() }
                 }
-                val timeBucket = if (timeDependent) (timelineTime * MediaLoader.CPU_PREVIEW_SAMPLE_FPS).toInt() else 0
+                val effectSampleFps = if (MediaWorkers.isConstrainedDevice) 12 else MediaLoader.CPU_PREVIEW_SAMPLE_FPS
+                val timeBucket = if (timeDependent) (timelineTime * effectSampleFps).toInt() else 0
                 var key = System.identityHashCode(source).toLong()
                 key = (key * 31L) + activeEffects.hashCode().toLong()
                 key = (key * 31L) + timeBucket.toLong()
