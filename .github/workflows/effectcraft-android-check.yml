@@ -41,7 +41,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          yes | sdkmanager --install "ndk;26.1.10909125"
+          sdkmanager --install "ndk;26.1.10909125"
           echo "ANDROID_NDK_HOME=${ANDROID_HOME}/ndk/26.1.10909125" >> "${GITHUB_ENV}"
 
       - name: Install Rust 1.95 and Android target
