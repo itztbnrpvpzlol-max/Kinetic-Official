@@ -77,8 +77,7 @@ internal fun canUseDirectSurfaceVideo(layer: Layer): Boolean {
 
 private class DirectVideoTextureView(
     context: Context,
-    private val player: FfmpegVideoPlayer,
-    
+    private val player: FfmpegVideoPlayer
 ) : TextureView(context), TextureView.SurfaceTextureListener {
     private val mainHandler = Handler(Looper.getMainLooper())
     private var outputSurface: Surface? = null
