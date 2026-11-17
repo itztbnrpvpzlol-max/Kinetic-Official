@@ -71,8 +71,9 @@ private val effectCategories = listOf(
 @Composable
 fun EffectsBrowserScreen(onClose: () -> Unit, onAddEffect: (String) -> Unit) {
     val shelfPager = rememberPagerState(pageCount = { 2 })
-    var selectedCategory by remember { mutableStateOf<EffectCategory?>(null) }
+    var selectedCategoryTitle by remember { mutableStateOf<String?>(null) }
     var registryCategories by remember { mutableStateOf(effectCategories.map { it.copy(effects = emptyList()) }) }
+    val selectedCategory = registryCategories.firstOrNull { it.title == selectedCategoryTitle }
     var catalogMessage by remember { mutableStateOf("Connecting to EffectCraft effect registry…") }
     var catalogCount by remember { mutableStateOf(0) }
 
@@ -105,7 +106,7 @@ fun EffectsBrowserScreen(onClose: () -> Unit, onAddEffect: (String) -> Unit) {
         Row(Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 22.dp),
             verticalAlignment = Alignment.CenterVertically) {
             if (selectedCategory != null) {
-                Box(Modifier.size(38.dp).clip(CircleShape).clickable { selectedCategory = null },
+                Box(Modifier.size(38.dp).clip(CircleShape).clickable { selectedCategoryTitle = null },
                     contentAlignment = Alignment.Center) {
                     KIcon(IconKind.BACK, KColors.Muted, Modifier.size(19.dp))
                 }
@@ -146,7 +147,7 @@ fun EffectsBrowserScreen(onClose: () -> Unit, onAddEffect: (String) -> Unit) {
             Spacer(Modifier.height(4.dp))
             displayedCategories.chunked(2).forEach { row ->
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    row.forEach { category -> CategoryTile(category, Modifier.weight(1f)) { selectedCategory = category } }
+                    row.forEach { category -> CategoryTile(category, Modifier.weight(1f)) { selectedCategoryTitle = category.title } }
                     if (row.size == 1) Spacer(Modifier.weight(1f))
                 }
                 Spacer(Modifier.height(10.dp))
