@@ -33,7 +33,9 @@ jobs:
           submodules: recursive
 
       - name: Install Android SDK and NDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools
 
       - name: Install NDK 26.1
         shell: bash
