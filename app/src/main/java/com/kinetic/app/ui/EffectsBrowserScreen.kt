@@ -80,10 +80,11 @@ fun EffectsBrowserScreen(onClose: () -> Unit, onAddEffect: (String) -> Unit) {
         EffectCraftCatalog.load()
             .onSuccess { entries ->
                 catalogCount = entries.size
-                registryCategories = entries.groupBy { it.category }.map { (category, effects) ->
-                    val style = categoryStyle(category)
-                    EffectCategory(category.uppercase(), style.first, style.second, style.third,
-                        effects.map { it.name })
+                registryCategories = effectCategories.map { shelf ->
+                    val discovered = entries
+                        .filter { it.category.equals(shelf.title, ignoreCase = true) }
+                        .map { it.name }
+                    shelf.copy(effects = (shelf.effects + discovered).distinct())
                 }
                 catalogMessage = catalogCount.toString() +
                     " EffectCraft effects discovered. Eight legacy effects are currently addable in Kinetic preview."
@@ -94,12 +95,8 @@ fun EffectsBrowserScreen(onClose: () -> Unit, onAddEffect: (String) -> Unit) {
             }
     }
 
-    val displayedCategories = if (registryCategories.isNotEmpty()) {
-        registryCategories + EffectCategory(
-            "KINETIC BUILT-INS", IconKind.EFFECTS, Color(0xFF86B7FF), Color(0xFF1D2940),
-            listOf("Motion Tile", "Wave Warp", "Warp Shake", "RGB Split", "Oscillate", "Morphosis", "Deep Glow", "Exposure And Gamma")
-        )
-    } else effectCategories
+    // Keep all eleven Kinetic shelves visible; registry effects are merged into them.
+    val displayedCategories = if (catalogCount > 0) registryCategories else effectCategories
 
     Column(
         Modifier.fillMaxSize().background(KColors.Bg).statusBarsPadding().navigationBarsPadding()
