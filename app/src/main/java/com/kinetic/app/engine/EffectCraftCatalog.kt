@@ -42,7 +42,11 @@ object EffectCraftCatalog {
                         EffectCraftEffectInfo(
                             id = id,
                             name = name,
-                            category = item.optString("category", "Other").ifBlank { "Other" },
+                            category = toKineticCategory(
+                                item.optString("category", "Other"),
+                                id,
+                                name
+                            ),
                             gpu = item.optBoolean("gpu"),
                             floatPrecision = item.optBoolean("float"),
                             parameterCount = params.length()
@@ -52,4 +56,30 @@ object EffectCraftCatalog {
             }.also { check(it.isNotEmpty()) { "EffectCraft returned an empty effect catalog" } }
         }
     }
+    /**
+     * Kinetic's Effects browser intentionally has eleven stable shelves.
+     * EffectCraft's finer-grained source categories are folded into these shelves;
+     * anything ambiguous stays in Other rather than disappearing into a new shelf.
+     */
+    private fun toKineticCategory(source: String, id: String, name: String): String {
+        val category = source.trim().lowercase()
+        val identity = "$id $name".lowercase()
+        return when {
+            category.contains("color correction") -> "COLOR & LIGHT"
+            category == "stylize" -> "STYLIZE"
+            category == "paint" -> "DRAWING & EDGE"
+            category == "time" || category == "simulation" -> "MOTION"
+            category == "distort" || category == "perspective" -> "DISTORTION & WARP"
+            category == "generate" || category == "noise & grain" -> "PROCEDURAL"
+            category == "blur & sharpen" -> "BLUR"
+            category == "3d channel" || category == "immersive video" -> "3D"
+            category == "text" -> "TEXT"
+            category == "audio" -> "AUDIO"
+            "warp" in identity || "distort" in identity -> "DISTORTION & WARP"
+            "blur" in identity || "sharpen" in identity -> "BLUR"
+            "glow" in identity || "exposure" in identity || "color" in identity || "colour" in identity -> "COLOR & LIGHT"
+            else -> "OTHER"
+        }
+    }
+
 }
