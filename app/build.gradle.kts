@@ -88,8 +88,8 @@ tasks.named("preBuild").configure {
     dependsOn(downloadManropeAssets)
 }
 
-// Rust is opt-in until the EffectCraft dependency graph has passed Android ABI validation.
-// Normal Kinetic builds continue using the existing CMake/GLES renderer.
+// EffectCraft is part of normal Android builds. The existing CMake/GLES renderer
+// remains available as a fallback while the editor's render pipeline is migrated.
 val buildEffectCraftAndroid by tasks.registering(Exec::class) {
     group = "build"
     description = "Build the EffectCraft Rust JNI library for Kinetic's Android ABIs."
@@ -105,7 +105,7 @@ val buildEffectCraftAndroid by tasks.registering(Exec::class) {
 }
 
 val includeEffectCraftNative = providers.gradleProperty("KINETIC_BUILD_EFFECTCRAFT")
-    .orElse("false")
+    .orElse("true")
     .map { it.toBoolean() }
 
 if (includeEffectCraftNative.get()) {
