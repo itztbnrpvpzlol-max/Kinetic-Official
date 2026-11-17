@@ -7,10 +7,14 @@ package com.kinetic.app.engine
  * packaged, and validated on the target Android ABI.
  */
 internal object EffectCraftNative {
-    val available: Boolean = runCatching {
+    private val loadResult = runCatching {
         System.loadLibrary("kinetic_effectcraft")
         true
-    }.getOrDefault(false)
+    }
+
+    val available: Boolean = loadResult.getOrDefault(false)
+    val loadError: String?
+        get() = loadResult.exceptionOrNull()?.let { it.javaClass.simpleName + ": " + (it.message ?: "no detail") }
 
     @JvmStatic
     external fun nativeInitialize(): Boolean
