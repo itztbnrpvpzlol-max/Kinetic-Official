@@ -86,3 +86,11 @@ jobs:
           APK="app/build/outputs/apk/debug/app-debug.apk"
           test -s "$APK"
           unzip -l "$APK" | grep -F 'lib/arm64-v8a/libkinetic_effectcraft.so'
+
+      - name: Upload Kinetic debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: kinetic-effectcraft-arm64-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 7
