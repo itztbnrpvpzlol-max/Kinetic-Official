@@ -26,6 +26,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -41,6 +42,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.kinetic.app.engine.EffectCraftCatalog
 
 private data class EffectCategory(
     val title: String,
@@ -70,6 +72,34 @@ private val effectCategories = listOf(
 fun EffectsBrowserScreen(onClose: () -> Unit, onAddEffect: (String) -> Unit) {
     val shelfPager = rememberPagerState(pageCount = { 2 })
     var selectedCategory by remember { mutableStateOf<EffectCategory?>(null) }
+    var registryCategories by remember { mutableStateOf<List<EffectCategory>>(emptyList()) }
+    var catalogMessage by remember { mutableStateOf("Connecting to EffectCraft effect registry…") }
+    var catalogCount by remember { mutableStateOf(0) }
+
+    LaunchedEffect(Unit) {
+        EffectCraftCatalog.load()
+            .onSuccess { entries ->
+                catalogCount = entries.size
+                registryCategories = entries.groupBy { it.category }.map { (category, effects) ->
+                    val style = categoryStyle(category)
+                    EffectCategory(category.uppercase(), style.first, style.second, style.third,
+                        effects.map { it.name })
+                }
+                catalogMessage = catalogCount.toString() +
+                    " EffectCraft effects discovered. Eight legacy effects are currently addable in Kinetic preview."
+            }
+            .onFailure { error ->
+                catalogMessage = "EffectCraft catalog unavailable: " +
+                    (error.message ?: "unknown error")
+            }
+    }
+
+    val displayedCategories = if (registryCategories.isNotEmpty()) {
+        registryCategories + EffectCategory(
+            "KINETIC BUILT-INS", IconKind.EFFECTS, Color(0xFF86B7FF), Color(0xFF1D2940),
+            listOf("Motion Tile", "Wave Warp", "Warp Shake", "RGB Split", "Oscillate", "Morphosis", "Deep Glow", "Exposure And Gamma")
+        )
+    } else effectCategories
 
     Column(
         Modifier.fillMaxSize().background(KColors.Bg).statusBarsPadding().navigationBarsPadding()
@@ -114,8 +144,10 @@ fun EffectsBrowserScreen(onClose: () -> Unit, onAddEffect: (String) -> Unit) {
                 }
             }
             SectionHeading("Categories")
-            Spacer(Modifier.height(12.dp))
-            effectCategories.chunked(2).forEach { row ->
+            Text(catalogMessage, color = KColors.Muted, fontSize = 9.sp,
+                modifier = Modifier.padding(top = 5.dp, bottom = 9.dp))
+            Spacer(Modifier.height(4.dp))
+            displayedCategories.chunked(2).forEach { row ->
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     row.forEach { category -> CategoryTile(category, Modifier.weight(1f)) { selectedCategory = category } }
                     if (row.size == 1) Spacer(Modifier.weight(1f))
@@ -133,7 +165,10 @@ fun EffectsBrowserScreen(onClose: () -> Unit, onAddEffect: (String) -> Unit) {
                 category.effects.chunked(4).forEach { row ->
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         row.forEach { effect ->
-                            EffectChoice(effect, category.accent, Modifier.weight(1f)) { onAddEffect(effect) }
+                            val canAdd = effect in KINETIC_PREVIEW_EFFECTS
+                            EffectChoice(effect, category.accent, Modifier.weight(1f), isSupported = canAdd) {
+                                if (canAdd) onAddEffect(effect)
+                            }
                         }
                         repeat(4 - row.size) { Spacer(Modifier.weight(1f)) }
                     }
@@ -146,6 +181,27 @@ fun EffectsBrowserScreen(onClose: () -> Unit, onAddEffect: (String) -> Unit) {
 }
 
 @Composable
+private val KINETIC_PREVIEW_EFFECTS = setOf(
+    "Motion Tile", "Wave Warp", "Warp Shake", "RGB Split",
+    "Oscillate", "Morphosis", "Deep Glow", "Exposure And Gamma"
+)
+
+private fun categoryStyle(category: String): Triple<IconKind, Color, Color> {
+    val key = category.lowercase()
+    return when {
+        "color" in key || "light" in key -> Triple(IconKind.ADJ, Color(0xFFFF82B2), Color(0xFF281C2A))
+        "blur" in key || "sharpen" in key -> Triple(IconKind.FILTER, Color(0xFF8BC8FF), Color(0xFF1D2B39))
+        "distort" in key || "warp" in key -> Triple(IconKind.BLEND, Color(0xFF70DAD4), Color(0xFF1A2D32))
+        "motion" in key || "time" in key -> Triple(IconKind.MOTION, Color(0xFF86B7FF), Color(0xFF1D2940))
+        "text" in key -> Triple(IconKind.TEXT, Color(0xFFFFD77A), Color(0xFF332B1F))
+        "audio" in key -> Triple(IconKind.WAVEFORM, Color(0xFF79D8A7), Color(0xFF1B302A))
+        "3d" in key || "channel" in key -> Triple(IconKind.SHAPES, Color(0xFFFF987C), Color(0xFF332326))
+        "key" in key || "matte" in key -> Triple(IconKind.GRAPH, Color(0xFFFFC078), Color(0xFF30251D))
+        "generate" in key || "simulation" in key -> Triple(IconKind.GRID, Color(0xFFB5A4FF), Color(0xFF252238))
+        else -> Triple(IconKind.EFFECTS, Color(0xFFC0A2FF), Color(0xFF241E35))
+    }
+}
+
 private fun SectionHeading(title: String) {
     Text(title, color = KColors.Text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
 }
@@ -164,21 +220,33 @@ private fun ShelfSection(title: String, emptyMessage: String, icon: IconKind, ac
 }
 
 @Composable
-private fun EffectChoice(name: String, accent: Color, modifier: Modifier = Modifier, onClick: () -> Unit) {
+private fun EffectChoice(
+    name: String,
+    accent: Color,
+    modifier: Modifier = Modifier,
+    isSupported: Boolean = true,
+    onClick: () -> Unit
+) {
     Column(
         modifier.aspectRatio(0.96f).clip(RoundedCornerShape(12.dp))
             .background(KColors.Surface)
             .border(1.dp, KColors.Line, RoundedCornerShape(12.dp))
-            .clickable(onClick = onClick)
+            .clickable(enabled = isSupported, onClick = onClick)
     ) {
         Box(Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(topStart = 11.dp, topEnd = 11.dp))) {
             EffectArtwork(name, accent, Modifier.fillMaxSize())
             Box(
-                Modifier.align(Alignment.TopEnd).padding(6.dp).size(23.dp)
-                    .clip(CircleShape).background(KColors.Bg.copy(alpha = 0.82f)),
+                Modifier.align(Alignment.TopEnd).padding(6.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(KColors.Bg.copy(alpha = 0.86f))
+                    .padding(horizontal = 6.dp, vertical = 4.dp),
                 contentAlignment = Alignment.Center
             ) {
-                KIcon(IconKind.PLUS, accent, Modifier.size(12.dp))
+                if (isSupported) {
+                    KIcon(IconKind.PLUS, accent, Modifier.size(12.dp))
+                } else {
+                    Text("SOON", color = KColors.Muted, fontSize = 7.sp, fontWeight = FontWeight.Bold)
+                }
             }
         }
         Column(
@@ -186,7 +254,7 @@ private fun EffectChoice(name: String, accent: Color, modifier: Modifier = Modif
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            Text(name, color = KColors.Text, fontSize = 8.sp, lineHeight = 9.sp,
+            Text(name, color = if (isSupported) KColors.Text else KColors.Muted, fontSize = 8.sp, lineHeight = 9.sp,
                 fontWeight = FontWeight.SemiBold, maxLines = 2,
                 overflow = TextOverflow.Ellipsis, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
         }
