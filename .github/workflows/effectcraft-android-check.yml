@@ -53,9 +53,8 @@ jobs:
         run: cargo install cargo-ndk --locked
 
       - name: Compile EffectCraft JNI for Android arm64
-        run: |
-          cargo ndk -t arm64-v8a build --release \
-            --manifest-path native/effectcraft-android/Cargo.toml
+        working-directory: native/effectcraft-android
+        run: cargo ndk -t arm64-v8a build --release
 
       - name: Verify native library output
         run: |
