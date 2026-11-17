@@ -13,3 +13,10 @@ crate-type = ["cdylib"]
 effectcraft-engine = { path = "../../third_party/effectcraft/crates/engine" }
 jni = "0.21.1"
 serde_json = "1"
+
+# EffectCraft's pinned craft-pdf revision requires the matching Hayro fork APIs.
+# Keep these patches at the top-level JNI crate because Cargo applies patches
+# from the consuming workspace root.
+[patch.crates-io]
+hayro-syntax = { git = "https://github.com/storytold/craft-libs", rev = "808730f49b9637b7909fe2ae56f9d63fdb100cae", version = "=0.7.2" }
+hayro-jbig2 = { git = "https://github.com/storytold/craft-libs", rev = "808730f49b9637b7909fe2ae56f9d63fdb100cae", version = "=0.3.0" }
