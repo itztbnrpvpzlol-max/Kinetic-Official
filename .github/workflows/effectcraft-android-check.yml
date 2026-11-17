@@ -1,0 +1,61 @@
+name: EffectCraft Android native check
+
+on:
+  push:
+    branches:
+      - feat/effectcraft-android-integration
+    paths:
+      - "native/effectcraft-android/**"
+      - "third_party/effectcraft"
+      - ".gitmodules"
+      - ".github/workflows/effectcraft-android-check.yml"
+  pull_request:
+    branches:
+      - feat/effectcraft-android-integration
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: effectcraft-android-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  android-arm64:
+    name: Compile EffectCraft JNI (arm64-v8a)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout Kinetic and pinned EffectCraft source
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Android SDK and NDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install NDK 26.1
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --install "ndk;26.1.10909125"
+          echo "ANDROID_NDK_HOME=${ANDROID_HOME}/ndk/26.1.10909125" >> "${GITHUB_ENV}"
+
+      - name: Install Rust 1.95 and Android target
+        uses: dtolnay/rust-toolchain@1.95.0
+        with:
+          targets: aarch64-linux-android
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --locked
+
+      - name: Compile EffectCraft JNI for Android arm64
+        run: |
+          cargo ndk -t arm64-v8a build --release \
+            --manifest-path native/effectcraft-android/Cargo.toml
+
+      - name: Verify native library output
+        run: |
+          test -s native/effectcraft-android/target/aarch64-linux-android/release/libkinetic_effectcraft.so || \
+            test -s native/effectcraft-android/../../target/aarch64-linux-android/release/libkinetic_effectcraft.so

@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 static SESSION: OnceLock<Mutex<Session>> = OnceLock::new();
 
 fn session() -> &'static Mutex<Session> {
-    SESSION.get_or_init(|| Mutex::new(Session::new()))
+    SESSION.get_or_init(|| Mutex::new(Session::default()))
 }
 
 fn response_string(env: &mut JNIEnv<'_>, value: Value) -> jstring {
