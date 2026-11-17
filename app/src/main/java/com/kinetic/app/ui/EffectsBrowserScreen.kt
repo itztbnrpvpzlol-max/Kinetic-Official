@@ -180,7 +180,6 @@ fun EffectsBrowserScreen(onClose: () -> Unit, onAddEffect: (String) -> Unit) {
     }
 }
 
-@Composable
 private val KINETIC_PREVIEW_EFFECTS = setOf(
     "Motion Tile", "Wave Warp", "Warp Shake", "RGB Split",
     "Oscillate", "Morphosis", "Deep Glow", "Exposure And Gamma"
@@ -202,6 +201,7 @@ private fun categoryStyle(category: String): Triple<IconKind, Color, Color> {
     }
 }
 
+@Composable
 private fun SectionHeading(title: String) {
     Text(title, color = KColors.Text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
 }
