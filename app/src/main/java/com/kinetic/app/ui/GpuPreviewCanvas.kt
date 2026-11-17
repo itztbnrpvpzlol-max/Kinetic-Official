@@ -107,48 +107,6 @@ fun PreviewCanvas(
 ) {
     val context = LocalContext.current
 
-    // Importing or splitting a clip prepares its segment-start frame once.
-    // Samples persist in filesDir and are shared by source URI/time across split clips.
-    LaunchedEffect(
-        editor.layers.filter { it.type == LayerType.VIDEO && it.uri != null }
-            .map { Triple(it.id, it.uri, it.srcOffset) },
-        editor.playing
-    ) {
-        if (!editor.playing) {
-            val clipsToWarm = editor.layers
-                .filter { it.visible && it.type == LayerType.VIDEO && it.uri != null }
-                .sortedBy { it.start }
-            for (clip in clipsToWarm) {
-                val source = clip.uri ?: continue
-                val sourceUri = Uri.parse(source)
-                val sampleFps = if (
-                    MediaWorkers.isConstrainedDevice && clip.effectStack.any { it.enabled }
-                ) 12 else MediaLoader.CPU_PREVIEW_SAMPLE_FPS
-                // Playback paths use 320px frames. A 448px paused/direct preview
-                // sample is also retained on larger devices, without extra RAM use.
-                val edgeVariants = if (MediaWorkers.isConstrainedDevice || clip.effectStack.any { it.enabled }) {
-                    listOf(320)
-                } else {
-                    listOf(320, 448)
-                }
-                for (maxEdge in edgeVariants) {
-                    if (MediaLoader.hasPersistentVideoFrame(
-                            context, sourceUri, clip.srcOffset, sampleFps, maxEdge
-                        )
-                    ) continue
-                    val frame = MediaLoader.bitmapFor(
-                        context, sourceUri, LayerType.VIDEO, clip.srcOffset,
-                        sampleFps = sampleFps,
-                        maxEdge = maxEdge,
-                        persistToDisk = true,
-                        lowPriorityRequest = true
-                    )
-                    if (frame != null && !frame.isRecycled) frame.recycle()
-                }
-            }
-        }
-    }
-
     LaunchedEffect(editor.layers.map { it.id }, editor.playing) {
         onVideoReady(true)
     }
@@ -363,30 +321,6 @@ private fun GpuCompositionPreviewCanvas(
             layer.type == LayerType.IMAGE ||
                 (layer.type == LayerType.VIDEO && layer.id !in textureVideoIds)
         )
-        if (uri != null && layer.type == LayerType.VIDEO &&
-            layer.id in textureVideoIds && layer.visible && layer.activeAt(editor.time)
-        ) {
-            key("${layer.id}#warm-start") {
-                LaunchedEffect(uri, layer.srcOffset, layer.visible, compositionFps) {
-                    while (layer.visible && layer.activeAt(latestTimelineTime.value) &&
-                        frames[layer.id] == null
-                    ) {
-                        val warmFrame = MediaLoader.bitmapFor(
-                            context, Uri.parse(uri), LayerType.VIDEO, layer.srcOffset,
-                            sampleFps = MediaLoader.CPU_PREVIEW_SAMPLE_FPS,
-                            maxEdge = if (MediaWorkers.isConstrainedDevice) 320 else 448,
-                            persistToDisk = true
-                        )
-                        if (warmFrame != null) {
-                            frames[layer.id] = warmFrame
-                            trimPreviewFrameCache(layer.id)
-                            break
-                        }
-                        kotlinx.coroutines.delay(80L)
-                    }
-                }
-            }
-        }
         if (uri != null && needsBitmap) {
             key(layer.id) {
                 DisposableEffect(layer.id) {
@@ -1243,11 +1177,7 @@ private class CompositionGlRenderer(
     private fun drawVideoLayer(layer: GpuLayer, scale: Float, ox: Float, oy: Float) {
         val output = videoOutputs[layer.id]
         if (layer.opacity <= 0f) return
-        if (output == null || !output.hasFrame || externalProgram == 0) {
-            // Show the cached segment-start frame while FFmpeg opens the clip.
-            if (layer.bitmap != null) drawBitmapLayer(layer, layer.bitmap, scale, ox, oy)
-            return
-        }
+        if (output == null || !output.hasFrame || externalProgram == 0) return
         val right = if (layer.mask) layer.width * 0.8f else layer.width
         val bottom = if (layer.mask) layer.height * 0.8f else layer.height
         val uvMax = if (layer.mask) 0.8f else 1f
