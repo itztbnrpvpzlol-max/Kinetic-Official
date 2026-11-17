@@ -148,7 +148,7 @@ jobs:
           gradle-version: '8.11.1'
 
       - name: Build Kinetic Android APK with EffectCraft packaged
-        run: gradle :app:assembleDebug --no-daemon
+        run: gradle :app:assembleDebug --no-daemon -PKINETIC_BUILD_EFFECTCRAFT=false
 
       - name: Verify EffectCraft is inside the APK
         run: |
