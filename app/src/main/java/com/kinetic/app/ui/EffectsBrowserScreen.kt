@@ -141,7 +141,7 @@ fun EffectsBrowserScreen(onClose: () -> Unit, onAddEffect: (String) -> Unit) {
                 }
             }
             SectionHeading("Categories")
-            Text(catalogMessage, color = KColors.Muted, fontSize = 9.sp,
+            Text(catalogMessage, color = KColors.Muted, fontSize = 11.sp,
                 modifier = Modifier.padding(top = 5.dp, bottom = 9.dp))
             Spacer(Modifier.height(4.dp))
             displayedCategories.chunked(2).forEach { row ->
@@ -162,7 +162,7 @@ fun EffectsBrowserScreen(onClose: () -> Unit, onAddEffect: (String) -> Unit) {
                 category.effects.chunked(4).forEach { row ->
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         row.forEach { effect ->
-                            val canAdd = effect in KINETIC_PREVIEW_EFFECTS
+                            val canAdd = false
                             EffectChoice(effect, category.accent, Modifier.weight(1f), isSupported = canAdd) {
                                 if (canAdd) onAddEffect(effect)
                             }
@@ -176,11 +176,6 @@ fun EffectsBrowserScreen(onClose: () -> Unit, onAddEffect: (String) -> Unit) {
         Spacer(Modifier.height(18.dp))
     }
 }
-
-private val KINETIC_PREVIEW_EFFECTS = setOf(
-    "Motion Tile", "Wave Warp", "Warp Shake", "RGB Split",
-    "Oscillate", "Morphosis", "Deep Glow", "Exposure And Gamma"
-)
 
 private fun categoryStyle(category: String): Triple<IconKind, Color, Color> {
     val key = category.lowercase()
