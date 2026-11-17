@@ -1,0 +1,4 @@
+[submodule "third_party/effectcraft"]
+	path = third_party/effectcraft
+	url = https://github.com/storytold/effectcraft.git
+	branch = main
