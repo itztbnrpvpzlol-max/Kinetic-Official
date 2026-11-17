@@ -53,12 +53,12 @@ private data class EffectCategory(
 )
 
 private val effectCategories = listOf(
-    EffectCategory("COLOR & LIGHT", IconKind.ADJ, Color(0xFFFF82B2), Color(0xFF281C2A), listOf("Exposure And Gamma", "Deep Glow")),
+    EffectCategory("COLOR & LIGHT", IconKind.ADJ, Color(0xFFFF82B2), Color(0xFF281C2A), emptyList()),
     EffectCategory("STYLIZE", IconKind.EFFECTS, Color(0xFFC0A2FF), Color(0xFF241E35)),
-    EffectCategory("DRAWING & EDGE", IconKind.GRAPH, Color(0xFFFFC078), Color(0xFF30251D), listOf("Morphosis")),
-    EffectCategory("MOTION", IconKind.MOTION, Color(0xFF86B7FF), Color(0xFF1D2940), listOf("Oscillate")),
+    EffectCategory("DRAWING & EDGE", IconKind.GRAPH, Color(0xFFFFC078), Color(0xFF30251D), emptyList()),
+    EffectCategory("MOTION", IconKind.MOTION, Color(0xFF86B7FF), Color(0xFF1D2940), emptyList()),
     EffectCategory("DISTORTION & WARP", IconKind.BLEND, Color(0xFF70DAD4), Color(0xFF1A2D32),
-        listOf("Motion Tile", "Wave Warp", "Warp Shake", "RGB Split")),
+        emptyList()),
     EffectCategory("PROCEDURAL", IconKind.GRID, Color(0xFFB5A4FF), Color(0xFF252238)),
     EffectCategory("BLUR", IconKind.FILTER, Color(0xFF8BC8FF), Color(0xFF1D2B39)),
     EffectCategory("3D", IconKind.SHAPES, Color(0xFFFF987C), Color(0xFF332326)),
@@ -72,7 +72,7 @@ private val effectCategories = listOf(
 fun EffectsBrowserScreen(onClose: () -> Unit, onAddEffect: (String) -> Unit) {
     val shelfPager = rememberPagerState(pageCount = { 2 })
     var selectedCategory by remember { mutableStateOf<EffectCategory?>(null) }
-    var registryCategories by remember { mutableStateOf<List<EffectCategory>>(emptyList()) }
+    var registryCategories by remember { mutableStateOf(effectCategories.map { it.copy(effects = emptyList()) }) }
     var catalogMessage by remember { mutableStateOf("Connecting to EffectCraft effect registry…") }
     var catalogCount by remember { mutableStateOf(0) }
 
@@ -84,10 +84,10 @@ fun EffectsBrowserScreen(onClose: () -> Unit, onAddEffect: (String) -> Unit) {
                     val discovered = entries
                         .filter { it.category.equals(shelf.title, ignoreCase = true) }
                         .map { it.name }
-                    shelf.copy(effects = (shelf.effects + discovered).distinct())
+                    shelf.copy(effects = discovered.distinct())
                 }
                 catalogMessage = catalogCount.toString() +
-                    " EffectCraft effects discovered. Eight legacy effects are currently addable in Kinetic preview."
+                    " EffectCraft effects discovered. "
             }
             .onFailure { error ->
                 catalogMessage = "EffectCraft catalog unavailable: " +
@@ -96,7 +96,7 @@ fun EffectsBrowserScreen(onClose: () -> Unit, onAddEffect: (String) -> Unit) {
     }
 
     // Keep all eleven Kinetic shelves visible; registry effects are merged into them.
-    val displayedCategories = if (catalogCount > 0) registryCategories else effectCategories
+    val displayedCategories = registryCategories
 
     Column(
         Modifier.fillMaxSize().background(KColors.Bg).statusBarsPadding().navigationBarsPadding()
