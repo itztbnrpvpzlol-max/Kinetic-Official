@@ -24,7 +24,7 @@ data class EffectCraftEffectInfo(
 object EffectCraftCatalog {
     suspend fun load(): Result<List<EffectCraftEffectInfo>> = withContext(Dispatchers.IO) {
         runCatching {
-            check(EffectCraftBridge.initialize()) { "EffectCraft native engine is unavailable" }
+            EffectCraftBridge.initializeWithError()?.let { error -> throw IllegalStateException(error) }
             val response = JSONObject(EffectCraftBridge.execute("effect.list"))
             check(response.optBoolean("ok")) {
                 response.optString("error").ifBlank { "EffectCraft could not list its effects" }
