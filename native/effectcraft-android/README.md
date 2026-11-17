@@ -24,15 +24,15 @@ by this initial bridge.
 - The repository cloned with submodules:
   `git clone --recurse-submodules ...`
 
-From this directory, build the supported ABI libraries into the Android app's JNI
-library directory:
+Build the JNI library for the app's configured Android ABIs by passing
+`-PKINETIC_BUILD_EFFECTCRAFT=true` to Gradle:
 
 ```sh
-cargo ndk -t arm64-v8a -t armeabi-v7a -t x86_64 \
-  -o ../../app/src/main/jniLibs build --release
+./gradlew :app:assembleDebug -PKINETIC_BUILD_EFFECTCRAFT=true
 ```
 
-The Gradle build is not wired to invoke this command automatically yet. First validate
-the Rust dependency graph and ABI builds independently; then add a reproducible Gradle
-task/CI step. Do not remove the existing CMake/GLES engine while this bridge is being
-validated.
+This opt-in task runs `cargo ndk` and packages the Rust library under
+`app/src/main/jniLibs`. Normal Kinetic builds do not invoke Cargo yet and continue
+using the existing CMake/GLES renderer. The first Android build must validate the
+upstream Rust dependency graph and every configured ABI before this flag is used in
+regular CI or release builds.

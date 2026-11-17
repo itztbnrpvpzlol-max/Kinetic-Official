@@ -26,12 +26,8 @@ object EffectCraftBridge {
         }
         return runCatching {
             EffectCraftNative.nativeExecute(commandId, paramsJson)
-        }.getOrElse { error ->
-            val safeMessage = error.message
-                ?.replace("\\", "\\\\")
-                ?.replace("\"", "\\\"")
-                ?: "Native bridge call failed"
-            """{"protocolVersion":1,"ok":false,"error":"$safeMessage"}"""
+        }.getOrElse {
+            """{"protocolVersion":1,"ok":false,"error":"Native bridge call failed"}"""
         }
     }
 }

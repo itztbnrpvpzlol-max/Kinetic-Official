@@ -36,6 +36,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kinetic.app.data.AppSettings
 import com.kinetic.app.data.MediaLoader
+import com.kinetic.app.engine.EffectCraftBridge
 import com.kinetic.app.plugins.EffectPluginManager
 import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.launch
@@ -48,6 +49,7 @@ fun SettingsScreen(settings: AppSettings, pluginManager: EffectPluginManager, on
     var cacheCleared by remember { mutableStateOf(false) }
     var pluginRevision by remember { mutableIntStateOf(0) }
     val installedPacks = remember(pluginRevision) { pluginManager.installedPacks() }
+    val effectCraftAvailable = EffectCraftBridge.available
     Column(Modifier.fillMaxSize().background(KColors.Bg).statusBarsPadding().navigationBarsPadding()) {
         Row(Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) { KIcon(IconKind.BACK, KColors.Text) }
@@ -103,6 +105,25 @@ fun SettingsScreen(settings: AppSettings, pluginManager: EffectPluginManager, on
                         }.padding(8.dp))
                 }
             }
+
+            Section("Engine integration")
+            Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("EffectCraft native bridge", color = KColors.Text, fontSize = 15.sp)
+                    Text(
+                        if (effectCraftAvailable) "Native library loaded" else "Not packaged in this build",
+                        color = KColors.Dim,
+                        fontSize = 12.sp
+                    )
+                }
+                Text(
+                    if (effectCraftAvailable) "READY" else "IN PROGRESS",
+                    color = KColors.Accent,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            Text("Kinetic's existing renderer remains active while the new engine is validated.", color = KColors.Dim, fontSize = 12.sp)
 
             Spacer(Modifier.height(24.dp))
             Text("Kinetic 0.2", color = KColors.Dim, fontSize = 12.sp)

@@ -1,4 +1,5 @@
 import java.net.URL
+import org.gradle.api.tasks.Exec
 
 plugins {
     id("com.android.application") version "8.9.1"
@@ -87,6 +88,32 @@ tasks.named("preBuild").configure {
     dependsOn(downloadManropeAssets)
 }
 
+// Rust is opt-in until the EffectCraft dependency graph has passed Android ABI validation.
+// Normal Kinetic builds continue using the existing CMake/GLES renderer.
+val buildEffectCraftAndroid by tasks.registering(Exec::class) {
+    group = "build"
+    description = "Build the EffectCraft Rust JNI library for Kinetic's Android ABIs."
+    workingDir(rootProject.file("native/effectcraft-android"))
+    commandLine(
+        "cargo", "ndk",
+        "-t", "arm64-v8a",
+        "-t", "armeabi-v7a",
+        "-t", "x86_64",
+        "-o", rootProject.file("app/src/main/jniLibs").absolutePath,
+        "build", "--release"
+    )
+}
+
+val includeEffectCraftNative = providers.gradleProperty("KINETIC_BUILD_EFFECTCRAFT")
+    .orElse("false")
+    .map { it.toBoolean() }
+
+if (includeEffectCraftNative.get()) {
+    tasks.named("preBuild").configure {
+        dependsOn(buildEffectCraftAndroid)
+    }
+}
+
 dependencies {
     val bom = platform("androidx.compose:compose-bom:2024.09.00")
     implementation(bom)
@@ -103,5 +130,4 @@ dependencies {
     implementation("androidx.media3:media3-ui:1.5.1")
     implementation("androidx.media3:media3-transformer:1.5.1")
     implementation("androidx.media3:media3-effect:1.5.1")
-
 }
