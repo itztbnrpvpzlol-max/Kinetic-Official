@@ -12,8 +12,17 @@ object EffectCraftBridge {
     val available: Boolean
         get() = EffectCraftNative.available
 
-    fun initialize(): Boolean {
-        return EffectCraftNative.available && EffectCraftNative.nativeInitialize()
+    fun initialize(): Boolean = initializeWithError() == null
+
+    fun initializeWithError(): String? {
+        if (!EffectCraftNative.available) {
+            return "EffectCraft library failed to load: " + (EffectCraftNative.loadError ?: "unknown linker error")
+        }
+        return runCatching {
+            if (EffectCraftNative.nativeInitialize()) null else "EffectCraft nativeInitialize returned false"
+        }.getOrElse { error ->
+            "EffectCraft initialization threw " + error.javaClass.simpleName + ": " + (error.message ?: "no detail")
+        }
     }
 
     /**
