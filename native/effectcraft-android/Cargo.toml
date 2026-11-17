@@ -1,0 +1,15 @@
+[package]
+name = "kinetic-effectcraft-android"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+publish = false
+
+[lib]
+name = "kinetic_effectcraft"
+crate-type = ["cdylib"]
+
+[dependencies]
+effectcraft-engine = { path = "../../third_party/effectcraft/crates/engine" }
+jni = "0.21.1"
+serde_json = "1"
