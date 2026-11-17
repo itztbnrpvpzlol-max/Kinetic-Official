@@ -1,14 +1,12 @@
 package com.kinetic.app.ui
 
 import android.content.Context
-import android.graphics.Bitmap
 import android.graphics.SurfaceTexture
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.view.Surface
 import android.view.TextureView
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
@@ -17,13 +15,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.setValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.Modifier
@@ -32,9 +25,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.kinetic.app.engine.FfmpegVideoPlayer
 import com.kinetic.app.data.PreviewDiagnostics
-import com.kinetic.app.data.MediaLoader
-import com.kinetic.app.data.MediaWorkers
-import com.kinetic.app.model.LayerType
 import com.kinetic.app.engine.NativePlaybackEngine
 import com.kinetic.app.model.COMP_H
 import com.kinetic.app.model.COMP_W
@@ -88,7 +78,7 @@ internal fun canUseDirectSurfaceVideo(layer: Layer): Boolean {
 private class DirectVideoTextureView(
     context: Context,
     private val player: FfmpegVideoPlayer,
-    private val onFirstFrame: () -> Unit
+    
 ) : TextureView(context), TextureView.SurfaceTextureListener {
     private val mainHandler = Handler(Looper.getMainLooper())
     private var outputSurface: Surface? = null
@@ -109,7 +99,6 @@ private class DirectVideoTextureView(
 
     override fun onSurfaceTextureUpdated(surface: SurfaceTexture) {
         player.markFrameAvailable()
-        onFirstFrame()
         PreviewDiagnostics.recordSurfaceVideoFrame()
     }
 
@@ -147,22 +136,7 @@ internal fun DirectSurfaceVideoPreview(
     val context = LocalContext.current
     val uri = Uri.parse(checkNotNull(layer.uri))
     val player = remember(uri) { FfmpegVideoPlayer(context, uri) }
-    var hasSurfaceFrame by remember(player) { mutableStateOf(player.hasReceivedFrame()) }
-    var fallbackFrame by remember(player) { mutableStateOf<Bitmap?>(null) }
-    val textureView = remember(context, player) {
-        DirectVideoTextureView(context, player) { hasSurfaceFrame = true }
-    }
-    LaunchedEffect(uri, layer.srcOffset, player) {
-        fallbackFrame = MediaLoader.bitmapFor(
-            context, uri, LayerType.VIDEO, layer.srcOffset,
-            sampleFps = MediaLoader.CPU_PREVIEW_SAMPLE_FPS,
-            maxEdge = if (MediaWorkers.isConstrainedDevice) 320 else 448,
-            persistToDisk = true
-        )
-    }
-    DisposableEffect(fallbackFrame) {
-        onDispose { fallbackFrame?.let { if (!it.isRecycled) it.recycle() } }
-    }
+    val textureView = remember(context, player) { DirectVideoTextureView(context, player) }
     val sourcePositionMs = (
         (layer.sourceElapsedAt(editor.time) + layer.srcOffset).coerceAtLeast(0f) * 1000f
     ).toLong()
@@ -172,14 +146,6 @@ internal fun DirectSurfaceVideoPreview(
         contentAlignment = Alignment.Center
     ) {
         val fitScale = minOf(maxWidth.value / COMP_W, maxHeight.value / COMP_H)
-        if (!hasSurfaceFrame && fallbackFrame != null && !fallbackFrame!!.isRecycled) {
-            Image(
-                bitmap = fallbackFrame!!.asImageBitmap(),
-                contentDescription = null,
-                contentScale = ContentScale.FillBounds,
-                modifier = androidx.compose.ui.Modifier.fillMaxSize()
-            )
-        }
         AndroidView(
             factory = { textureView },
             modifier = Modifier.size(
