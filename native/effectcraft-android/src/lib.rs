@@ -15,7 +15,7 @@ fn session() -> &'static Mutex<Session> {
 
 fn response_string(env: &mut JNIEnv<'_>, value: Value) -> jstring {
     let encoded = serde_json::to_string(&value).unwrap_or_else(|_| {
-        String::from(r#"{"protocolVersion":1,"ok":false,"error":"Could not encode engine response"}"#)
+        String::from(r#"{\"protocolVersion\":1,\"ok\":false,\"error\":\"Could not encode engine response\"}"#)
     });
     match env.new_string(encoded) {
         Ok(value) => value.into_raw(),
@@ -60,7 +60,7 @@ pub extern "system" fn Java_com_kinetic_app_engine_EffectCraftNative_nativeExecu
             Ok(value) => value.to_string_lossy().into_owned(),
             Err(_) => return error_response("Could not read command parameters from Kotlin"),
         };
-        let params: Value = match serde_json::from_str(&params_text) {
+        let params: Value = match serde_json::from_str::<Value>(&params_text) {
             Ok(value) if value.is_object() => value,
             Ok(_) => return error_response("Command parameters must be a JSON object"),
             Err(error) => return error_response(format!("Invalid command JSON: {error}")),
