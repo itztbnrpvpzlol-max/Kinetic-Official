@@ -96,3 +96,63 @@ pub extern "system" fn Java_com_kinetic_app_engine_EffectCraftNative_nativeExecu
         Err(_) => response_string(&mut env, error_response("EffectCraft encountered an internal panic")),
     }
 }
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_kinetic_app_engine_EffectCraftNative_nativeExecuteBatch(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    commands_json: JString<'_>,
+) -> jstring {
+    let outcome = catch_unwind(AssertUnwindSafe(|| {
+        let commands_text = match env.get_string(&commands_json) {
+            Ok(value) => value.to_string_lossy().into_owned(),
+            Err(_) => return error_response("Could not read command batch from Kotlin"),
+        };
+        let commands: Vec<Value> = match serde_json::from_str(&commands_text) {
+            Ok(value) => value,
+            Err(error) => return error_response(format!("Invalid command batch JSON: {error}")),
+        };
+        let mut engine = match session().lock() {
+            Ok(engine) => engine,
+            Err(_) => return error_response("EffectCraft session lock is unavailable"),
+        };
+        let mut results = Vec::with_capacity(commands.len());
+        let mut events = Vec::new();
+        let mut ok = true;
+        for (index, entry) in commands.iter().enumerate() {
+            let Some(command_id) = entry.get("command").and_then(Value::as_str) else {
+                results.push(json!({"ok": false, "error": format!("Batch entry {index} is missing command")}));
+                ok = false;
+                break;
+            };
+            let params = entry.get("params").cloned().unwrap_or_else(|| json!({}));
+            if !params.is_object() {
+                results.push(json!({"command": command_id, "ok": false, "error": "Command params must be an object"}));
+                ok = false;
+                break;
+            }
+            match engine.execute_checked(command_id, params) {
+                Ok(value) => results.push(json!({"command": command_id, "ok": true, "result": value})),
+                Err(error) => {
+                    results.push(json!({"command": command_id, "ok": false, "error": error.to_string()}));
+                    ok = false;
+                }
+            }
+            events.extend(engine.drain_events());
+            if !ok {
+                break;
+            }
+        }
+        json!({
+            "protocolVersion": 1,
+            "ok": ok,
+            "results": results,
+            "revision": engine.revision,
+            "events": events
+        })
+    }));
+    match outcome {
+        Ok(value) => response_string(&mut env, value),
+        Err(_) => response_string(&mut env, error_response("EffectCraft encountered an internal panic during a command batch")),
+    }
+}
