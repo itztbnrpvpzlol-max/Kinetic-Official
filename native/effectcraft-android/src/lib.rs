@@ -409,7 +409,14 @@ pub extern "system" fn Java_com_kinetic_app_engine_EffectCraftNative_nativeRende
     }));
     match result {
         Ok(Ok(bytes)) => env.byte_array_from_slice(&bytes).map(|array| array.into_raw()).unwrap_or(std::ptr::null_mut()),
-        _ => std::ptr::null_mut(),
+        Ok(Err(error)) => {
+            let _ = env.throw_new("java/lang/IllegalStateException", error);
+            std::ptr::null_mut()
+        }
+        Err(_) => {
+            let _ = env.throw_new("java/lang/IllegalStateException", "EffectCraft renderer panicked");
+            std::ptr::null_mut()
+        }
     }
 }
 
