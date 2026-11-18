@@ -48,7 +48,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.kinetic.app.ai.AiEditorEngine
+import com.kinetic.app.ai.AiEditorEngine\nimport com.kinetic.app.ai.AiNeuralModels
 import com.kinetic.app.data.AppSettings
 import com.kinetic.app.model.EditorState
 import kotlinx.coroutines.Dispatchers
@@ -237,7 +237,7 @@ fun AiEditorScreen(settings: AppSettings, onBack: () -> Unit, onOpenEditor: (Edi
                     Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
                         Text("ON-DEVICE AI", color = Color(0xFFB99AFF), fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         Text("Private by design", color = KColors.Text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                        Text("Reference-shot clusters, footage features and soundtrack accents are processed locally. Kinetic builds an editable timeline; your media is not sent to a cloud service.", color = KColors.Muted, fontSize = 12.sp)
+                        Text("Anime reference embeddings and RAFT optical flow run on this device when their models are installed. First use downloads model files; your footage and reference images stay local.", color = KColors.Muted, fontSize = 12.sp)
                     }
                 }
             }
@@ -255,6 +255,10 @@ fun AiEditorScreen(settings: AppSettings, onBack: () -> Unit, onOpenEditor: (Edi
                     }
                     scope.launch {
                         val result = runCatching {
+                            val modelStatus = withContext(Dispatchers.IO) {
+                                AiNeuralModels.prepare(context)
+                            }
+                            generationStatus = modelStatus.message
                             withContext(Dispatchers.IO) {
                                 AiEditorEngine.generate(
                                     context,
@@ -292,7 +296,7 @@ fun AiEditorScreen(settings: AppSettings, onBack: () -> Unit, onOpenEditor: (Edi
                 Text(if (generating) "Analysing & building…" else "Generate my edit", fontWeight = FontWeight.SemiBold)
             }
             Text(
-                generationStatus.ifBlank { "Local scene analysis, music-beat detection, style profiling and editable timeline generation." },
+                generationStatus.ifBlank { "Local scene analysis, anime reference matching, optical-flow inference, music-beat detection and editable timeline generation." },
                 color = KColors.Muted, fontSize = 10.sp,
                 modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 6.dp)
             )
