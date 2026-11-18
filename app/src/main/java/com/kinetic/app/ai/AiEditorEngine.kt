@@ -88,17 +88,18 @@ object AiEditorEngine {
 
     suspend fun generate(context: Context, request: Request, fps: Int, resolution: Int): GeneratedProject {
         require(request.footage.isNotEmpty()) { "Add at least one video before generating." }
-        val videos = request.footage.map { analyzeVideo(context, it) }
+        val effectiveRequest = applyPromptIntent(request)
+        val videos = effectiveRequest.footage.map { analyzeVideo(context, it) }
         require(videos.any { it.scenes.isNotEmpty() }) { "Kinetic couldn't decode usable frames from the selected videos." }
 
-        val audioUri = request.audio.firstOrNull()
+        val audioUri = effectiveRequest.audio.firstOrNull()
         val audio = audioUri?.let { analyzeAudio(context, it) }
         val audioDuration = audioUri?.let { probeAudioDuration(context, it) } ?: audio?.duration
-        val referenceVideos = request.references.filter { isVideo(context, it) }
+        val referenceVideos = effectiveRequest.references.filter { isVideo(context, it) }
             .take(6).mapNotNull { runCatching { analyzeVideo(context, it) }.getOrNull() }
         val imageFeatures = request.references.filterNot { isVideo(context, it) }
             .take(12).mapNotNull { analyzeImageFeatures(context, it) }
-        val profile = buildStyleProfile(context, referenceVideos, imageFeatures, request.styleNotes)
+        val profile = buildStyleProfile(context, referenceVideos, imageFeatures, effectiveRequest.styleNotes)
         persistStyleProfile(context, profile)
         val styleTrainingSamples = referenceVideos.flatMap { it.scenes }.map { scene ->
             floatArrayOf(kotlin.math.ln(scene.duration.coerceAtLeast(0.1f)), scene.visualEnergy, scene.cutStrength, scene.motionEnergy, scene.stylizedVisualScore)
@@ -107,9 +108,9 @@ object AiEditorEngine {
         }
         val styleModel = AiStyleModel.trainOrLoad(context, styleTrainingSamples)
 
-        val totalDuration = request.durationSeconds.coerceIn(10f, 120f)
-        val plan = planEdit(videos.flatMap { it.scenes }, audio?.beats.orEmpty(), profile, request, totalDuration, styleModel)
-        val colorGrade = if ("Color grading" in request.priorities) {
+        val totalDuration = effectiveRequest.durationSeconds.coerceIn(10f, 120f)
+        val plan = planEdit(videos.flatMap { it.scenes }, audio?.beats.orEmpty(), profile, effectiveRequest, totalDuration, styleModel)
+        val colorGrade = if ("Color grading" in effectiveRequest.priorities) {
             runCatching {
                 EffectCraftCatalog.load().getOrNull()?.firstOrNull { effect ->
                     effect.category == "COLOR & LIGHT" && effect.gpu &&
@@ -122,7 +123,7 @@ object AiEditorEngine {
                 }
             }.getOrNull()
         } else null
-        val layers = executePlan(plan, audio, audioDuration, request, fps.coerceIn(12, 60), videos, resolution, colorGrade)
+        val layers = executePlan(plan, audio, audioDuration, request, fps.coerceIn(12, 60), videos, resolution, colorGrade, effectiveRequest.prompt)
         val report = buildString {
             append("Analysed ").append(videos.size).append(" source video(s) and ")
             append(videos.sumOf { it.scenes.size }).append(" candidate scenes")
@@ -130,10 +131,10 @@ object AiEditorEngine {
             if (referenceVideos.isNotEmpty()) append("; extracted pacing from ").append(referenceVideos.size).append(" reference video(s)")
             if (styleModel.trainingSamples > 0) append("; trained the on-device style clustering model from ").append(styleModel.trainingSamples).append(" reference shots")
             append(". Built ").append(plan.size).append(" selected shots with editable motion and title layers.")
-            append(" Scene selection is heuristic, not anime-character or story recognition.")
+            append(" Prompt intent was applied to pacing and effect priorities. Scene selection is not semantic anime-character or story recognition.")
         }
         return GeneratedProject(
-            name = "AI Edit • ${request.style}",
+            name = "AI Edit • ${effectiveRequest.style}",
             duration = max(totalDuration, layers.maxOfOrNull { it.end } ?: totalDuration),
             layers = layers,
             sceneCount = plan.size,
@@ -141,6 +142,16 @@ object AiEditorEngine {
             profile = profile,
             report = report
         )
+    }
+
+    private fun applyPromptIntent(request: Request): Request {
+        val prompt = request.prompt.lowercase()
+        val priorities = request.priorities.toMutableSet()
+        if (listOf("slow motion", "slow-mo", "slowmo", "velocity", "speed ramp").any { it in prompt }) priorities.add("Time remapping")
+        if (listOf("shake", "impact", "camera hit", "punch in").any { it in prompt }) priorities.add("Impact shakes")
+        if (listOf("transition", "smooth", "fade", "dissolve").any { it in prompt }) priorities.add("Transitions")
+        if (listOf("color grade", "color grading", "vibrant", "cinematic", "moody", "dark", "colorful").any { it in prompt }) priorities.add("Color grading")
+        return request.copy(priorities = priorities)
     }
 
     private fun analyzeVideo(context: Context, uri: Uri): VideoAnalysis {
@@ -471,15 +482,26 @@ object AiEditorEngine {
         target: Float,
         styleModel: AiStyleModel
     ): List<Scene> {
-        val targetShot = when (request.style) {
+        val promptText = request.prompt.lowercase()
+        val paceMultiplier = when {
+            listOf("fast", "rapid", "hype", "energetic", "high energy", "quick cuts").any { it in promptText } -> 0.62f
+            listOf("slow", "emotional", "dramatic", "atmospheric", "cinematic").any { it in promptText } -> 1.42f
+            else -> 1f
+        }
+        val targetShot = (when (request.style) {
             "Velocity" -> min(profile.averageShotSeconds, 1.15f)
             "Mograph" -> max(profile.averageShotSeconds, 1.6f)
             else -> profile.averageShotSeconds.coerceIn(1.0f, 2.6f)
+        } * paceMultiplier).coerceIn(0.48f, 4.2f)
+        val motionPreference = when {
+            listOf("action", "fight", "hype", "energetic", "fast", "velocity").any { it in promptText } -> 0.25f
+            listOf("calm", "emotional", "romantic", "peaceful", "slow").any { it in promptText } -> 0.06f
+            else -> 0.13f
         }
         val sorted = scenes.sortedByDescending { scene ->
             val learnedStyleMatch = styleModel.similarity(scene.duration, scene.visualEnergy, scene.cutStrength, scene.motionEnergy, scene.stylizedVisualScore)
             learnedStyleMatch * 0.46f + scene.visualEnergy * 0.16f + scene.cutStrength * 0.12f +
-                scene.motionEnergy * 0.13f + scene.stylizedVisualScore * 0.13f +
+                scene.motionEnergy * motionPreference + scene.stylizedVisualScore * (0.25f - motionPreference) +
                 if ("Impact shakes" in request.priorities) scene.cutStrength * 0.08f else 0f
         }
         val selected = ArrayList<Scene>()
@@ -511,7 +533,8 @@ object AiEditorEngine {
         fps: Int,
         videos: List<VideoAnalysis>,
         resolution: Int,
-        colorGrade: EffectCraftEffectInfo?
+        colorGrade: EffectCraftEffectInfo?,
+        prompt: String
     ): List<Layer> {
         val layers = ArrayList<Layer>()
         val compDuration = request.durationSeconds.coerceIn(10f, 120f)
@@ -533,7 +556,7 @@ object AiEditorEngine {
                     name = effect.name,
                     effectCraftId = effect.id,
                     effectCraftParameters = effect.params.associate { parameter ->
-                        parameter.id to gradedDefault(parameter)
+                        parameter.id to gradedDefault(parameter, prompt)
                     }
                 ))
             }.orEmpty()
@@ -631,13 +654,19 @@ object AiEditorEngine {
         return layers.sortedByDescending { if (it.type == LayerType.TEXT) 2 else if (it.type == LayerType.AUDIO) 0 else 1 }
     }
 
-    private fun gradedDefault(parameter: EffectCraftParameterInfo): String {
+    private fun gradedDefault(parameter: EffectCraftParameterInfo, prompt: String): String {
         val base = parameter.defaultJson.toDoubleOrNull() ?: return parameter.defaultJson
         val id = parameter.id.lowercase()
+        val mood = prompt.lowercase()
         val adjusted = when {
-            "saturation" in id || "vibrance" in id -> if (abs(base) <= 1.5) base + 0.12 else base + 12.0
+            ("saturation" in id || "vibrance" in id) && listOf("vibrant", "colorful", "vivid", "saturated").any { it in mood } ->
+                if (abs(base) <= 1.5) base + 0.22 else base + 22.0
+            ("saturation" in id || "vibrance" in id) -> if (abs(base) <= 1.5) base + 0.12 else base + 12.0
+            "contrast" in id && listOf("dramatic", "dark", "moody", "cinematic").any { it in mood } ->
+                if (abs(base) <= 2.0) base + 0.22 else base + 18.0
             "contrast" in id -> if (abs(base) <= 2.0) base + 0.12 else base + 10.0
-            "exposure" in id -> base + 0.12
+            "exposure" in id && listOf("dark", "moody", "night").any { it in mood } -> base - 0.12
+            "exposure" in id && listOf("bright", "light", "airy").any { it in mood } -> base + 0.12
             else -> base
         }
         return adjusted.coerceIn(
