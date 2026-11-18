@@ -575,3 +575,61 @@ private fun GraphCanvas(
         drawLine(KColors.Muted.copy(alpha = 0.75f), Offset(left, top), Offset(left, bottom), 1.dp.toPx())
     }
 }
+
+@Composable
+fun AnimationWorkspacePanel(editor: EditorState, layer: Layer, modifier: Modifier = Modifier) {
+    var section by remember(layer.id) { mutableStateOf("Layer") }
+    var craftCatalog by remember(layer.id) { mutableStateOf<Map<String, com.kinetic.app.engine.EffectCraftEffectInfo>>(emptyMap()) }
+    LaunchedEffect(layer.id) {
+        com.kinetic.app.engine.EffectCraftCatalog.load().onSuccess { craftCatalog = it.associateBy { item -> item.id } }
+    }
+    val tracks = layer.effectStack.flatMap { effect ->
+        if (effect.effectCraftId != null) {
+            craftCatalog[effect.effectCraftId]?.params.orEmpty()
+                .filter { it.defaultJson.toFloatOrNull() != null && it.options.isEmpty() }
+                .map { Triple(effect, it.id, it.name) }
+        } else {
+            controlsFor(effect).filter { !it.toggle && it.choices.isEmpty() }
+                .map { Triple(effect, it.key, it.label) }
+        }
+    }
+    Column(modifier.fillMaxSize().background(KColors.Surface)) {
+        Row(Modifier.fillMaxWidth().height(36.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            GraphModeButton("Layer", section == "Layer") { section = "Layer" }
+            GraphModeButton("Effect tracks", section == "Effects") { section = "Effects" }
+            Spacer(Modifier.weight(1f))
+            Text("ANIMATION", color = KColors.Muted, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+        }
+        if (section == "Layer") {
+            GraphPanel(editor, layer, Modifier.fillMaxSize())
+        } else if (tracks.isEmpty()) {
+            Box(Modifier.fillMaxSize().padding(16.dp), contentAlignment = Alignment.Center) {
+                Text("No numeric effect parameters are available yet. Add an EffectCraft effect, then select its keyframe diamond in Effects.",
+                    color = KColors.Muted, fontSize = 10.sp, textAlign = TextAlign.Center)
+            }
+        } else {
+            Row(Modifier.fillMaxSize()) {
+                Column(Modifier.width(132.dp).fillMaxHeight().verticalScroll(rememberScrollState()).padding(5.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    tracks.forEach { (effect, key, label) ->
+                        val selected = editor.selectedEffectId == effect.id && editor.selectedEffectParameter == key
+                        Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp))
+                            .background(if (selected) KColors.Accent.copy(alpha = .14f) else KColors.Bg)
+                            .border(1.dp, if (selected) KColors.Accent else KColors.Line, RoundedCornerShape(6.dp))
+                            .clickable { editor.selectEffectParameter(layer.id, effect.id, key) }
+                            .padding(horizontal = 7.dp, vertical = 7.dp)) {
+                            Column {
+                                Text(effect.name, color = if (selected) KColors.Accent else KColors.Text, fontSize = 8.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                                Text(label, color = KColors.Muted, fontSize = 8.sp, maxLines = 2)
+                                Text("${effect.parameterKeys[key].orEmpty().size} keys", color = KColors.Accent, fontSize = 7.sp)
+                            }
+                        }
+                    }
+                }
+                Box(Modifier.weight(1f).fillMaxHeight()) {
+                    EffectGraphPanel(editor, layer, Modifier.fillMaxSize())
+                }
+            }
+        }
+    }
+}
