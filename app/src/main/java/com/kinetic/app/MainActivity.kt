@@ -16,7 +16,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import com.kinetic.app.data.AppSettings
-import com.kinetic.app.ai.AiEditorEngine
 import com.kinetic.app.data.MediaLoader
 import com.kinetic.app.data.ProjectStore
 import com.kinetic.app.model.EditorState
