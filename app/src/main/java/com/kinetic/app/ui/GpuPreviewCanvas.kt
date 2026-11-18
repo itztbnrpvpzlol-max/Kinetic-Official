@@ -378,7 +378,7 @@ private fun GpuCompositionPreviewCanvas(
         val uri = layer.uri ?: continue
         key(layer.id) {
             LaunchedEffect(uri, layer.srcOffset, compositionFps, qualityScale) {
-                if (frames[layer.id] == null) {
+                while (frames[layer.id] == null && layer.visible) {
                     val poster = MediaLoader.bitmapFor(
                         context,
                         Uri.parse(uri),
@@ -388,12 +388,16 @@ private fun GpuCompositionPreviewCanvas(
                         maxEdge = if (MediaWorkers.isConstrainedDevice) 320 else 448,
                         persistToDisk = true
                     )
-                    if (poster != null && frames[layer.id] == null) {
-                        frames[layer.id] = poster
-                        trimPreviewFrameCache(layer.id)
-                    } else if (poster != null && !poster.isRecycled) {
-                        poster.recycle()
+                    if (poster != null) {
+                        if (frames[layer.id] == null) {
+                            frames[layer.id] = poster
+                            trimPreviewFrameCache(layer.id)
+                        } else if (!poster.isRecycled) {
+                            poster.recycle()
+                        }
+                        break
                     }
+                    kotlinx.coroutines.delay(120L)
                 }
             }
         }
