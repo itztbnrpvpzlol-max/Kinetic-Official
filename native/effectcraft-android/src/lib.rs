@@ -379,10 +379,7 @@ pub extern "system" fn Java_com_kinetic_app_engine_EffectCraftNative_nativeRende
         Ok(out)
     }));
     match result {
-        Ok(Ok(bytes)) => {
-            let signed: Vec<i8> = bytes.into_iter().map(|value| value as i8).collect();
-            env.byte_array_from_slice(&signed).map(|array| array.into_raw()).unwrap_or(std::ptr::null_mut())
-        }
+        Ok(Ok(bytes)) => env.byte_array_from_slice(&bytes).map(|array| array.into_raw()).unwrap_or(std::ptr::null_mut())
         _ => std::ptr::null_mut(),
     }
 }
