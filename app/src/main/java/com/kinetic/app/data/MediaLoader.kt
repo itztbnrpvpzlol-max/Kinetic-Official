@@ -55,6 +55,9 @@ object MediaLoader {
 
     /** Called from Android memory callbacks. Keep only a small warm cache under pressure. */
     fun trimMemory(level: Int) {
+        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
+            EffectCraftBridge.trimMediaCache()
+        }
         when {
             level >= android.content.ComponentCallbacks2.TRIM_MEMORY_COMPLETE -> maxCachedRetrievers = 1
             level >= android.content.ComponentCallbacks2.TRIM_MEMORY_BACKGROUND -> maxCachedRetrievers = 1
@@ -78,6 +81,7 @@ object MediaLoader {
     }
 
     fun releaseAll() {
+        EffectCraftBridge.trimMediaCache()
         sequentialVideoDecoder.release()
         val toRelease = synchronized(retrieverRegistryLock) {
             val snapshot = retrievers.entries.map { it.key to it.value }
