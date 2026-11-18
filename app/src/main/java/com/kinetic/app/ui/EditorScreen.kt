@@ -368,7 +368,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                             editor.extractAudio(activeLayer.id)
                         } else Toast.makeText(ctx, "Select a video layer first", Toast.LENGTH_SHORT).show()
                     }
-                    "Transform", "Speed", "Volume", "Masking", "Effects", "Blending", "Blend modes" -> {
+                    "Speed", "Volume", "Masking", "Effects", "Blending", "Blend modes" -> {
                         if (activeLayer != null) {
                             showPropertiesPanel = false
                             showShapePanel = false
@@ -525,7 +525,6 @@ private fun FloatingEditingDock(active: String, hasSelection: Boolean, onSelect:
     // Keep Import inside the capsule, but visually separate it from the tools.
     val tools = if (hasSelection) {
         listOf(
-            "Transform" to IconKind.MOTION,
             "Properties" to IconKind.SLIDERS,
             "Speed" to IconKind.STOPWATCH,
             "Volume" to IconKind.VOLUME,
@@ -700,24 +699,6 @@ private fun ToolPanelControls(tool: String, editor: EditorState, layer: Layer, d
             else Arrangement.spacedBy(5.dp)
     ) {
         when (tool) {
-            "Transform" -> {
-                Column(
-                    Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(1.dp)
-                ) {
-                    Text("TRANSFORM", color = KColors.Muted, fontSize = 9.sp,
-                        fontWeight = FontWeight.Bold, letterSpacing = 1.1.sp)
-                    PropertyLine("Position", editor, layer, listOf(PropId.POS_X, PropId.POS_Y))
-                    if (layer.type != LayerType.AUDIO) {
-                        PropertyLine("Scale", editor, layer,
-                            if (layer.scaleLinked) listOf(PropId.SCALE_X) else listOf(PropId.SCALE_X, PropId.SCALE_Y),
-                            onLongPress = { editor.toggleScaleLink(layer.id) })
-                        PropertyLine("Rotation", editor, layer, listOf(PropId.ROTATION))
-                        PropertyLine("Anchor", editor, layer, listOf(PropId.ANCHOR_X, PropId.ANCHOR_Y))
-                    }
-                    PropertyLine("Opacity", editor, layer, listOf(PropId.OPACITY))
-                }
-            }
             "Speed" -> {
                 PropertyLine("Speed", editor, layer, listOf(PropId.SPEED))
                 Text("Remaps source time for video and linked audio.", color = KColors.Muted, fontSize = 9.sp)
