@@ -113,7 +113,7 @@ fun CpuPreviewCanvas(
                 } else 0f
                 // CPU effects are expensive on low-memory phones. Limit effect-bearing
                 // preview frames to 12 fps instead of queuing 20 fps of native work.
-                val sampleFps = if (MediaWorkers.isConstrainedDevice && layer.effectStack.any { it.enabled }) {
+                val sampleFps = if (MediaWorkers.isConstrainedDevice && layer.effectStack.any { it.enabled && it.effectCraftId == null }) {
                     12
                 } else MediaLoader.CPU_PREVIEW_SAMPLE_FPS
                 val bucket = if (layer.type == LayerType.VIDEO) {
@@ -198,7 +198,7 @@ fun CpuPreviewCanvas(
                     continue
                 }
                 val source = bitmaps[layer.id] ?: continue
-                val activeEffects = layer.effectStack.filter { it.enabled }.take(8)
+                val activeEffects = layer.effectStack.filter { it.enabled && it.effectCraftId == null }.take(8)
                 if (activeEffects.isEmpty()) {
                     val previous = effectedBitmaps.remove(layer.id)
                     if (previous != null && previous !== source && !previous.isRecycled) previous.recycle()
