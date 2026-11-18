@@ -99,9 +99,13 @@ object AiEditorEngine {
             .take(12).mapNotNull { analyzeImageFeatures(context, it) }
         val profile = buildStyleProfile(context, referenceVideos, imageFeatures, request.styleNotes)
         persistStyleProfile(context, profile)
+        val styleTrainingSamples = referenceVideos.flatMap { it.scenes }.map { scene ->
+            floatArrayOf(kotlin.math.ln(scene.duration.coerceAtLeast(0.1f)), scene.visualEnergy, scene.cutStrength)
+        }
+        val styleModel = AiStyleModel.trainOrLoad(context, styleTrainingSamples)
 
         val totalDuration = request.durationSeconds.coerceIn(10f, 120f)
-        val plan = planEdit(videos.flatMap { it.scenes }, audio?.beats.orEmpty(), profile, request, totalDuration)
+        val plan = planEdit(videos.flatMap { it.scenes }, audio?.beats.orEmpty(), profile, request, totalDuration, styleModel)
         val colorGrade = if ("Color grading" in request.priorities) {
             runCatching {
                 EffectCraftCatalog.load().getOrNull()?.firstOrNull { effect ->
@@ -371,7 +375,8 @@ object AiEditorEngine {
         beats: List<Float>,
         profile: StyleProfile,
         request: Request,
-        target: Float
+        target: Float,
+        styleModel: AiStyleModel
     ): List<Scene> {
         val targetShot = when (request.style) {
             "Velocity" -> min(profile.averageShotSeconds, 1.15f)
@@ -379,8 +384,9 @@ object AiEditorEngine {
             else -> profile.averageShotSeconds.coerceIn(1.0f, 2.6f)
         }
         val sorted = scenes.sortedByDescending { scene ->
-            scene.visualEnergy * 0.55f + scene.cutStrength * 0.3f +
-                if ("Impact shakes" in request.priorities) scene.cutStrength * 0.15f else 0f
+            val learnedStyleMatch = styleModel.similarity(scene.duration, scene.visualEnergy, scene.cutStrength)
+            learnedStyleMatch * 0.62f + scene.visualEnergy * 0.23f + scene.cutStrength * 0.15f +
+                if ("Impact shakes" in request.priorities) scene.cutStrength * 0.08f else 0f
         }
         val selected = ArrayList<Scene>()
         var cursor = 0f
@@ -527,11 +533,17 @@ object AiEditorEngine {
     }
 
     private fun queryName(context: Context, uri: Uri): String {
-        return runCatching {
-            context.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
-                if (it.moveToFirst()) it.getString(0)?.substringBeforeLast('.')?.takeIf(String::isNotBlank)
+        val displayName = runCatching {
+            context.contentResolver.query(
+                uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null
+            )?.use { cursor ->
+                val column = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                if (column >= 0 && cursor.moveToFirst()) {
+                    cursor.getString(column)?.substringBeforeLast('.')?.takeIf(String::isNotBlank)
+                } else null
             }
-        }.getOrNull() ?: uri.lastPathSegment?.substringAfterLast('/') ?: "Footage"
+        }.getOrNull()
+        return displayName ?: uri.lastPathSegment?.substringAfterLast('/') ?: "Footage"
     }
 
     private fun persistStyleProfile(context: Context, profile: StyleProfile) {
