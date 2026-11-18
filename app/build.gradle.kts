@@ -144,4 +144,7 @@ dependencies {
     implementation("androidx.media3:media3-ui:1.5.1")
     implementation("androidx.media3:media3-transformer:1.5.1")
     implementation("androidx.media3:media3-effect:1.5.1")
+
+    // Local neural inference for anime-reference embeddings and RAFT optical flow.
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.20.0")
 }
