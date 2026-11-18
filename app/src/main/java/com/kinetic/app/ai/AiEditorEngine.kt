@@ -101,6 +101,8 @@ object AiEditorEngine {
         persistStyleProfile(context, profile)
         val styleTrainingSamples = referenceVideos.flatMap { it.scenes }.map { scene ->
             floatArrayOf(kotlin.math.ln(scene.duration.coerceAtLeast(0.1f)), scene.visualEnergy, scene.cutStrength)
+        } + imageFeatures.map { features ->
+            floatArrayOf(kotlin.math.ln(profile.averageShotSeconds.coerceAtLeast(0.1f)), features[0], features[1])
         }
         val styleModel = AiStyleModel.trainOrLoad(context, styleTrainingSamples)
 
