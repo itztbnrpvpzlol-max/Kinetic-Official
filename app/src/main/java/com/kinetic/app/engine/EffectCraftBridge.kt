@@ -132,4 +132,39 @@ object EffectCraftBridge {
         }.getOrNull()
     }
 
+
+    /**
+     * Decode a local video frame using EffectCraft's FilmCraft decoder and MediaPool.
+     * Call from a media worker. Null means the caller should use its compatibility decoder.
+     */
+    fun decodeVideoFrame(path: String, timeSeconds: Float, maxSide: Int): Bitmap? {
+        if (!available || path.isBlank() || !timeSeconds.isFinite()) return null
+        return runCatching {
+            if (!EffectCraftNative.nativeInitialize()) return null
+            val encoded = EffectCraftNative.nativeDecodeVideoFrame(
+                path, timeSeconds.coerceAtLeast(0f), maxSide.coerceIn(128, 2048)
+            ) ?: return null
+            if (encoded.size < 8) return null
+            val header = ByteBuffer.wrap(encoded).order(ByteOrder.LITTLE_ENDIAN)
+            val width = header.int
+            val height = header.int
+            if (width <= 0 || height <= 0 ||
+                width.toLong() * height.toLong() > 8_388_608L ||
+                encoded.size.toLong() != 8L + width.toLong() * height.toLong() * 4L
+            ) return null
+            val pixels = IntArray(width * height)
+            var offset = 8
+            for (index in pixels.indices) {
+                val red = encoded[offset++].toInt() and 0xFF
+                val green = encoded[offset++].toInt() and 0xFF
+                val blue = encoded[offset++].toInt() and 0xFF
+                val alpha = encoded[offset++].toInt() and 0xFF
+                pixels[index] = (alpha shl 24) or (red shl 16) or (green shl 8) or blue
+            }
+            Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).also {
+                it.setPixels(pixels, 0, width, 0, 0, width, height)
+            }
+        }.getOrNull()
+    }
+
 }
