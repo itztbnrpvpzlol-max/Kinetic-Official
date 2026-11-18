@@ -170,7 +170,7 @@ fun AiEditorScreen(settings: AppSettings, onBack: () -> Unit, onOpenEditor: (Edi
                     minLines = 2,
                     shape = RoundedCornerShape(14.dp)
                 )
-                Text("References are intended to build a personal style profile on this device; uploading them here does not train a model yet.", color = KColors.Muted, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp))
+                Text("Kinetic measures reference pacing and image colour locally, then reuses that style profile on this device. This is analysis, not neural-network training.", color = KColors.Muted, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp))
             }
             item {
                 AiSection("04", "Creative direction", "Tell the editor what you want")
@@ -235,7 +235,7 @@ fun AiEditorScreen(settings: AppSettings, onBack: () -> Unit, onOpenEditor: (Edi
                     Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
                         Text("ON-DEVICE AI", color = Color(0xFFB99AFF), fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         Text("Private by design", color = KColors.Text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                        Text("The intended engine will analyse selected media locally and build an editable Kinetic timeline. No cloud upload is part of this design.", color = KColors.Muted, fontSize = 12.sp)
+                        Text("Footage frames, soundtrack energy and reference media are analysed locally. Kinetic then builds an editable timeline; your media is not sent to a cloud service.", color = KColors.Muted, fontSize = 12.sp)
                     }
                 }
             }
