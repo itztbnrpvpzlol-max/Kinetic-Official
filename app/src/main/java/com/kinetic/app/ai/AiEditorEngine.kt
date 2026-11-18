@@ -125,6 +125,7 @@ object AiEditorEngine {
             append(videos.sumOf { it.scenes.size }).append(" candidate scenes")
             if (audio != null) append("; detected ").append(audio.beats.size).append(" music accents")
             if (referenceVideos.isNotEmpty()) append("; extracted pacing from ").append(referenceVideos.size).append(" reference video(s)")
+            if (styleModel.trainingSamples > 0) append("; trained the on-device style clustering model from ").append(styleModel.trainingSamples).append(" reference shots")
             append(". Built ").append(plan.size).append(" selected shots with editable motion and title layers.")
             append(" Scene selection is heuristic, not anime-character or story recognition.")
         }
