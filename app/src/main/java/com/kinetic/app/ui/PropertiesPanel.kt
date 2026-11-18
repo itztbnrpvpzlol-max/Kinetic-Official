@@ -112,7 +112,7 @@ private fun ValueController(editor: EditorState, layer: Layer, id: PropId, axis:
             detectHorizontalDragGestures(onDragStart = { editor.selectProp(id); editor.beginEdit() }) { change, drag ->
                 change.consume()
                 val current = editor.layers.firstOrNull { it.id == layer.id }?.p(id)?.valueAt(editor.time) ?: value
-                editor.setPropValue(layer.id, id, current + drag / density * id.scrubStep)
+                editor.setPropValue(layer.id, id, current + drag / density * id.scrubStep * 4f)
             }
         }, contentAlignment = Alignment.Center) {
         Text((if (axis.isNotEmpty()) "$axis  " else "") + id.format(value),
