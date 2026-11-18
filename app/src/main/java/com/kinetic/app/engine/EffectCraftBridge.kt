@@ -3,6 +3,10 @@ package com.kinetic.app.engine
 import android.graphics.Bitmap
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import org.json.JSONArray
+import org.json.JSONObject
+import org.json.JSONTokener
+import com.kinetic.app.model.EffectInstance
 
 /**
  * Versioned Kotlin-facing boundary for EffectCraft.
@@ -66,7 +70,7 @@ object EffectCraftBridge {
      */
     fun renderFrame(
         source: Bitmap,
-        effectsJson: String,
+        effects: List<EffectInstance>,
         timeSeconds: Float,
         maxSide: Int,
         cacheKey: String
@@ -86,8 +90,23 @@ object EffectCraftBridge {
                 rgba[offset++] = (pixel and 0xFF).toByte()
                 rgba[offset++] = ((pixel ushr 24) and 0xFF).toByte()
             }
+            val effectList = JSONArray()
+            effects.forEach { effect ->
+                val effectId = effect.effectCraftId ?: return@forEach
+                val parameters = JSONObject()
+                effect.effectCraftParameters.forEach { (name, raw) ->
+                    val base = raw.toFloatOrNull()
+                    val value: Any = if (base != null) {
+                        effect.effectCraftParameterAt(name, timeSeconds, base).toDouble()
+                    } else {
+                        runCatching { JSONTokener(raw).nextValue() }.getOrDefault(raw)
+                    }
+                    parameters.put(name, value)
+                }
+                effectList.put(JSONObject().put("id", effectId).put("values", parameters))
+            }
             val encoded = EffectCraftNative.nativeRenderFrame(
-                cacheKey, rgba, width, height, effectsJson, timeSeconds, maxSide
+                cacheKey, rgba, width, height, effectList.toString(), timeSeconds, maxSide
             ) ?: return null
             if (encoded.size < 8) return null
             val header = ByteBuffer.wrap(encoded).order(ByteOrder.LITTLE_ENDIAN)
