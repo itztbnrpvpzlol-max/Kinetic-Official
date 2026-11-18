@@ -161,6 +161,37 @@ pub extern "system" fn Java_com_kinetic_app_engine_EffectCraftNative_nativeExecu
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
+use effectcraft_media::MediaPool;
+use effectcraft_engine::project::{FootageKind};
+use effectcraft_engine::render::FootageSource;
+
+static MEDIA_POOL: OnceLock<MediaPool> = OnceLock::new();
+static MEDIA_FOOTAGE: OnceLock<Mutex<HashMap<String, effectcraft_engine::project::Footage>>> = OnceLock::new();
+
+fn media_pool() -> &'static MediaPool {
+    MEDIA_POOL.get_or_init(|| {
+        // 64 MiB keeps the decoded-frame LRU useful without exhausting a 32-bit
+        // Android process. MediaPool owns decoder reuse and sequential read-ahead.
+        let pool = MediaPool::with_budget(64 * 1024 * 1024);
+        pool.set_read_ahead(true);
+        pool
+    })
+}
+
+fn media_footage(path: &str) -> Result<effectcraft_engine::project::Footage, String> {
+    let cache = MEDIA_FOOTAGE.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Some(footage) = cache.lock().map_err(|_| "EffectCraft footage cache lock unavailable")?.get(path).cloned() {
+        return Ok(footage);
+    }
+    let footage = effectcraft_media::probe(path).map_err(|error| format!("Could not probe media: {error}"))?;
+    if footage.kind != FootageKind::Video || !footage.has_video {
+        return Err("EffectCraft MediaPool only accepts video footage".into());
+    }
+    cache.lock().map_err(|_| "EffectCraft footage cache lock unavailable")?
+        .insert(path.to_string(), footage.clone());
+    Ok(footage)
+}
+
 use effectcraft_engine::project::{Footage, FootageKind, ItemId, ItemKind, LayerId, LayerSource};
 use effectcraft_engine::raster::Image;
 use effectcraft_engine::render::FootageSource;
@@ -380,6 +411,57 @@ pub extern "system" fn Java_com_kinetic_app_engine_EffectCraftNative_nativeRende
     }));
     match result {
         Ok(Ok(bytes)) => env.byte_array_from_slice(&bytes).map(|array| array.into_raw()).unwrap_or(std::ptr::null_mut()),
+        _ => std::ptr::null_mut(),
+    }
+}
+
+
+/// Decode one requested preview frame through EffectCraft's persistent MediaPool.
+/// The returned byte array is [width:u32 LE][height:u32 LE][RGBA8 pixels].
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_kinetic_app_engine_EffectCraftNative_nativeDecodeVideoFrame(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    path: JString<'_>,
+    time_seconds: jni::sys::jfloat,
+    max_side: jni::sys::jint,
+) -> jni::sys::jbyteArray {
+    let result = catch_unwind(AssertUnwindSafe(|| -> Result<Vec<u8>, String> {
+        let path = env.get_string(&path).map_err(|e| e.to_string())?
+            .to_string_lossy().into_owned();
+        if path.is_empty() || !std::path::Path::new(&path).is_file() {
+            return Err("Video path is not a readable local file".into());
+        }
+        if !time_seconds.is_finite() || max_side <= 0 {
+            return Err("Invalid video frame request".into());
+        }
+        let footage = media_footage(&path)?;
+        let source_width = footage.width.max(1);
+        let source_height = footage.height.max(1);
+        let edge = (max_side as u32).clamp(128, 2048);
+        let scale = (edge as f64 / f64::from(source_width.max(source_height))).min(1.0);
+        let width = ((f64::from(source_width) * scale).round() as u32).max(1);
+        let height = ((f64::from(source_height) * scale).round() as u32).max(1);
+        if u64::from(width) * u64::from(height) > 8_388_608 {
+            return Err("Requested preview frame exceeds the pixel budget".into());
+        }
+        let tick = Tick::from_seconds_f64(f64::from(time_seconds.max(0.0)));
+        let frame = FootageSource::frame_at_size(
+            media_pool(), ItemId(0), &footage, tick, width, height
+        ).ok_or_else(|| "EffectCraft could not decode the requested video frame".to_string())?;
+        let pixels = frame.to_rgba8();
+        if pixels.len() != width as usize * height as usize * 4 {
+            return Err("EffectCraft returned an invalid RGBA frame".into());
+        }
+        let mut output = Vec::with_capacity(8 + pixels.len());
+        output.extend_from_slice(&width.to_le_bytes());
+        output.extend_from_slice(&height.to_le_bytes());
+        output.extend_from_slice(&pixels);
+        Ok(output)
+    }));
+    match result {
+        Ok(Ok(bytes)) => env.byte_array_from_slice(&bytes)
+            .map(|array| array.into_raw()).unwrap_or(std::ptr::null_mut()),
         _ => std::ptr::null_mut(),
     }
 }
