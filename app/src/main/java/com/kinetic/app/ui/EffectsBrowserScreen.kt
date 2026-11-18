@@ -44,17 +44,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kinetic.app.engine.EffectCraftCatalog
 
-private val supportedEffectNames = setOf(
-    "Motion Tile",
-    "Wave Warp",
-    "Warp Shake",
-    "RGB Split",
-    "Oscillate",
-    "Morphosis",
-    "Deep Glow",
-    "Exposure And Gamma"
-)
-
 private data class EffectCategory(
     val title: String,
     val icon: IconKind,
@@ -174,7 +163,7 @@ fun EffectsBrowserScreen(onClose: () -> Unit, onAddEffect: (String) -> Unit) {
                 category.effects.chunked(4).forEach { row ->
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         row.forEach { effect ->
-                            val canAdd = effect in supportedEffectNames
+                            val canAdd = false
                             EffectChoice(effect, category.accent, Modifier.weight(1f), isSupported = canAdd) {
                                 if (canAdd) onAddEffect(effect)
                             }
