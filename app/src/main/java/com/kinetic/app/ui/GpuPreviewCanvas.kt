@@ -253,13 +253,13 @@ private fun GpuCompositionPreviewCanvas(
     val activeVideoLayers = editor.layers.filter {
         it.visible && it.activeAt(editor.time) && it.type == LayerType.VIDEO && it.uri != null
     }
-    fun hasEffectCraftAdjustmentAbove(layerId: String): Boolean {
+    fun hasAdjustmentEffectAbove(layerId: String): Boolean {
         val index = editor.layers.indexOfFirst { it.id == layerId }
         if (index <= 0) return false
         return editor.layers.take(index).any { adjustment ->
             adjustment.type == LayerType.ADJUSTMENT && adjustment.visible &&
                 adjustment.activeAt(editor.time) &&
-                adjustment.effectStack.any { it.enabled && it.effectCraftId != null }
+                adjustment.effectStack.any { it.enabled }
         }
     }
     // A video under an adjustment layer must use decoded bitmaps so the
@@ -268,7 +268,7 @@ private fun GpuCompositionPreviewCanvas(
         .filter {
             failedVideoSources[it.id] != it.uri &&
                 it.effectStack.none { effect -> effect.enabled } &&
-                !hasEffectCraftAdjustmentAbove(it.id)
+                !hasAdjustmentEffectAbove(it.id)
         }
         .take(decoderLimit)
     val textureVideoIds = videoLayers.mapTo(HashSet<String>()) { it.id }
@@ -295,7 +295,7 @@ private fun GpuCompositionPreviewCanvas(
     // Untouched video uses SurfaceTexture as a GPU source texture. Effect-bearing
     // video uses the bitmap path above so effects never depend on a GPU shader.
     val hasEffectVideo = activeVideoLayers.any { layer ->
-        layer.effectStack.any { it.enabled } || hasEffectCraftAdjustmentAbove(layer.id)
+        layer.effectStack.any { it.enabled } || hasAdjustmentEffectAbove(layer.id)
     }
     // Keep native CPU effects below the decoder's maximum sample rate on
     // constrained devices; the GL thread remains free to composite each frame.
@@ -315,14 +315,14 @@ private fun GpuCompositionPreviewCanvas(
             .asSequence()
             .filter { it.type == LayerType.ADJUSTMENT && it.visible && it.activeAt(editor.time) }
             .flatMap { it.effectStack.asSequence() }
-            .filter { it.enabled && it.effectCraftId != null }
+            .filter { it.enabled }
             .toList()
         if (effectsAbove.isEmpty()) null else layer.id to effectsAbove
     }.toMap()
 
     val effectCraftVectorLayers = editor.layers.filter { layer ->
         (layer.type == LayerType.TEXT || layer.type == LayerType.SHAPE) &&
-            (layer.effectStack.any { it.enabled && it.effectCraftId != null } ||
+            (layer.effectStack.any { it.enabled } ||
                 adjustmentEffectsByLayer[layer.id].orEmpty().isNotEmpty())
     }
     val effectCraftVectorSignature = effectCraftVectorLayers.map {
@@ -343,7 +343,9 @@ private fun GpuCompositionPreviewCanvas(
             for (layer in effectCraftVectorLayers) {
                 if (!layer.visible || !layer.activeAt(now)) continue
                 val activeEffects = (layer.effectStack + adjustmentEffectsByLayer[layer.id].orEmpty())
-                    .filter { it.enabled && it.effectCraftId != null }.take(8)
+                    .filter { it.enabled }.take(8)
+                val activeLegacyEffects = activeEffects.filter { it.effectCraftId == null }
+                val activeEffectCraft = activeEffects.filter { it.effectCraftId != null }
                 if (activeEffects.isEmpty()) continue
                 var keyValue = layer.hashCode().toLong()
                 keyValue = keyValue * 31L + timeBucket.toLong()
@@ -355,11 +357,27 @@ private fun GpuCompositionPreviewCanvas(
                 if (retryAt != null && System.nanoTime() < retryAt) continue
                 val rendered = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
                     val source = rasterizeEffectCraftLayer(layer, now, 640) ?: return@withContext null
+                    var legacyRendered: Bitmap? = null
                     try {
-                        com.kinetic.app.engine.EffectCraftBridge.renderFrame(
-                            source, activeEffects, now, 640, "kinetic-gpu-layer-${layer.id}"
-                        )
+                        legacyRendered = if (activeLegacyEffects.isNotEmpty()) {
+                            NativeEffectsEngine.processBitmap(source, activeLegacyEffects, now)
+                        } else null
+                        val effectInput = legacyRendered ?: source
+                        val craftRendered = if (activeEffectCraft.isNotEmpty()) {
+                            com.kinetic.app.engine.EffectCraftBridge.renderFrame(
+                                effectInput, activeEffectCraft, now, 640, "kinetic-gpu-layer-${layer.id}"
+                            )
+                        } else null
+                        if (craftRendered != null && legacyRendered != null &&
+                            legacyRendered !== source && legacyRendered !== craftRendered && !legacyRendered.isRecycled
+                        ) legacyRendered.recycle()
+                        craftRendered ?: legacyRendered
                     } finally {
+                        if (legacyRendered != null && legacyRendered !== source &&
+                            !legacyRendered.isRecycled && activeEffectCraft.isEmpty()
+                        ) {
+                            // The legacy bitmap is returned as the visible result.
+                        }
                         if (!source.isRecycled) source.recycle()
                     }
                 }
