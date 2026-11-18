@@ -253,8 +253,8 @@ fn create_render_context(width: u32, height: u32, effects: &Value, rgba: &[u8]) 
     let solid_item = {
         let c = engine.project.comp(comp).ok_or("EffectCraft composition disappeared")?;
         let l = c.layer(layer).ok_or("EffectCraft source layer disappeared")?;
-        match l.source {
-            LayerSource::Solid { item } => item,
+        match &l.source {
+            LayerSource::Solid { item } => *item,
             _ => return Err("EffectCraft source layer is not a solid".into()),
         }
     };
@@ -345,9 +345,10 @@ pub extern "system" fn Java_com_kinetic_app_engine_EffectCraftNative_nativeRende
         if rgba.len() != w as usize * h as usize * 4 {
             return Err("Input RGBA buffer length does not match its dimensions".into());
         }
-        let ids = serde_json::to_string(&effects.as_array().unwrap_or(&Vec::new()).iter()
-            .map(|e| e.get("id").or_else(|| e.get("name")).cloned().unwrap_or(Value::Null))
-            .collect::<Vec<_>>()).map_err(|e| e.to_string())?;
+        let effect_ids = effects.as_array().map(|list| {
+        list.iter().map(|effect| effect.get("id").or_else(|| effect.get("name")).cloned().unwrap_or(Value::Null)).collect::<Vec<_>>()
+    }).unwrap_or_default();
+    let ids = serde_json::to_string(&effect_ids).map_err(|e| e.to_string())?;
         let mut contexts = render_contexts().lock().map_err(|_| "EffectCraft render cache lock unavailable")?;
         let rebuild = contexts.get(&key).is_none_or(|c| c.width != w || c.height != h || c.effect_ids != ids);
         if rebuild {
