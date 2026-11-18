@@ -8,6 +8,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -274,7 +276,7 @@ fun LayerStylePanel(editor: com.kinetic.app.model.EditorState, layer: com.kineti
                 "strokeWidth" -> raw.toFloatOrNull()?.takeIf { it.isFinite() && it >= 0f }?.let { value -> editor.updateLayer(layer.id) { it.copy(strokeWidth = value.coerceIn(0f, 200f)) } }
                 "fillColor", "strokeColor" -> {
                     val hex = raw.trim().removePrefix("#").removePrefix("0x").removePrefix("0X")
-                    val parsed = runCatching { hex.toLong(16) }.getOrNull()
+                    val parsed = runCatching { java.lang.Long.parseUnsignedLong(hex, 16) }.getOrNull()
                     if (parsed != null && (hex.length == 6 || hex.length == 8)) {
                         val color = (if (hex.length == 6) (0xFF000000L or parsed) else parsed).toInt()
                         editor.updateLayer(layer.id) { if (field == "fillColor") it.copy(color = color) else it.copy(strokeColor = color) }
