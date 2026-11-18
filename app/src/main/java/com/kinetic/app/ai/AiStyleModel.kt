@@ -32,15 +32,21 @@ internal class AiStyleModel private constructor(
         fun trainOrLoad(context: Context, samples: List<FloatArray>): AiStyleModel {
             val valid = samples.filter { it.size >= 5 && it.all(Float::isFinite) }
                 .map { sample -> FloatArray(5) { axis -> if (axis == 0) sample[0] else sample[axis].coerceIn(0f, 1f) } }
+            val previous = load(context)
             if (valid.isNotEmpty()) {
-                val model = train(valid)
+                // Retain learned centroids as replay samples so new references refine,
+                // rather than erase, the user's accumulated style preferences.
+                val retained = previous?.centroids.orEmpty().flatMap { center ->
+                    listOf(center.copyOf(), center.copyOf())
+                }
+                val model = train(valid + retained, (previous?.trainingSamples ?: 0) + valid.size)
                 persist(context, model)
                 return model
             }
-            return load(context) ?: AiStyleModel(emptyList(), 0)
+            return previous ?: AiStyleModel(emptyList(), 0)
         }
 
-        private fun train(samples: List<FloatArray>): AiStyleModel {
+        private fun train(samples: List<FloatArray>, totalSamples: Int = samples.size): AiStyleModel {
             val count = minOf(4, samples.size)
             val centers = ArrayList<FloatArray>(count)
             centers.add(samples.first().copyOf())
@@ -65,7 +71,7 @@ internal class AiStyleModel private constructor(
                     }
                 }
             }
-            return AiStyleModel(centers, samples.size)
+            return AiStyleModel(centers, totalSamples)
         }
 
         private fun persist(context: Context, model: AiStyleModel) {
