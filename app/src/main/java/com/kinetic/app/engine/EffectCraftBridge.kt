@@ -167,4 +167,11 @@ object EffectCraftBridge {
         }.getOrNull()
     }
 
+
+    /** Clear EffectCraft's decoded-frame LRU on Android memory pressure. */
+    fun trimMediaCache() {
+        if (!available) return
+        runCatching { EffectCraftNative.nativeClearMediaFrames() }
+    }
+
 }
