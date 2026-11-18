@@ -85,8 +85,8 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  android-arm64:
-    name: Build Kinetic APK with EffectCraft (arm64-v8a)
+  android-armv7:
+    name: Build Kinetic APK with EffectCraft (armeabi-v7a)
     needs: build-ffmpeg
     runs-on: ubuntu-latest
     timeout-minutes: 90
@@ -117,24 +117,24 @@ jobs:
       - name: Install Rust 1.95 and Android target
         uses: dtolnay/rust-toolchain@1.95.0
         with:
-          targets: aarch64-linux-android
+          targets: armv7-linux-androideabi
 
       - name: Install cargo-ndk
         run: cargo install cargo-ndk --locked
 
-      - name: Compile EffectCraft JNI for Android arm64
+      - name: Compile EffectCraft JNI for Android 32-bit ARM
         working-directory: native/effectcraft-android
-        run: cargo ndk -t arm64-v8a build --release
+        run: cargo ndk -t armeabi-v7a build --release
 
       - name: Package EffectCraft JNI library for Android
         shell: bash
         run: |
           set -euo pipefail
-          LIBRARY="$(find native/effectcraft-android target -path '*/aarch64-linux-android/release/libkinetic_effectcraft.so' -print -quit 2>/dev/null || true)"
+          LIBRARY="$(find native/effectcraft-android target -path '*/armv7-linux-androideabi/release/libkinetic_effectcraft.so' -print -quit 2>/dev/null || true)"
           test -n "${LIBRARY}"
           test -s "${LIBRARY}"
-          mkdir -p app/src/main/jniLibs/arm64-v8a
-          cp "${LIBRARY}" app/src/main/jniLibs/arm64-v8a/libkinetic_effectcraft.so
+          mkdir -p app/src/main/jniLibs/armeabi-v7a
+          cp "${LIBRARY}" app/src/main/jniLibs/armeabi-v7a/libkinetic_effectcraft.so
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
@@ -155,12 +155,12 @@ jobs:
           set -euo pipefail
           APK="app/build/outputs/apk/debug/app-debug.apk"
           test -s "${APK}"
-          unzip -l "${APK}" | grep -F 'lib/arm64-v8a/libkinetic_effectcraft.so'
+          unzip -l "${APK}" | grep -F 'lib/armeabi-v7a/libkinetic_effectcraft.so'
 
       - name: Upload Kinetic debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: kinetic-effectcraft-arm64-debug-apk
+          name: kinetic-effectcraft-armeabi-v7a-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 7
