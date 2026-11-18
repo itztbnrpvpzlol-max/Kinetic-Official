@@ -200,7 +200,9 @@ object MediaLoader {
             val workerStartNs = System.nanoTime()
             val bucket = if (type == LayerType.VIDEO) (timeSec * sampleFps.toFloat()).toInt() else 0
             val sourceKey = mediaCacheIdentity(uri)
-            val key = if (type == LayerType.IMAGE) "$sourceKey@image@$maxEdge" else "$sourceKey@$sampleFps@$maxEdge@$bucket"
+            // Bump the preview cache namespace so stale black startup frames from older
+            // decoder behavior cannot be replayed indefinitely from disk.
+            val key = if (type == LayerType.IMAGE) "$sourceKey@image@$maxEdge" else "$sourceKey@v3@$sampleFps@$maxEdge@$bucket"
             synchronized(key.intern()) {
                 val diskFile = if (type == LayerType.VIDEO || persistToDisk) previewFrameFile(ctx, key, type) else null
                 val memoryBytes = compressedPreviewFrameCache.get(key)
@@ -223,10 +225,28 @@ object MediaLoader {
                             null -> uri.toString()
                             else -> null
                         }?.takeIf { path -> File(path).isFile }
-                        val effectCraftFrame = localPath?.let { path ->
+                        var effectCraftFrame = localPath?.let { path ->
                             EffectCraftBridge.decodeVideoFrame(
                                 path, bucket / sampleFps.toFloat(), maxEdge
                             )
+                        }
+                        // FilmCraft can occasionally return the decoder's cleared
+                        // startup buffer for timestamp zero. Cross-check only suspicious
+                        // near-black first samples with Android's independent retriever;
+                        // preserve genuine black footage when both decoders agree.
+                        if (bucket == 0 && effectCraftFrame != null && isNearlyBlackFrame(effectCraftFrame)) {
+                            val alternate = videoFrame(
+                                ctx, uri, bucket / sampleFps.toFloat(), maxEdge,
+                                MediaMetadataRetriever.OPTION_CLOSEST
+                            )
+                            if (alternate != null) {
+                                if (!isNearlyBlackFrame(alternate)) {
+                                    effectCraftFrame.recycle()
+                                    effectCraftFrame = alternate
+                                } else if (alternate !== effectCraftFrame) {
+                                    alternate.recycle()
+                                }
+                            }
                         }
                         effectCraftFrame ?: if (lowPriorityRequest) {
                             // Timeline thumbnails never hold the Android sequential decoder lock.
@@ -557,6 +577,37 @@ object MediaLoader {
         while (maxOf(bounds.outWidth, bounds.outHeight) / sample > maxEdge.coerceAtLeast(240)) sample *= 2
         val options = BitmapFactory.Options().apply { inSampleSize = sample }
         return ctx.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, options) }
+    }
+
+    /**
+     * Samples a small grid rather than scanning every pixel. This is only used
+     * to detect a suspicious decoder-startup buffer at the first video sample.
+     */
+    private fun isNearlyBlackFrame(bitmap: Bitmap): Boolean {
+        if (bitmap.isRecycled || bitmap.width <= 0 || bitmap.height <= 0) return false
+        val stepX = (bitmap.width / 24).coerceAtLeast(1)
+        val stepY = (bitmap.height / 24).coerceAtLeast(1)
+        var samples = 0
+        var dark = 0
+        var y = 0
+        while (y < bitmap.height) {
+            var x = 0
+            while (x < bitmap.width) {
+                val pixel = bitmap.getPixel(x, y)
+                val alpha = (pixel ushr 24) and 0xFF
+                if (alpha > 16) {
+                    val red = (pixel ushr 16) and 0xFF
+                    val green = (pixel ushr 8) and 0xFF
+                    val blue = pixel and 0xFF
+                    val luminance = (red * 299 + green * 587 + blue * 114) / 1000
+                    samples++
+                    if (luminance <= 5) dark++
+                }
+                x += stepX
+            }
+            y += stepY
+        }
+        return samples >= 16 && dark.toFloat() / samples.toFloat() >= 0.985f
     }
 
     private fun videoFrame(
