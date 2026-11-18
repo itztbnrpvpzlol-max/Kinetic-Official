@@ -43,13 +43,14 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kinetic.app.engine.EffectCraftCatalog
+import com.kinetic.app.engine.EffectCraftEffectInfo
 
 private data class EffectCategory(
     val title: String,
     val icon: IconKind,
     val accent: Color,
     val background: Color,
-    val effects: List<String> = emptyList()
+    val effects: List<EffectCraftEffectInfo> = emptyList()
 )
 
 private val effectCategories = listOf(
@@ -69,7 +70,7 @@ private val effectCategories = listOf(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun EffectsBrowserScreen(onClose: () -> Unit, onAddEffect: (String) -> Unit) {
+fun EffectsBrowserScreen(onClose: () -> Unit, onAddEffect: (EffectCraftEffectInfo) -> Unit) {
     val shelfPager = rememberPagerState(pageCount = { 2 })
     var selectedCategoryTitle by remember { mutableStateOf<String?>(null) }
     var registryCategories by remember { mutableStateOf(effectCategories.map { it.copy(effects = emptyList()) }) }
@@ -84,8 +85,8 @@ fun EffectsBrowserScreen(onClose: () -> Unit, onAddEffect: (String) -> Unit) {
                 registryCategories = effectCategories.map { shelf ->
                     val discovered = entries
                         .filter { it.category.equals(shelf.title, ignoreCase = true) }
-                        .map { it.name }
-                    shelf.copy(effects = discovered.distinct())
+                        .distinctBy { it.id }
+                    shelf.copy(effects = discovered)
                 }
                 catalogMessage = catalogCount.toString() +
                     " EffectCraft effects discovered. "
@@ -163,9 +164,8 @@ fun EffectsBrowserScreen(onClose: () -> Unit, onAddEffect: (String) -> Unit) {
                 category.effects.chunked(4).forEach { row ->
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         row.forEach { effect ->
-                            val canAdd = false
-                            EffectChoice(effect, category.accent, Modifier.weight(1f), isSupported = canAdd) {
-                                if (canAdd) onAddEffect(effect)
+                            EffectChoice(effect.name, category.accent, Modifier.weight(1f), isSupported = true) {
+                                onAddEffect(effect)
                             }
                         }
                         repeat(4 - row.size) { Spacer(Modifier.weight(1f)) }
