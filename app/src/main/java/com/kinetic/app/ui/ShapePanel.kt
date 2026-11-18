@@ -16,6 +16,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -175,5 +176,122 @@ fun ShapeLibraryPanel(onClose: () -> Unit, onSelect: (ShapePreset) -> Unit, modi
                 }
             }
         }
+    }
+}
+
+
+@Composable
+fun LayerStylePanel(editor: com.kinetic.app.model.EditorState, layer: com.kinetic.app.model.Layer, onClose: () -> Unit, modifier: Modifier = Modifier) {
+    var editField by remember(layer.id) { mutableStateOf<String?>(null) }
+    val isText = layer.type == com.kinetic.app.model.LayerType.TEXT
+    val palette = listOf(
+        0xFFFFFFFF.toInt(), 0xFF111111.toInt(), 0xFFFF5252.toInt(), 0xFFFF9800.toInt(),
+        0xFFFFEB3B.toInt(), 0xFF4CAF50.toInt(), 0xFF00BCD4.toInt(), 0xFF448AFF.toInt(),
+        0xFF7C4DFF.toInt(), 0xFFE040FB.toInt(), 0xFFFF80AB.toInt(), 0xFF8D8BA3.toInt()
+    )
+    val shape = RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp)
+    Column(modifier.clip(shape).background(KColors.Surface).border(1.dp, KColors.Line, shape)) {
+        Row(Modifier.fillMaxWidth().height(38.dp).padding(start = 13.dp, end = 5.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(if (isText) "TEXT & TYPOGRAPHY" else "VECTOR APPEARANCE", color = KColors.Text, fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            Box(Modifier.size(32.dp).clickable(onClick = onClose), contentAlignment = Alignment.Center) { KIcon(IconKind.CLOSE, KColors.Muted, Modifier.size(16.dp)) }
+        }
+        Column(Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+            if (isText) {
+                Text("CONTENT", color = KColors.Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                StyleAction("Edit text", layer.text) { editField = "text" }
+                Text("FONT", color = KColors.Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                    listOf("Sans Serif", "Serif", "Monospace").forEach { family ->
+                        Chip(family, layer.fontFamily == family) { editor.updateLayer(layer.id) { it.copy(fontFamily = family) } }
+                    }
+                }
+                StyleAction("Font size", "%.0f px".format(layer.fontSize)) { editField = "fontSize" }
+                Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                    Chip("Bold", layer.textBold) { editor.updateLayer(layer.id) { it.copy(textBold = !it.textBold) } }
+                    Chip("Italic", layer.textItalic) { editor.updateLayer(layer.id) { it.copy(textItalic = !it.textItalic) } }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                    listOf("Left", "Center", "Right").forEach { align ->
+                        Chip(align, layer.textAlign == align) { editor.updateLayer(layer.id) { it.copy(textAlign = align) } }
+                    }
+                }
+            }
+            Text("FILL", color = KColors.Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                Chip(if (layer.fillEnabled) "Fill on" else "Fill off", layer.fillEnabled) {
+                    editor.updateLayer(layer.id) { it.copy(fillEnabled = !it.fillEnabled) }
+                }
+                Text("Color", color = KColors.Text, fontSize = 10.sp)
+                Box(Modifier.size(24.dp).clip(RoundedCornerShape(6.dp)).background(Color(layer.color)).border(1.dp, KColors.Line, RoundedCornerShape(6.dp)).clickable { editField = "fillColor" })
+                Text("#%08X".format(layer.color), color = KColors.Muted, fontSize = 9.sp)
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                palette.forEach { swatch ->
+                    Box(Modifier.size(22.dp).clip(RoundedCornerShape(5.dp)).background(Color(swatch))
+                        .border(if (layer.color == swatch) 2.dp else 1.dp, if (layer.color == swatch) KColors.Accent else KColors.Line, RoundedCornerShape(5.dp))
+                        .clickable { editor.updateLayer(layer.id) { it.copy(color = swatch) } })
+                }
+            }
+            Text("STROKE", color = KColors.Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                Chip(if (layer.strokeEnabled) "Stroke on" else "Stroke off", layer.strokeEnabled) {
+                    editor.updateLayer(layer.id) { it.copy(strokeEnabled = !it.strokeEnabled) }
+                }
+                Box(Modifier.size(24.dp).clip(RoundedCornerShape(6.dp)).background(Color(layer.strokeColor)).border(1.dp, KColors.Line, RoundedCornerShape(6.dp)).clickable { editField = "strokeColor" })
+                Text("#%08X".format(layer.strokeColor), color = KColors.Muted, fontSize = 9.sp)
+                Spacer(Modifier.weight(1f))
+                StyleAction("Width", "%.1f px".format(layer.strokeWidth)) { editField = "strokeWidth" }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                palette.forEach { swatch ->
+                    Box(Modifier.size(22.dp).clip(RoundedCornerShape(5.dp)).background(Color(swatch))
+                        .border(if (layer.strokeColor == swatch) 2.dp else 1.dp, if (layer.strokeColor == swatch) KColors.Accent else KColors.Line, RoundedCornerShape(5.dp))
+                        .clickable { editor.updateLayer(layer.id) { it.copy(strokeColor = swatch) } })
+                }
+            }
+        }
+    }
+    val field = editField
+    if (field != null) {
+        val title = when (field) {
+            "text" -> "Text content"
+            "fontSize" -> "Font size (px)"
+            "strokeWidth" -> "Stroke width (px)"
+            "fillColor" -> "Fill color (hex, RRGGBB or AARRGGBB)"
+            else -> "Stroke color (hex, RRGGBB or AARRGGBB)"
+        }
+        val initial = when (field) {
+            "text" -> layer.text
+            "fontSize" -> layer.fontSize.toString()
+            "strokeWidth" -> layer.strokeWidth.toString()
+            "fillColor" -> "%08X".format(layer.color)
+            else -> "%08X".format(layer.strokeColor)
+        }
+        TextInputDialog(title, initial, onDone = { raw ->
+            when (field) {
+                "text" -> editor.updateLayer(layer.id) { it.copy(text = raw, name = raw.trim().ifBlank { it.name }) }
+                "fontSize" -> raw.toFloatOrNull()?.takeIf { it.isFinite() && it > 0f }?.let { value -> editor.updateLayer(layer.id) { it.copy(fontSize = value.coerceIn(1f, 1000f)) } }
+                "strokeWidth" -> raw.toFloatOrNull()?.takeIf { it.isFinite() && it >= 0f }?.let { value -> editor.updateLayer(layer.id) { it.copy(strokeWidth = value.coerceIn(0f, 200f)) } }
+                "fillColor", "strokeColor" -> {
+                    val hex = raw.trim().removePrefix("#").removePrefix("0x").removePrefix("0X")
+                    val parsed = runCatching { hex.toLong(16) }.getOrNull()
+                    if (parsed != null && (hex.length == 6 || hex.length == 8)) {
+                        val color = (if (hex.length == 6) (0xFF000000L or parsed) else parsed).toInt()
+                        editor.updateLayer(layer.id) { if (field == "fillColor") it.copy(color = color) else it.copy(strokeColor = color) }
+                    }
+                }
+            }
+            editField = null
+        }, onDismiss = { editField = null })
+    }
+}
+
+@Composable
+private fun StyleAction(label: String, value: String, onClick: () -> Unit) {
+    Row(Modifier.fillMaxWidth().height(32.dp).clip(RoundedCornerShape(6.dp)).background(KColors.Bg)
+        .border(1.dp, KColors.Line, RoundedCornerShape(6.dp)).clickable(onClick = onClick).padding(horizontal = 9.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        Text(label, color = KColors.Text, fontSize = 10.sp, modifier = Modifier.weight(1f))
+        Text(value, color = KColors.Accent, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
     }
 }
