@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - feat/effectcraft-android-integration
+      - feat/effectcraft-native-core-migration
+      - feat/effectcraft-native-core-migration
     paths:
       - "native/effectcraft-android/**"
       - "third_party/effectcraft"
