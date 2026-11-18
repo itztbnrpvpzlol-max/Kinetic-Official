@@ -534,7 +534,14 @@ private fun GpuCompositionPreviewCanvas(
 
     // Effect processing can be substantially more expensive than texture upload.
     // Keep it on a latest-only worker so Deep Glow / warps never stall the GL thread.
-    LaunchedEffect(editor.layers.map { it.id to it.effectStack.hashCode() }) {
+    // Include adjustment activation/parameter changes so their effects are rebound
+    // exactly when the playhead enters or leaves an adjustment layer.
+    val adjustmentEffectSignature = adjustmentEffectsByLayer.entries
+        .map { it.key to it.value.hashCode() }
+    LaunchedEffect(
+        editor.layers.map { it.id to it.effectStack.hashCode() },
+        adjustmentEffectSignature
+    ) {
         while (true) {
             val now = latestTimelineTime.value
             val playing = latestPlaying.value
