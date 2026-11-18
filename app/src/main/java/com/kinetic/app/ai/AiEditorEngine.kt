@@ -123,7 +123,7 @@ object AiEditorEngine {
                 }
             }.getOrNull()
         } else null
-        val layers = executePlan(plan, audio, audioDuration, request, fps.coerceIn(12, 60), videos, resolution, colorGrade, effectiveRequest.prompt)
+        val layers = executePlan(plan, audio, audioDuration, effectiveRequest, fps.coerceIn(12, 60), videos, resolution, colorGrade, effectiveRequest.prompt)
         val report = buildString {
             append("Analysed ").append(videos.size).append(" source video(s) and ")
             append(videos.sumOf { it.scenes.size }).append(" candidate scenes")
