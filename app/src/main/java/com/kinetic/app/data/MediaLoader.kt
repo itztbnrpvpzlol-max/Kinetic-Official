@@ -225,49 +225,52 @@ object MediaLoader {
                             null -> uri.toString()
                             else -> null
                         }?.takeIf { path -> File(path).isFile }
-                        var effectCraftFrame = localPath?.let { path ->
+                        var decodedFrame = localPath?.let { path ->
                             EffectCraftBridge.decodeVideoFrame(
                                 path, bucket / sampleFps.toFloat(), maxEdge
                             )
                         }
-                        // FilmCraft can occasionally return the decoder's cleared
-                        // startup buffer for timestamp zero. Cross-check only suspicious
-                        // near-black first samples with Android's independent retriever;
-                        // preserve genuine black footage when both decoders agree.
-                        if (bucket == 0 && effectCraftFrame != null && isNearlyBlackFrame(effectCraftFrame)) {
+                        if (decodedFrame == null) {
+                            decodedFrame = if (lowPriorityRequest) {
+                                // Timeline thumbnails never hold the Android sequential decoder lock.
+                                videoFrame(
+                                    ctx, uri, bucket / sampleFps.toFloat(), maxEdge,
+                                    MediaMetadataRetriever.OPTION_CLOSEST
+                                )
+                            } else {
+                                val sequentialFrame = sequentialVideoDecoder.decodeFrame(
+                                    ctx, uri, sourceKey,
+                                    bucket.toLong() * 1_000_000L / sampleFps.coerceAtLeast(1),
+                                    maxEdge
+                                )
+                                if (sequentialFrame != null) sequentialFrame
+                                else if (sequentialVideoDecoder.shouldUseRetrieverFallback(sourceKey)) {
+                                    videoFrame(
+                                        ctx, uri, bucket / sampleFps.toFloat(), maxEdge,
+                                        MediaMetadataRetriever.OPTION_CLOSEST
+                                    )
+                                } else null
+                            }
+                        }
+                        // Some codecs expose their cleared startup buffer as a valid
+                        // first frame. Check every decoder path (including SAF content
+                        // URIs), not only FilmCraft local-file decodes. If Android agrees
+                        // it is black, preserve the legitimate black opening.
+                        if (bucket == 0 && decodedFrame != null && isNearlyBlackFrame(decodedFrame)) {
                             val alternate = videoFrame(
                                 ctx, uri, bucket / sampleFps.toFloat(), maxEdge,
                                 MediaMetadataRetriever.OPTION_CLOSEST
                             )
                             if (alternate != null) {
                                 if (!isNearlyBlackFrame(alternate)) {
-                                    effectCraftFrame.recycle()
-                                    effectCraftFrame = alternate
-                                } else if (alternate !== effectCraftFrame) {
+                                    decodedFrame.recycle()
+                                    decodedFrame = alternate
+                                } else if (alternate !== decodedFrame) {
                                     alternate.recycle()
                                 }
                             }
                         }
-                        effectCraftFrame ?: if (lowPriorityRequest) {
-                            // Timeline thumbnails never hold the Android sequential decoder lock.
-                            videoFrame(
-                                ctx, uri, bucket / sampleFps.toFloat(), maxEdge,
-                                MediaMetadataRetriever.OPTION_CLOSEST
-                            )
-                        } else {
-                            val sequentialFrame = sequentialVideoDecoder.decodeFrame(
-                                ctx, uri, sourceKey,
-                                bucket.toLong() * 1_000_000L / sampleFps.coerceAtLeast(1),
-                                maxEdge
-                            )
-                            if (sequentialFrame != null) sequentialFrame
-                            else if (sequentialVideoDecoder.shouldUseRetrieverFallback(sourceKey)) {
-                                videoFrame(
-                                    ctx, uri, bucket / sampleFps.toFloat(), maxEdge,
-                                    MediaMetadataRetriever.OPTION_CLOSEST
-                                )
-                            } else null
-                        }
+                        decodedFrame
                     }
                 } catch (e: Exception) {
                     null
