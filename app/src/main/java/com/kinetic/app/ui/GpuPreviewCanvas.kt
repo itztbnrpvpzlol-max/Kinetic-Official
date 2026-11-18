@@ -373,11 +373,6 @@ private fun GpuCompositionPreviewCanvas(
                         ) legacyRendered.recycle()
                         craftRendered ?: legacyRendered
                     } finally {
-                        if (legacyRendered != null && legacyRendered !== source &&
-                            !legacyRendered.isRecycled && activeEffectCraft.isEmpty()
-                        ) {
-                            // The legacy bitmap is returned as the visible result.
-                        }
                         if (!source.isRecycled) source.recycle()
                     }
                 }
