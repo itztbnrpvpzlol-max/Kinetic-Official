@@ -253,11 +253,23 @@ private fun GpuCompositionPreviewCanvas(
     val activeVideoLayers = editor.layers.filter {
         it.visible && it.activeAt(editor.time) && it.type == LayerType.VIDEO && it.uri != null
     }
-    // Video layers without enabled effects use SurfaceTexture external textures.
-    // Effect-bearing clips are intentionally excluded and decoded to bounded
-    // bitmaps so the independent native CPU engine can process their pixels.
+    fun hasEffectCraftAdjustmentAbove(layerId: String): Boolean {
+        val index = editor.layers.indexOfFirst { it.id == layerId }
+        if (index <= 0) return false
+        return editor.layers.take(index).any { adjustment ->
+            adjustment.type == LayerType.ADJUSTMENT && adjustment.visible &&
+                adjustment.activeAt(editor.time) &&
+                adjustment.effectStack.any { it.enabled && it.effectCraftId != null }
+        }
+    }
+    // A video under an adjustment layer must use decoded bitmaps so the
+    // adjustment's EffectCraft pass can process its actual pixels.
     val videoLayers = activeVideoLayers
-        .filter { failedVideoSources[it.id] != it.uri && it.effectStack.none { effect -> effect.enabled } }
+        .filter {
+            failedVideoSources[it.id] != it.uri &&
+                it.effectStack.none { effect -> effect.enabled } &&
+                !hasEffectCraftAdjustmentAbove(it.id)
+        }
         .take(decoderLimit)
     val textureVideoIds = videoLayers.mapTo(HashSet<String>()) { it.id }
 
@@ -282,7 +294,9 @@ private fun GpuCompositionPreviewCanvas(
 
     // Untouched video uses SurfaceTexture as a GPU source texture. Effect-bearing
     // video uses the bitmap path above so effects never depend on a GPU shader.
-    val hasEffectVideo = activeVideoLayers.any { layer -> layer.effectStack.any { it.enabled } }
+    val hasEffectVideo = activeVideoLayers.any { layer ->
+        layer.effectStack.any { it.enabled } || hasEffectCraftAdjustmentAbove(layer.id)
+    }
     // Keep native CPU effects below the decoder's maximum sample rate on
     // constrained devices; the GL thread remains free to composite each frame.
     val compositionFps = if (hasEffectVideo) {
