@@ -244,6 +244,7 @@ private fun GpuCompositionPreviewCanvas(
     // Preserve a recent decoded sample across adjacent split segments that share a source URI.
     val recentVideoFrames = remember { mutableStateMapOf<String, RecentVideoPreviewFrame>() }
     val textTextures = remember { mutableMapOf<String, Pair<Int, Bitmap>>() }
+    val effectCraftLayerBitmaps = remember { mutableStateMapOf<String, Bitmap>() }
     val failedVideoSources = remember { mutableStateMapOf<String, String>() }
     // Native decoder instances are scarce system resources, not a thread pool.
     // Excess video layers use the existing bitmap preview path rather than
@@ -290,6 +291,60 @@ private fun GpuCompositionPreviewCanvas(
     val effectSampleFps = adaptiveEffectFps
     val latestTimelineTime = androidx.compose.runtime.rememberUpdatedState(editor.time)
     val latestPlaying = androidx.compose.runtime.rememberUpdatedState(editor.playing)
+
+    val effectCraftVectorLayers = editor.layers.filter { layer ->
+        (layer.type == LayerType.TEXT || layer.type == LayerType.SHAPE) &&
+            layer.effectStack.any { it.enabled && it.effectCraftId != null }
+    }
+    val effectCraftVectorSignature = effectCraftVectorLayers.map { "${it.id}|${it.hashCode()}" }
+    LaunchedEffect(effectCraftVectorSignature, effectSampleFps) {
+        val validIds = effectCraftVectorLayers.map { it.id }.toSet()
+        effectCraftLayerBitmaps.keys.toList().filterNot { it in validIds }.forEach { id ->
+            effectCraftLayerBitmaps.remove(id)?.let { if (!it.isRecycled) it.recycle() }
+        }
+        if (effectCraftVectorLayers.isEmpty()) return@LaunchedEffect
+        val lastProcessed = mutableMapOf<String, Long>()
+        val retryAfterNs = mutableMapOf<String, Long>()
+        while (true) {
+            val now = latestTimelineTime.value
+            val playing = latestPlaying.value
+            val timeBucket = (now * effectSampleFps).toInt()
+            for (layer in effectCraftVectorLayers) {
+                if (!layer.visible || !layer.activeAt(now)) continue
+                val activeEffects = layer.effectStack.filter { it.enabled && it.effectCraftId != null }.take(8)
+                if (activeEffects.isEmpty()) continue
+                var keyValue = layer.hashCode().toLong()
+                keyValue = keyValue * 31L + timeBucket.toLong()
+                if (layer.type == LayerType.SHAPE) {
+                    keyValue = keyValue * 31L + layer.vectorPointsAt(now).hashCode().toLong()
+                }
+                if (lastProcessed[layer.id] == keyValue) continue
+                val retryAt = retryAfterNs[layer.id]
+                if (retryAt != null && System.nanoTime() < retryAt) continue
+                val rendered = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                    val source = rasterizeEffectCraftLayer(layer, now, 640) ?: return@withContext null
+                    try {
+                        com.kinetic.app.engine.EffectCraftBridge.renderFrame(
+                            source, activeEffects, now, 640, "kinetic-gpu-layer-${layer.id}"
+                        )
+                    } finally {
+                        if (!source.isRecycled) source.recycle()
+                    }
+                }
+                val stillCurrent = (latestTimelineTime.value * effectSampleFps).toInt() == timeBucket
+                if (rendered != null && stillCurrent) {
+                    retryAfterNs.remove(layer.id)
+                    lastProcessed[layer.id] = keyValue
+                    val previous = effectCraftLayerBitmaps.put(layer.id, rendered)
+                    if (previous != null && previous !== rendered && !previous.isRecycled) previous.recycle()
+                } else {
+                    if (rendered != null && !rendered.isRecycled) rendered.recycle()
+                    retryAfterNs[layer.id] = System.nanoTime() + 350_000_000L
+                }
+            }
+            kotlinx.coroutines.delay(if (playing) 40L else 80L)
+        }
+    }
 
     // Bound the CPU-side fallback/still bitmap cache as well as the GL texture
     // cache. Keep frames for currently visible active layers; evict older
@@ -556,52 +611,23 @@ private fun GpuCompositionPreviewCanvas(
                 activeTextTextureIds.add(layer.id)
                 val logicalWidth = layer.width.toInt().coerceIn(1, 4096)
                 val logicalHeight = layer.height.toInt().coerceIn(1, 4096)
-                val signature = if (layer.type == LayerType.TEXT)
-                    ((layer.text.hashCode() * 31 + layer.color) * 31 +
-                        logicalWidth * 7 + logicalHeight)
-                else (((layer.color * 31 + logicalWidth * 7 + logicalHeight) * 31 +
-                    layer.shapeKind.hashCode()) * 31 + layer.vectorPointsAt(editor.time).hashCode())
-                val cached = textTextures[layer.id]
-                if (cached == null || cached.first != signature || cached.second.isRecycled) {
-                    // Text and vector layers are rasterized at preview scale.
-                    // A 4096x4096 ARGB bitmap would otherwise consume 64 MiB
-                    // for one layer, before its GPU copy is considered.
-                    val maxTextureEdge = if (MediaWorkers.isConstrainedDevice) 320 else 768
-                    val bitmapScale = minOf(
-                        1f, maxTextureEdge.toFloat() / maxOf(logicalWidth, logicalHeight)
-                    )
-                    val w = (logicalWidth * bitmapScale).roundToInt().coerceAtLeast(1)
-                    val h = (logicalHeight * bitmapScale).roundToInt().coerceAtLeast(1)
-                    val generated = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-                    val canvas = AndroidCanvas(generated)
-                    canvas.scale(bitmapScale, bitmapScale)
-                    val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = layer.color }
-                    if (layer.type == LayerType.TEXT) {
-                        paint.textAlign = Paint.Align.CENTER
-                        paint.textSize = 120f
-                        paint.typeface = Typeface.DEFAULT_BOLD
-                        canvas.drawText(layer.text, logicalWidth / 2f, logicalHeight / 2f + 40f, paint)
-                    } else {
-                        val points = if (layer.vectorPoints.isEmpty()) {
-                            listOf(
-                                com.kinetic.app.model.VectorPoint(0f, 0f),
-                                com.kinetic.app.model.VectorPoint(1f, 0f),
-                                com.kinetic.app.model.VectorPoint(1f, 1f),
-                                com.kinetic.app.model.VectorPoint(0f, 1f)
-                            )
-                        } else layer.vectorPointsAt(editor.time)
-                        val path = android.graphics.Path()
-                        points.forEachIndexed { index, point ->
-                            val x = point.x.coerceIn(0f, 1f) * logicalWidth
-                            val y = point.y.coerceIn(0f, 1f) * logicalHeight
-                            if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
-                        }
-                        path.close()
-                        canvas.drawPath(path, paint)
-                    }
-                    textTextures[layer.id] = signature to generated
-                    generated
-                } else cached.second
+                val signature = layer.hashCode() * 31 +
+                    if (layer.type == LayerType.SHAPE) layer.vectorPointsAt(editor.time).hashCode() else 0
+                val effectBitmap = effectCraftLayerBitmaps[layer.id]
+                if (effectBitmap != null && !effectBitmap.isRecycled) {
+                    effectBitmap
+                } else {
+                    val cached = textTextures[layer.id]
+                    if (cached == null || cached.first != signature || cached.second.isRecycled) {
+                        // Rasterize styled text/vector layers at bounded preview resolution.
+                        val maxTextureEdge = if (MediaWorkers.isConstrainedDevice) 320 else 768
+                        val generated = rasterizeEffectCraftLayer(layer, editor.time, maxTextureEdge)
+                        if (generated != null) {
+                            textTextures[layer.id] = signature to generated
+                            generated
+                        } else null
+                    } else cached.second
+                }
             }
             else -> null
         } ?: continue
