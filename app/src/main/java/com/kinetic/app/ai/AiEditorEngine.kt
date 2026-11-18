@@ -767,7 +767,7 @@ object AiEditorEngine {
         prompt: String
     ): List<EffectInstance> {
         val mood = prompt.lowercase()
-        val categories = linkedSetOf("COLOR & LIGHT")
+        val categories = linkedSetOf("COLOR & LIGHT", "STYLIZE")
         if ("Time remapping" in request.priorities || request.style == "Velocity" ||
             listOf("velocity", "speed ramp", "slow motion", "slow-mo").any { it in mood }) {
             categories.add("MOTION")
@@ -776,9 +776,10 @@ object AiEditorEngine {
             categories.add("DISTORTION & WARP")
         }
         if (request.style == "Mograph" || listOf("anime", "glow", "neon", "stylized", "vfx").any { it in mood }) {
-            categories.add("STYLIZE")
             categories.add("PROCEDURAL")
+            categories.add("3D")
         }
+        if ("Typography" in request.priorities) categories.add("TEXT")
         if (listOf("blur", "soft", "dreamy", "depth").any { it in mood }) categories.add("BLUR")
         if (listOf("3d", "three dimensional", "parallax", "perspective").any { it in mood }) categories.add("3D")
         if ("Color grading" in request.priorities) categories.add("COLOR & LIGHT")
