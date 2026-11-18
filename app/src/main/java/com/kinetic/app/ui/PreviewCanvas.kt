@@ -253,6 +253,7 @@ fun CpuPreviewCanvas(
                     }
                     val previous = effectedBitmaps.put(layer.id, rendered ?: source)
                     if (previous != null && previous !== source && previous !== rendered && !previous.isRecycled) previous.recycle()
+                    if (legacyRendered != null && legacyRendered !== source && legacyRendered !== rendered && !legacyRendered.isRecycled) legacyRendered.recycle()
                     lastProcessed[layer.id] = key
                 } else {
                     if (rendered != null && rendered !== source && !rendered.isRecycled) rendered.recycle()
