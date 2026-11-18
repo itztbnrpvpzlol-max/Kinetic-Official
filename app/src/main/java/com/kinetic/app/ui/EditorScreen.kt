@@ -331,6 +331,9 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                         if (dockTool == "Text" || dockTool == "Appearance") {
                             LayerStylePanel(editor, activeLayer, onClose = { showToolPanel = false },
                                 modifier = Modifier.fillMaxWidth().height(adaptivePanelHeight.dp))
+                        } else if (dockTool == "Animation") {
+                            AnimationWorkspacePanel(editor, activeLayer,
+                                modifier = Modifier.fillMaxWidth().height(adaptivePanelHeight.dp))
                         } else {
                             ToolEditPanel(dockTool, editor, activeLayer,
                                 onClose = { showToolPanel = false },
@@ -373,7 +376,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                             editor.extractAudio(activeLayer.id)
                         } else Toast.makeText(ctx, "Select a video layer first", Toast.LENGTH_SHORT).show()
                     }
-                    "Text", "Appearance" -> {
+                    "Text", "Appearance", "Animation" -> {
                         if (activeLayer != null && (tool != "Text" || activeLayer.type == LayerType.TEXT)) {
                             showPropertiesPanel = false
                             showShapePanel = false
@@ -542,6 +545,7 @@ private fun FloatingEditingDock(active: String, layer: Layer?, onSelect: (String
             "Properties" to IconKind.SLIDERS,
             if (layer.type == LayerType.TEXT) "Text" to IconKind.TEXT else null,
             if (layer.type == LayerType.TEXT || layer.type == LayerType.SHAPE) "Appearance" to IconKind.FILTER else null,
+            "Animation" to IconKind.GRAPH,
             "Speed" to IconKind.STOPWATCH,
             "Volume" to IconKind.VOLUME,
             "Masking" to IconKind.MASK,
