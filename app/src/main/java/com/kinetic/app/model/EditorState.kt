@@ -7,6 +7,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.kinetic.app.data.AppSettings
+import com.kinetic.app.engine.EffectCraftEffectInfo
 import java.util.UUID
 import kotlin.math.abs
 import kotlin.math.max
@@ -695,6 +696,27 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
             if (id == PropId.POS_X || id == PropId.POS_Y) syncPositionKeyframes(result) else result
         }
         selectedKey = sorted.indexOf(moved)
+    }
+
+    fun addEffectCraftEffect(layerId: String, effect: EffectCraftEffectInfo): Boolean {
+        if (layers.none { it.id == layerId } || effect.id.isBlank()) return false
+        val instance = EffectInstance(
+            name = effect.name,
+            effectCraftId = effect.id,
+            effectCraftParameters = effect.params.associate { it.id to it.defaultJson }
+        )
+        updateLayer(layerId) { layer -> layer.copy(effectStack = layer.effectStack + instance) }
+        return layers.firstOrNull { it.id == layerId }?.effectStack?.any { it.id == instance.id } == true
+    }
+
+    fun updateEffectCraftParameter(layerId: String, effectId: String, parameter: String, valueJson: String) {
+        updateLayer(layerId, push = false) { layer ->
+            layer.copy(effectStack = layer.effectStack.map { effect ->
+                if (effect.id == effectId && effect.effectCraftId != null) {
+                    effect.copy(effectCraftParameters = effect.effectCraftParameters + (parameter to valueJson))
+                } else effect
+            })
+        }
     }
 
     fun addEffect(layerId: String, name: String): Boolean {
