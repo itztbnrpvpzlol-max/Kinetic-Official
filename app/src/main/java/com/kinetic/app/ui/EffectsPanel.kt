@@ -358,7 +358,7 @@ private fun EffectCraftParameterLine(
     val keys = effect.parameterKeys[parameter.id].orEmpty()
     val selected = editor.selectedEffectId == effect.id &&
         editor.selectedEffectParameter == parameter.id
-    val hasCurrentKey = keys.any { kotlin.math.abs(it.t - editor.time) <= 1f / 120f }
+    val hasCurrentKey = keys.any { kotlin.math.abs(it.t - editor.time) <= editor.frame / 2f }
     var editing by remember(effect.id, parameter.id) { mutableStateOf(false) }
     var input by remember(effect.id, parameter.id, raw) { mutableStateOf(raw.trim('"')) }
     var menuOpen by remember(effect.id, parameter.id) { mutableStateOf(false) }
