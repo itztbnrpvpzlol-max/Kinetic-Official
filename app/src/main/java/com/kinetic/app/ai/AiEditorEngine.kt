@@ -261,7 +261,7 @@ object AiEditorEngine {
                         output.limit(info.offset + info.size)
                         val pcm = output.slice().order(ByteOrder.LITTLE_ENDIAN)
                         while (pcm.remaining() >= 2 && processed < sampleRate * 120 * channels) {
-                            val sample = pcm.short.toInt() / 32768.0
+                            val sample = pcm.getShort().toInt() / 32768.0
                             sumSquares += sample * sample
                             samplesInWindow++
                             processed++
@@ -279,7 +279,7 @@ object AiEditorEngine {
             if (samplesInWindow > 0) energies.add(sqrt(sumSquares / samplesInWindow).toFloat())
             val mean = energies.average().takeIf { it.isFinite() }?.toFloat() ?: 0f
             val beats = ArrayList<Float>()
-            for (i in 2 until energies.lastIndex) {
+            for (i in 2 until (energies.size - 2)) {
                 val value = energies[i]
                 val before = (energies[i - 1] + energies[i - 2]) / 2f
                 val after = (energies[i + 1] + energies[i + 2]) / 2f
