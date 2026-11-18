@@ -166,9 +166,10 @@ object AiEditorEngine {
             if (rotation == 90 || rotation == 270) { val swap = width; width = height; height = swap }
             val name = queryName(context, uri)
             val sampleStep = max(0.45f, duration / 150f)
-            data class FrameSample(val time: Float, val energy: Float, val motion: Float, val style: Float)
+            data class FrameSample(val time: Float, val energy: Float, val change: Float, val motion: Float, val style: Float)
             val frames = ArrayList<FrameSample>()
             var previous: FloatArray? = null
+            var previousMotionFrame: FloatArray? = null
             var t = 0f
             while (t < duration && frames.size < 180) {
                 val bitmap = runCatching {
@@ -177,12 +178,15 @@ object AiEditorEngine {
                 if (bitmap != null) {
                     val features = frameFeatures(bitmap)
                     val difference = previous?.let { featureDistance(it, features) } ?: 0f
+                    val motionFrame = motionDescriptor(bitmap)
+                    val motion = previousMotionFrame?.let { estimateBlockMotion(it, motionFrame) } ?: 0f
                     val energy = (features[1] * 0.34f + features[2] * 0.28f +
                         features[3] * 0.38f).coerceIn(0f, 1f)
                     val stylized = (features[3] * 0.48f + features[2] * 0.32f +
                         features[4] * 0.20f).coerceIn(0f, 1f)
-                    frames.add(FrameSample(t, energy, difference, stylized))
+                    frames.add(FrameSample(t, energy, difference, motion, stylized))
                     previous = features
+                    previousMotionFrame = motionFrame
                     if (!bitmap.isRecycled) bitmap.recycle()
                 }
                 t += sampleStep
@@ -196,7 +200,7 @@ object AiEditorEngine {
             frames.forEachIndexed { index, item ->
                 if (index > 0) {
                     val prior = frames[index - 1]
-                    val strength = (item.motion * 0.72f + abs(item.energy - prior.energy) * 0.28f)
+                    val strength = (item.change * 0.78f + abs(item.energy - prior.energy) * 0.22f)
                         .coerceIn(0f, 1f)
                     if (strength > 0.20f && item.time - lastCut >= 0.8f) {
                         cuts.add(item.time to strength)
@@ -270,6 +274,63 @@ object AiEditorEngine {
             edgeDensity,
             (colorfulness / count).toFloat()
         )
+    }
+
+    /** Low-resolution luminance plane used for inexpensive block-motion estimation. */
+    private fun motionDescriptor(bitmap: Bitmap): FloatArray {
+        val width = 20
+        val height = 12
+        val scaled = Bitmap.createScaledBitmap(bitmap, width, height, true)
+        val pixels = IntArray(width * height)
+        scaled.getPixels(pixels, 0, width, 0, 0, width, height)
+        if (scaled !== bitmap) scaled.recycle()
+        return FloatArray(pixels.size) { index ->
+            val pixel = pixels[index]
+            val red = ((pixel shr 16) and 255) / 255f
+            val green = ((pixel shr 8) and 255) / 255f
+            val blue = (pixel and 255) / 255f
+            red * 0.2126f + green * 0.7152f + blue * 0.0722f
+        }
+    }
+
+    /**
+     * Sparse block matching over a 20x12 luminance plane. This estimates
+     * coarse frame-to-frame motion; it is not neural optical flow/interpolation.
+     */
+    private fun estimateBlockMotion(previous: FloatArray, current: FloatArray): Float {
+        val width = 20
+        val height = 12
+        if (previous.size != width * height || current.size != width * height) return 0f
+        var displacement = 0.0
+        var blocks = 0
+        for (top in 0 until height step 4) {
+            for (left in 0 until width step 5) {
+                var bestError = Double.POSITIVE_INFINITY
+                var bestDx = 0
+                var bestDy = 0
+                for (dy in -2..2) for (dx in -2..2) {
+                    var error = 0.0
+                    var count = 0
+                    for (y in top until min(height, top + 4)) {
+                        for (x in left until min(width, left + 5)) {
+                            val px = x + dx
+                            val py = y + dy
+                            if (px !in 0 until width || py !in 0 until height) continue
+                            error += abs(previous[y * width + x] - current[py * width + px])
+                            count++
+                        }
+                    }
+                    if (count > 0 && error / count < bestError) {
+                        bestError = error / count
+                        bestDx = dx
+                        bestDy = dy
+                    }
+                }
+                displacement += kotlin.math.sqrt((bestDx * bestDx + bestDy * bestDy).toDouble())
+                blocks++
+            }
+        }
+        return if (blocks == 0) 0f else (displacement / blocks / 2.828427).toFloat().coerceIn(0f, 1f)
     }
 
     private fun featureDistance(a: FloatArray, b: FloatArray): Float =
