@@ -1,5 +1,9 @@
 package com.kinetic.app.engine
 
+import android.graphics.Bitmap
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+
 /**
  * Versioned Kotlin-facing boundary for EffectCraft.
  *
@@ -53,6 +57,56 @@ object EffectCraftBridge {
         }.getOrElse { error ->
             """{"protocolVersion":1,"ok":false,"error":"Native batch call failed: ${error.javaClass.simpleName}"}"""
         }
+    }
+
+
+    /**
+     * Sends the actual decoded Kinetic clip frame through EffectCraft's compositor.
+     * Returns null only when the native renderer rejects the frame or cannot render it.
+     */
+    fun renderFrame(
+        source: Bitmap,
+        effectsJson: String,
+        timeSeconds: Float,
+        maxSide: Int,
+        cacheKey: String
+    ): Bitmap? {
+        if (!available || source.isRecycled || source.width <= 0 || source.height <= 0) return null
+        return runCatching {
+            if (!EffectCraftNative.nativeInitialize()) return null
+            val width = source.width
+            val height = source.height
+            val pixels = IntArray(width * height)
+            source.getPixels(pixels, 0, width, 0, 0, width, height)
+            val rgba = ByteArray(width * height * 4)
+            var offset = 0
+            for (pixel in pixels) {
+                rgba[offset++] = ((pixel ushr 16) and 0xFF).toByte()
+                rgba[offset++] = ((pixel ushr 8) and 0xFF).toByte()
+                rgba[offset++] = (pixel and 0xFF).toByte()
+                rgba[offset++] = ((pixel ushr 24) and 0xFF).toByte()
+            }
+            val encoded = EffectCraftNative.nativeRenderFrame(
+                cacheKey, rgba, width, height, effectsJson, timeSeconds, maxSide
+            ) ?: return null
+            if (encoded.size < 8) return null
+            val header = ByteBuffer.wrap(encoded).order(ByteOrder.LITTLE_ENDIAN)
+            val outWidth = header.int
+            val outHeight = header.int
+            if (outWidth <= 0 || outHeight <= 0 || encoded.size != 8 + outWidth * outHeight * 4) return null
+            val output = IntArray(outWidth * outHeight)
+            var i = 8
+            for (p in output.indices) {
+                val red = encoded[i++].toInt() and 0xFF
+                val green = encoded[i++].toInt() and 0xFF
+                val blue = encoded[i++].toInt() and 0xFF
+                val alpha = encoded[i++].toInt() and 0xFF
+                output[p] = (alpha shl 24) or (red shl 16) or (green shl 8) or blue
+            }
+            Bitmap.createBitmap(outWidth, outHeight, Bitmap.Config.ARGB_8888).also {
+                it.setPixels(output, 0, outWidth, 0, 0, outWidth, outHeight)
+            }
+        }.getOrNull()
     }
 
 }
