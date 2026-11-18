@@ -9,6 +9,7 @@ import androidx.compose.runtime.setValue
 import com.kinetic.app.data.AppSettings
 import com.kinetic.app.engine.EffectCraftEffectInfo
 import java.util.UUID
+import java.security.MessageDigest
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.roundToInt
@@ -41,6 +42,28 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
 
     val fps: Int get() = settings.fps
     val frame: Float get() = 1f / settings.fps
+
+    /**
+     * Stable content identity for pre-rendered output. Selection, playhead
+     * position and playback state are intentionally excluded; every property
+     * that can change the rendered composition is represented by the project
+     * settings and the ordered immutable layer snapshots.
+     */
+    fun timelineRenderFingerprint(width: Int, height: Int): String {
+        val source = buildString {
+            append(projectId).append('|')
+            append(fps).append('|')
+            append(resolution).append('|')
+            append(duration.toBits()).append('|')
+            append(width).append('x').append(height).append('|')
+            layers.forEach { layer ->
+                append(layer.toString()).append('\u001e')
+            }
+        }
+        val digest = MessageDigest.getInstance("SHA-256")
+            .digest(source.toByteArray(Charsets.UTF_8))
+        return digest.joinToString("") { byte -> "%02x".format(byte) }
+    }
     val selected: Layer? get() = layers.firstOrNull { it.id == selectedId }
     fun restoreProject(savedDuration: Float, savedResolution: Int, savedLayers: List<Layer>, savedTime: Float = 0f) {
         baseDuration = maxOf(savedDuration, savedLayers.maxOfOrNull { it.end } ?: 0f, 0.1f)
