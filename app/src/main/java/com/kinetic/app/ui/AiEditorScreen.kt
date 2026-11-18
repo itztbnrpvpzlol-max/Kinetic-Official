@@ -172,7 +172,7 @@ fun AiEditorScreen(settings: AppSettings, onBack: () -> Unit, onOpenEditor: (Edi
                     minLines = 2,
                     shape = RoundedCornerShape(14.dp)
                 )
-                Text("Kinetic measures reference pacing and image colour locally, then reuses that style profile on this device. This is analysis, not neural-network training.", color = KColors.Muted, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp))
+                Text("Reference videos train a lightweight on-device style model for shot pacing and visual energy. It is not a neural network or anime-character recognition model.", color = KColors.Muted, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp))
             }
             item {
                 AiSection("04", "Creative direction", "Tell the editor what you want")
@@ -237,7 +237,7 @@ fun AiEditorScreen(settings: AppSettings, onBack: () -> Unit, onOpenEditor: (Edi
                     Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
                         Text("ON-DEVICE AI", color = Color(0xFFB99AFF), fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         Text("Private by design", color = KColors.Text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                        Text("Footage frames, soundtrack energy and reference media are analysed locally. Kinetic then builds an editable timeline; your media is not sent to a cloud service.", color = KColors.Muted, fontSize = 12.sp)
+                        Text("Reference-shot clusters, footage features and soundtrack accents are processed locally. Kinetic builds an editable timeline; your media is not sent to a cloud service.", color = KColors.Muted, fontSize = 12.sp)
                     }
                 }
             }
