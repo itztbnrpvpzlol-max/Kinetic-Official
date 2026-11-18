@@ -32,7 +32,7 @@ class AnimeCharacterEncoder(nn.Module):
         trunk.fc = Identity()
         self.model = nn.Sequential(
             trunk,
-            nn.Sequential(nn.Linear(512, 500), Normalize()),
+            nn.Sequential(Identity(), nn.Linear(512, 500), Normalize()),
         )
 
     def forward(self, images):
