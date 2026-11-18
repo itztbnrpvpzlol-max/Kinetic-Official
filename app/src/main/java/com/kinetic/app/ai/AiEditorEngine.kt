@@ -20,13 +20,12 @@ import kotlin.math.min
 import kotlin.math.sqrt
 
 /**
- * On-device, deterministic AI-editing foundation.
+ * On-device AI-assisted editing pipeline.
  *
- * This pipeline performs real media inspection and produces an editable Kinetic
- * composition. It is deliberately model-free for now: it does not claim to train
- * a neural network or understand anime semantics. Scene-change, visual-energy,
- * beat and style measurements are local heuristics that can later be replaced
- * by learned models without changing the planner/executor contract.
+ * It analyses media locally, trains a compact reference-style clustering model,
+ * scores shots using motion and visual descriptors, and emits editable Kinetic
+ * layers. Semantic anime recognition and neural optical-flow interpolation are
+ * separate capabilities and are not represented as implemented here.
  */
 object AiEditorEngine {
     data class Request(
@@ -496,12 +495,15 @@ object AiEditorEngine {
                     Keyframe(cursor + duration, 0f)
                 ).distinctBy { (it.t * fps).toInt() }.sortedBy { it.t }
             } else emptyList()
-            val speedKeys = if ("Time remapping" in request.priorities && request.style == "Velocity") {
+            val speedKeys = if ("Time remapping" in request.priorities &&
+                (request.style == "Velocity" || scene.motionEnergy > 0.18f)) {
                 val center = cursor + duration * 0.5f
+                val slowFactor = (0.92f - scene.motionEnergy * 0.52f - scene.cutStrength * 0.12f).coerceIn(0.38f, 0.82f)
+                val fastFactor = (1.12f + scene.motionEnergy * 0.72f).coerceIn(1.12f, 1.85f)
                 listOf(
-                    Keyframe(cursor, 1.65f),
-                    Keyframe(center, 0.62f, KeyType.BEZIER, 0.3f, 0f, 0.7f, 1f),
-                    Keyframe(min(cursor + duration, center + duration * 0.22f), 1.35f)
+                    Keyframe(cursor, fastFactor),
+                    Keyframe(center, slowFactor, KeyType.BEZIER, 0.3f, 0f, 0.7f, 1f),
+                    Keyframe(min(cursor + duration, center + duration * 0.22f), fastFactor)
                 ).distinctBy { (it.t * fps).toInt() }.sortedBy { it.t }
             } else emptyList()
             val shakeTime = beatTimes.minByOrNull { abs(it - cursor) }?.takeIf { abs(it - cursor) < 0.18f }
@@ -514,11 +516,24 @@ object AiEditorEngine {
                     Keyframe(min(cursor + duration, cursor + local + 0.15f), 0f)
                 ).distinctBy { (it.t * fps).toInt() }.sortedBy { it.t }
             } else emptyList()
-            if (speedKeys.isNotEmpty() || rotationKeys.isNotEmpty() || opacityKeys.isNotEmpty()) {
+            val impactScale = if ("Impact shakes" in request.priorities && shakeTime != null) {
+                val local = (shakeTime - cursor).coerceIn(0f, duration)
+                val punch = (100f + scene.cutStrength * 7f + scene.motionEnergy * 5f).coerceIn(102f, 112f)
+                listOf(
+                    Keyframe(max(cursor, cursor + local - 0.035f), 100f),
+                    Keyframe(min(cursor + duration, cursor + local + 0.035f), punch, KeyType.BEZIER),
+                    Keyframe(min(cursor + duration, cursor + local + 0.13f), 100f)
+                ).distinctBy { (it.t * fps).toInt() }.sortedBy { it.t }
+            } else emptyList()
+            if (speedKeys.isNotEmpty() || rotationKeys.isNotEmpty() || opacityKeys.isNotEmpty() || impactScale.isNotEmpty()) {
                 val props = video.props.toMutableMap()
                 if (speedKeys.isNotEmpty()) props[PropId.SPEED] = Prop(1f, speedKeys)
                 if (rotationKeys.isNotEmpty()) props[PropId.ROTATION] = Prop(0f, rotationKeys)
                 if (opacityKeys.isNotEmpty()) props[PropId.OPACITY] = Prop(100f, opacityKeys)
+                if (impactScale.isNotEmpty()) {
+                    props[PropId.SCALE_X] = Prop(100f, impactScale)
+                    props[PropId.SCALE_Y] = Prop(100f, impactScale)
+                }
                 video = video.copy(props = props)
             }
             layers.add(video)
@@ -528,8 +543,17 @@ object AiEditorEngine {
             val sourceDuration = audioDuration?.takeIf { it > 0f } ?: compDuration
             val layerDuration = min(compDuration, sourceDuration)
             if (layerDuration > 0f) {
-                layers.add(newLayer(LayerType.AUDIO, "AI Soundtrack", 0f, layerDuration, 0f, 0f,
-                    uri.toString(), sourceDuration))
+                val audioLayer = newLayer(LayerType.AUDIO, "AI Soundtrack", 0f, layerDuration, 0f, 0f,
+                    uri.toString(), sourceDuration)
+                val fade = min(0.32f, layerDuration * 0.18f)
+                layers.add(audioLayer.copy(props = audioLayer.props + (
+                    PropId.VOLUME to Prop(1f, listOf(
+                        Keyframe(0f, 0f),
+                        Keyframe(fade, 1f),
+                        Keyframe(max(fade, layerDuration - fade), 1f),
+                        Keyframe(layerDuration, 0f)
+                    ).distinctBy { (it.t * fps).toInt() }.sortedBy { it.t })
+                )))
             }
         }
         if (plan.isNotEmpty()) {
