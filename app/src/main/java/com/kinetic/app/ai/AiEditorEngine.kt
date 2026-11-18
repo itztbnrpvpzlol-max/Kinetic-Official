@@ -7,11 +7,10 @@ import android.media.MediaFormat
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import com.kinetic.app.model.*
-import org.json.JSONArray
 import org.json.JSONObject
 import java.nio.ByteOrder
-import java.util.UUID
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
@@ -91,7 +90,9 @@ object AiEditorEngine {
         val audio = request.audio.firstOrNull()?.let { analyzeAudio(context, it) }
         val referenceVideos = request.references.filter { isVideo(context, it) }
             .take(6).mapNotNull { runCatching { analyzeVideo(context, it) }.getOrNull() }
-        val profile = buildStyleProfile(referenceVideos, request.styleNotes)
+        val imageFeatures = request.references.filterNot { isVideo(context, it) }
+            .take(12).mapNotNull { analyzeImageFeatures(context, it) }
+        val profile = buildStyleProfile(context, referenceVideos, imageFeatures, request.styleNotes)
         persistStyleProfile(context, profile)
 
         val totalDuration = request.durationSeconds.coerceIn(10f, 120f)
@@ -297,15 +298,36 @@ object AiEditorEngine {
         }
     }
 
-    private fun buildStyleProfile(references: List<VideoAnalysis>, notes: String): StyleProfile {
+    private fun analyzeImageFeatures(context: Context, uri: Uri): FloatArray? {
+        return runCatching {
+            val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, options) }
+            if (options.outWidth <= 0 || options.outHeight <= 0) return null
+            options.inSampleSize = max(1, max(options.outWidth, options.outHeight) / 512)
+            options.inJustDecodeBounds = false
+            val bitmap = context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, options) }
+                ?: return null
+            val features = frameFeatures(bitmap)
+            bitmap.recycle()
+            floatArrayOf(features[0], features[2])
+        }.getOrNull()
+    }
+
+    private fun buildStyleProfile(context: Context, references: List<VideoAnalysis>, images: List<FloatArray>, notes: String): StyleProfile {
         val scenes = references.flatMap { it.scenes }
-        val avgShot = scenes.map { it.duration }.average().takeIf { it.isFinite() }?.toFloat() ?: 1.8f
+        val previous = loadStyleProfile(context)
+        val avgShot = scenes.map { it.duration }.average().takeIf { it.isFinite() }?.toFloat()
+            ?: previous?.averageShotSeconds ?: 1.8f
         val total = references.sumOf { it.duration.toDouble() }.toFloat().coerceAtLeast(0.1f)
-        val cutRate = scenes.size / total
-        val brightness = scenes.map { it.visualEnergy }.average().takeIf { it.isFinite() }?.toFloat() ?: 0.5f
-        val saturation = 0.5f // Reference video frame saturation is represented in the feature pass in a later model-backed iteration.
+        val cutRate = if (scenes.isNotEmpty()) scenes.size / total else previous?.cutRate ?: 0.5f
+        val brightnessValues = images.map { it[0] } + scenes.map { it.visualEnergy }
+        val brightness = brightnessValues.average().takeIf { it.isFinite() }?.toFloat()
+            ?: previous?.averageBrightness ?: 0.5f
+        val saturation = images.map { it[1] }.average().takeIf { it.isFinite() }?.toFloat()
+            ?: previous?.averageSaturation ?: 0.5f
         return StyleProfile(avgShot.coerceIn(0.35f, 12f), cutRate.coerceIn(0.05f, 4f),
-            brightness.coerceIn(0f, 1f), saturation, references.size, notes.take(500))
+            brightness.coerceIn(0f, 1f), saturation.coerceIn(0f, 1f),
+            references.size + images.size, notes.take(500).ifBlank { previous?.notes.orEmpty() })
     }
 
     private fun planEdit(
@@ -329,7 +351,11 @@ object AiEditorEngine {
         var index = 0
         while (cursor < target && selected.size < 160) {
             val candidate = sorted.getOrNull(index % sorted.size) ?: break
-            val wanted = min(targetShot, target - cursor).coerceAtLeast(0.35f)
+            val beatBoundary = if ("Beat sync" in request.priorities) {
+                beats.firstOrNull { it > cursor + 0.45f && it <= cursor + targetShot * 1.5f }
+            } else null
+            val beatLength = beatBoundary?.minus(cursor)
+            val wanted = min(beatLength ?: targetShot, target - cursor).coerceAtLeast(0.35f)
             val sourceStart = candidate.start + (candidate.duration - min(candidate.duration, wanted)).coerceAtLeast(0f) * 0.5f
             val sourceEnd = min(candidate.end, sourceStart + wanted)
             val snapped = beats.minByOrNull { abs(it - cursor) }?.takeIf { abs(it - cursor) < 0.16f } ?: cursor
@@ -362,6 +388,15 @@ object AiEditorEngine {
             val h = info?.height?.takeIf { it > 0 }?.toFloat() ?: baseH
             var video = newLayer(LayerType.VIDEO, scene.sourceName, cursor, duration, w, h,
                 scene.uri.toString(), info?.duration ?: scene.end).copy(srcOffset = scene.start)
+            val fadeDuration = min(0.22f, duration * 0.22f)
+            val opacityKeys = if ("Transitions" in request.priorities) {
+                listOf(
+                    Keyframe(cursor, 0f),
+                    Keyframe(min(cursor + duration, cursor + fadeDuration), 100f),
+                    Keyframe(max(cursor, cursor + duration - fadeDuration), 100f),
+                    Keyframe(cursor + duration, 0f)
+                ).distinctBy { (it.t * fps).toInt() }.sortedBy { it.t }
+            } else emptyList()
             val speedKeys = if ("Time remapping" in request.priorities && request.style == "Velocity") {
                 val center = cursor + duration * 0.5f
                 listOf(
@@ -380,10 +415,11 @@ object AiEditorEngine {
                     Keyframe(min(cursor + duration, cursor + local + 0.15f), 0f)
                 ).distinctBy { (it.t * fps).toInt() }.sortedBy { it.t }
             } else emptyList()
-            if (speedKeys.isNotEmpty() || rotationKeys.isNotEmpty()) {
+            if (speedKeys.isNotEmpty() || rotationKeys.isNotEmpty() || opacityKeys.isNotEmpty()) {
                 val props = video.props.toMutableMap()
                 if (speedKeys.isNotEmpty()) props[PropId.SPEED] = Prop(1f, speedKeys)
                 if (rotationKeys.isNotEmpty()) props[PropId.ROTATION] = Prop(0f, rotationKeys)
+                if (opacityKeys.isNotEmpty()) props[PropId.OPACITY] = Prop(100f, opacityKeys)
                 video = video.copy(props = props)
             }
             layers.add(video)
