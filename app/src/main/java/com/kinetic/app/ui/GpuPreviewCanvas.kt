@@ -370,6 +370,35 @@ private fun GpuCompositionPreviewCanvas(
         }
     }
 
+    // SurfaceTexture remains the low-latency presentation path for plain clips,
+    // but it can take a moment to deliver its first frame after a seek or clip switch.
+    // Seed each active video layer with an EffectCraft MediaPool frame so the preview
+    // never flashes black while the hardware surface is starting.
+    for (layer in editor.layers.filter { it.id in textureVideoIds }) {
+        val uri = layer.uri ?: continue
+        key(layer.id) {
+            LaunchedEffect(uri, layer.srcOffset, compositionFps, qualityScale) {
+                if (frames[layer.id] == null) {
+                    val poster = MediaLoader.bitmapFor(
+                        context,
+                        Uri.parse(uri),
+                        LayerType.VIDEO,
+                        layer.srcOffset.coerceAtLeast(0f),
+                        sampleFps = compositionFps,
+                        maxEdge = if (MediaWorkers.isConstrainedDevice) 320 else 448,
+                        persistToDisk = true
+                    )
+                    if (poster != null && frames[layer.id] == null) {
+                        frames[layer.id] = poster
+                        trimPreviewFrameCache(layer.id)
+                    } else if (poster != null && !poster.isRecycled) {
+                        poster.recycle()
+                    }
+                }
+            }
+        }
+    }
+
     for (layer in editor.layers) {
         val uri = layer.uri
         val needsBitmap = layer.visible && (
@@ -1218,7 +1247,13 @@ private class CompositionGlRenderer(
     private fun drawVideoLayer(layer: GpuLayer, scale: Float, ox: Float, oy: Float) {
         val output = videoOutputs[layer.id]
         if (layer.opacity <= 0f) return
-        if (output == null || !output.hasFrame || externalProgram == 0) return
+        if (output == null || !output.hasFrame || externalProgram == 0) {
+            // Keep the MediaPool poster visible until SurfaceTexture has a valid frame.
+            layer.bitmap?.takeIf { !it.isRecycled }?.let {
+                drawBitmapLayer(layer, it, scale, ox, oy)
+            }
+            return
+        }
         val right = if (layer.mask) layer.width * 0.8f else layer.width
         val bottom = if (layer.mask) layer.height * 0.8f else layer.height
         val uvMax = if (layer.mask) 0.8f else 1f
