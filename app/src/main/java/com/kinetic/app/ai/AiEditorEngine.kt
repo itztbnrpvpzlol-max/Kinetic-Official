@@ -87,7 +87,9 @@ object AiEditorEngine {
         val videos = request.footage.map { analyzeVideo(context, it) }
         require(videos.any { it.scenes.isNotEmpty() }) { "Kinetic couldn't decode usable frames from the selected videos." }
 
-        val audio = request.audio.firstOrNull()?.let { analyzeAudio(context, it) }
+        val audioUri = request.audio.firstOrNull()
+        val audio = audioUri?.let { analyzeAudio(context, it) }
+        val audioDuration = audioUri?.let { probeAudioDuration(context, it) } ?: audio?.duration
         val referenceVideos = request.references.filter { isVideo(context, it) }
             .take(6).mapNotNull { runCatching { analyzeVideo(context, it) }.getOrNull() }
         val imageFeatures = request.references.filterNot { isVideo(context, it) }
@@ -97,7 +99,7 @@ object AiEditorEngine {
 
         val totalDuration = request.durationSeconds.coerceIn(10f, 120f)
         val plan = planEdit(videos.flatMap { it.scenes }, audio?.beats.orEmpty(), profile, request, totalDuration)
-        val layers = executePlan(plan, audio, request, fps.coerceIn(12, 60), videos, resolution)
+        val layers = executePlan(plan, audio, audioDuration, request, fps.coerceIn(12, 60), videos, resolution)
         val report = buildString {
             append("Analysed ").append(videos.size).append(" source video(s) and ")
             append(videos.sumOf { it.scenes.size }).append(" candidate scenes")
@@ -206,6 +208,24 @@ object AiEditorEngine {
 
     private fun featureDistance(a: FloatArray, b: FloatArray): Float =
         (abs(a[0] - b[0]) * 0.7f + abs(a[1] - b[1]) * 0.8f + abs(a[2] - b[2]) * 0.5f).coerceIn(0f, 1f)
+
+    private fun probeAudioDuration(context: Context, uri: Uri): Float? {
+        val extractor = MediaExtractor()
+        return try {
+            extractor.setDataSource(context, uri, null)
+            (0 until extractor.trackCount).mapNotNull { index ->
+                extractor.getTrackFormat(index).let { format ->
+                    if (format.containsKey(MediaFormat.KEY_DURATION)) {
+                        format.getLong(MediaFormat.KEY_DURATION) / 1_000_000f
+                    } else null
+                }
+            }.maxOrNull()?.takeIf { it.isFinite() && it > 0f }
+        } catch (_: Exception) {
+            null
+        } finally {
+            runCatching { extractor.release() }
+        }
+    }
 
     private fun analyzeAudio(context: Context, uri: Uri): AudioAnalysis? {
         val extractor = MediaExtractor()
@@ -370,6 +390,7 @@ object AiEditorEngine {
     private fun executePlan(
         plan: List<Scene>,
         audio: AudioAnalysis?,
+        audioDuration: Float?,
         request: Request,
         fps: Int,
         videos: List<VideoAnalysis>,
@@ -426,13 +447,12 @@ object AiEditorEngine {
             layers.add(video)
             cursor += duration
         }
-        audio?.let { audioInfo ->
-            request.audio.firstOrNull()?.let { uri ->
-                val audioDuration = min(compDuration, audioInfo.duration.takeIf { it > 0f } ?: compDuration)
-                if (audioDuration > 0f) {
-                    layers.add(newLayer(LayerType.AUDIO, "AI Soundtrack", 0f, audioDuration, 0f, 0f,
-                        uri.toString(), audioInfo.duration))
-                }
+        request.audio.firstOrNull()?.let { uri ->
+            val sourceDuration = audioDuration?.takeIf { it > 0f } ?: compDuration
+            val layerDuration = min(compDuration, sourceDuration)
+            if (layerDuration > 0f) {
+                layers.add(newLayer(LayerType.AUDIO, "AI Soundtrack", 0f, layerDuration, 0f, 0f,
+                    uri.toString(), sourceDuration))
             }
         }
         if (plan.isNotEmpty()) {
