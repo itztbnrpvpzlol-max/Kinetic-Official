@@ -358,7 +358,6 @@ fun CpuPreviewCanvas(
                         // persist through animated transforms and transitions.
                     }
                     LayerType.SHAPE -> {
-                        paint.color = l.color; paint.alpha = alpha
                         val points = if (l.vectorPoints.isEmpty()) listOf(VectorPoint(0f, 0f), VectorPoint(1f, 0f), VectorPoint(1f, 1f), VectorPoint(0f, 1f)) else l.vectorPointsAt(time)
                         val path = shapePaths.getOrPut(l.id) { android.graphics.Path() }
                         path.reset()
@@ -366,13 +365,62 @@ fun CpuPreviewCanvas(
                             val px = point.x * l.width; val py = point.y * l.height
                             if (index == 0) path.moveTo(px, py) else path.lineTo(px, py)
                         }
-                        path.close(); nc.drawPath(path, paint)
+                        path.close()
+                        paint.alpha = alpha
+                        paint.xfermode = blendModes[l.blendMode]
+                        paint.colorFilter = if ("Grayscale" in l.effects) grayscaleFilter else null
+                        if (l.fillEnabled) {
+                            paint.style = Paint.Style.FILL
+                            paint.color = l.color
+                            nc.drawPath(path, paint)
+                        }
+                        if (l.strokeEnabled && l.strokeWidth > 0f) {
+                            paint.style = Paint.Style.STROKE
+                            paint.strokeJoin = Paint.Join.ROUND
+                            paint.strokeCap = Paint.Cap.ROUND
+                            paint.strokeWidth = l.strokeWidth
+                            paint.color = l.strokeColor
+                            nc.drawPath(path, paint)
+                        }
+                        paint.style = Paint.Style.FILL
                     }
                     LayerType.TEXT -> {
-                        textPaint.color = l.color; textPaint.alpha = alpha
+                        textPaint.textSize = l.fontSize.coerceIn(1f, 1000f)
+                        val family = when (l.fontFamily) {
+                            "Serif" -> Typeface.SERIF
+                            "Monospace" -> Typeface.MONOSPACE
+                            "Sans Serif" -> Typeface.SANS_SERIF
+                            else -> Typeface.DEFAULT
+                        }
+                        val style = when {
+                            l.textBold && l.textItalic -> Typeface.BOLD_ITALIC
+                            l.textBold -> Typeface.BOLD
+                            l.textItalic -> Typeface.ITALIC
+                            else -> Typeface.NORMAL
+                        }
+                        textPaint.typeface = Typeface.create(family, style)
+                        textPaint.textAlign = when (l.textAlign) {
+                            "Left" -> Paint.Align.LEFT
+                            "Right" -> Paint.Align.RIGHT
+                            else -> Paint.Align.CENTER
+                        }
                         textPaint.xfermode = blendModes[l.blendMode]
                         textPaint.colorFilter = if ("Grayscale" in l.effects) grayscaleFilter else null
-                        nc.drawText(l.text, l.width / 2f, l.height / 2f + 40f, textPaint)
+                        if (l.fillEnabled) {
+                            textPaint.style = Paint.Style.FILL
+                            textPaint.color = l.color
+                            textPaint.alpha = alpha
+                            nc.drawText(l.text, when (l.textAlign) { "Left" -> 0f; "Right" -> l.width; else -> l.width / 2f }, l.height / 2f + l.fontSize * 0.34f, textPaint)
+                        }
+                        if (l.strokeEnabled && l.strokeWidth > 0f) {
+                            textPaint.style = Paint.Style.STROKE
+                            textPaint.strokeWidth = l.strokeWidth
+                            textPaint.strokeJoin = Paint.Join.ROUND
+                            textPaint.color = l.strokeColor
+                            textPaint.alpha = alpha
+                            nc.drawText(l.text, when (l.textAlign) { "Left" -> 0f; "Right" -> l.width; else -> l.width / 2f }, l.height / 2f + l.fontSize * 0.34f, textPaint)
+                        }
+                        textPaint.style = Paint.Style.FILL
                     }
                     else -> Unit
                 }
