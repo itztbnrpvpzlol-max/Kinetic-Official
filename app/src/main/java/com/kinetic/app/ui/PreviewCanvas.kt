@@ -366,12 +366,12 @@ fun CpuPreviewCanvas(
                             if (index == 0) path.moveTo(px, py) else path.lineTo(px, py)
                         }
                         path.close()
-                        paint.alpha = alpha
                         paint.xfermode = blendModes[l.blendMode]
                         paint.colorFilter = if ("Grayscale" in l.effects) grayscaleFilter else null
                         if (l.fillEnabled) {
                             paint.style = Paint.Style.FILL
                             paint.color = l.color
+                            paint.alpha = alpha
                             nc.drawPath(path, paint)
                         }
                         if (l.strokeEnabled && l.strokeWidth > 0f) {
@@ -380,6 +380,7 @@ fun CpuPreviewCanvas(
                             paint.strokeCap = Paint.Cap.ROUND
                             paint.strokeWidth = l.strokeWidth
                             paint.color = l.strokeColor
+                            paint.alpha = alpha
                             nc.drawPath(path, paint)
                         }
                         paint.style = Paint.Style.FILL
