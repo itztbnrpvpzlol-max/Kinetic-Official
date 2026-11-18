@@ -2,7 +2,6 @@ package com.kinetic.app.ui
 
 import android.content.Intent
 import android.net.Uri
-import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -32,6 +31,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -46,13 +46,22 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.kinetic.app.ai.AiEditorEngine
+import com.kinetic.app.data.AppSettings
+import com.kinetic.app.model.EditorState
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private data class AiInputFile(val uri: Uri, val label: String)
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-fun AiEditorScreen(onBack: () -> Unit) {
+fun AiEditorScreen(settings: AppSettings, onBack: () -> Unit, onOpenEditor: (EditorState) -> Unit) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var generating by remember { mutableStateOf(false) }
+    var generationStatus by remember { mutableStateOf("") }
     val footage = remember { mutableStateListOf<AiInputFile>() }
     val soundtrack = remember { mutableStateListOf<AiInputFile>() }
     val styleReferences = remember { mutableStateListOf<AiInputFile>() }
@@ -234,16 +243,57 @@ fun AiEditorScreen(onBack: () -> Unit) {
         Column(Modifier.fillMaxWidth().background(KColors.Surface).padding(horizontal = 18.dp, vertical = 12.dp)) {
             Button(
                 onClick = {
-                    Toast.makeText(context, "AI planning runtime is the next integration step. Your selections are ready in this screen.", Toast.LENGTH_LONG).show()
+                    if (generating || footage.isEmpty()) return@Button
+                    generating = true
+                    generationStatus = "Analysing footage, music and style references on this device…"
+                    val seconds = when (targetDuration) {
+                        "15–30 seconds" -> 22.5f
+                        "60–90 seconds" -> 75f
+                        else -> 37.5f
+                    }
+                    scope.launch {
+                        val result = runCatching {
+                            withContext(Dispatchers.IO) {
+                                AiEditorEngine.generate(
+                                    context,
+                                    AiEditorEngine.Request(
+                                        footage = footage.map { it.uri },
+                                        audio = soundtrack.map { it.uri },
+                                        references = styleReferences.map { it.uri },
+                                        prompt = prompt,
+                                        style = selectedStyle,
+                                        durationSeconds = seconds,
+                                        priorities = selectedFocus.toSet(),
+                                        styleNotes = styleNotes
+                                    ),
+                                    settings.fps,
+                                    settings.resolution
+                                )
+                            }
+                        }
+                        generating = false
+                        result.onSuccess { generated ->
+                            val project = EditorState(settings, projectName = generated.name)
+                            project.restoreProject(generated.duration, settings.resolution, generated.layers, 0f)
+                            android.widget.Toast.makeText(context, generated.report, android.widget.Toast.LENGTH_LONG).show()
+                            onOpenEditor(project)
+                        }.onFailure { error ->
+                            generationStatus = error.message ?: "Couldn't generate this edit. Check the selected media and try again."
+                        }
+                    }
                 },
-                enabled = false,
+                enabled = footage.isNotEmpty() && !generating,
                 modifier = Modifier.fillMaxWidth().height(52.dp),
                 shape = RoundedCornerShape(15.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF7652B8))
             ) {
-                Text("Generate my edit", fontWeight = FontWeight.SemiBold)
+                Text(if (generating) "Analysing & building…" else "Generate my edit", fontWeight = FontWeight.SemiBold)
             }
-            Text("The input screen is in place. Local media analysis and timeline generation are not connected yet.", color = KColors.Muted, fontSize = 10.sp, modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 6.dp))
+            Text(
+                generationStatus.ifBlank { "Local scene analysis, music-beat detection, style profiling and editable timeline generation." },
+                color = KColors.Muted, fontSize = 10.sp,
+                modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 6.dp)
+            )
         }
     }
 }
