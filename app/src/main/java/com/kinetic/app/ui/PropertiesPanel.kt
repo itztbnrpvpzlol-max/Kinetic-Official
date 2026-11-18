@@ -34,6 +34,10 @@ fun PropertiesList(editor: EditorState, layer: Layer, onParent: () -> Unit) {
         Modifier.fillMaxSize().background(KColors.Surface).verticalScroll(rememberScrollState())
             .padding(horizontal = 12.dp, vertical = 7.dp)
     ) {
+        if (layer.type == LayerType.SHAPE || layer.type == LayerType.TEXT) {
+            LayerAppearanceControls(editor, layer)
+            Spacer(Modifier.height(8.dp))
+        }
         if (layer.type == LayerType.SHAPE) {
             var showVectorPoints by remember(layer.id) { mutableStateOf(false) }
             val points = layer.vectorPoints.ifEmpty {
@@ -203,5 +207,121 @@ fun ScrubValueBar(
             },
             onDismiss = { editingValue = false }
         )
+    }
+}
+
+@Composable
+private fun LayerAppearanceControls(editor: EditorState, layer: Layer) {
+    var editingText by remember(layer.id) { mutableStateOf(false) }
+    val palette = listOf(
+        0xFFFFFFFF.toInt(), 0xFF111111.toInt(), 0xFFFF5252.toInt(),
+        0xFFFFB300.toInt(), 0xFFFFEB3B.toInt(), 0xFF69F0AE.toInt(),
+        0xFF40C4FF.toInt(), 0xFF448AFF.toInt(), 0xFFB388FF.toInt(),
+        0xFFFF80AB.toInt(), 0xFF8D6E63.toInt(), 0xFF9E9E9E.toInt()
+    )
+    Column(Modifier.fillMaxWidth()) {
+        Text(if (layer.type == LayerType.TEXT) "TEXT & TYPOGRAPHY" else "FILL & STROKE",
+            color = KColors.Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold,
+            letterSpacing = 1.1.sp, modifier = Modifier.padding(start = 2.dp, top = 3.dp, bottom = 5.dp))
+        if (layer.type == LayerType.TEXT) {
+            Row(Modifier.fillMaxWidth().height(34.dp).clip(RoundedCornerShape(6.dp))
+                .background(KColors.Bg).clickable { editingText = true }.padding(horizontal = 9.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                Text("Edit text content", color = KColors.Text, fontSize = 11.sp, modifier = Modifier.weight(1f))
+                Text(layer.text.take(20), color = KColors.Muted, fontSize = 10.sp, maxLines = 1)
+            }
+            Spacer(Modifier.height(4.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Font size", color = KColors.Text, fontSize = 11.sp, modifier = Modifier.weight(1f))
+                ScrubValueBar("Size", layer.fontSize, Modifier.weight(1.2f), step = 2f,
+                    minValue = 4f, maxValue = 600f, valueFormat = "%.0f",
+                    onScrubStart = { editor.beginEdit() }) { value ->
+                    editor.updateLayer(layer.id, push = false) { it.copy(fontSize = value.coerceAtLeast(4f)) }
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                listOf("Sans Serif", "Serif", "Monospace").forEach { family ->
+                    AppearanceChoice(family, layer.fontFamily == family) {
+                        editor.updateLayer(layer.id) { it.copy(fontFamily = family) }
+                    }
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                AppearanceChoice("Bold", layer.textBold) {
+                    editor.updateLayer(layer.id) { it.copy(textBold = !it.textBold) }
+                }
+                AppearanceChoice("Italic", layer.textItalic) {
+                    editor.updateLayer(layer.id) { it.copy(textItalic = !it.textItalic) }
+                }
+                listOf("Left", "Center", "Right").forEach { alignment ->
+                    AppearanceChoice(alignment, layer.textAlign == alignment) {
+                        editor.updateLayer(layer.id) { it.copy(textAlign = alignment) }
+                    }
+                }
+            }
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Fill", color = KColors.Text, fontSize = 11.sp, modifier = Modifier.weight(1f))
+            AppearanceChoice("On", layer.fillEnabled) {
+                editor.updateLayer(layer.id) { it.copy(fillEnabled = true) }
+            }
+            AppearanceChoice("Off", !layer.fillEnabled) {
+                editor.updateLayer(layer.id) { it.copy(fillEnabled = false) }
+            }
+        }
+        Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            palette.forEach { color ->
+                Box(Modifier.weight(1f).height(20.dp).clip(RoundedCornerShape(4.dp))
+                    .background(Color(color))
+                    .border(if (layer.color == color) 2.dp else 1.dp,
+                        if (layer.color == color) KColors.Accent else KColors.Line, RoundedCornerShape(4.dp))
+                    .clickable { editor.updateLayer(layer.id) { it.copy(color = color) } })
+            }
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Stroke", color = KColors.Text, fontSize = 11.sp, modifier = Modifier.weight(1f))
+            AppearanceChoice("On", layer.strokeEnabled) {
+                editor.updateLayer(layer.id) { it.copy(strokeEnabled = true, strokeWidth = it.strokeWidth.coerceAtLeast(1f)) }
+            }
+            AppearanceChoice("Off", !layer.strokeEnabled) {
+                editor.updateLayer(layer.id) { it.copy(strokeEnabled = false) }
+            }
+        }
+        if (layer.strokeEnabled) {
+            Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                palette.forEach { color ->
+                    Box(Modifier.weight(1f).height(18.dp).clip(RoundedCornerShape(4.dp))
+                        .background(Color(color))
+                        .border(if (layer.strokeColor == color) 2.dp else 1.dp,
+                            if (layer.strokeColor == color) KColors.Accent else KColors.Line, RoundedCornerShape(4.dp))
+                        .clickable { editor.updateLayer(layer.id) { it.copy(strokeColor = color) } })
+                }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Stroke width", color = KColors.Text, fontSize = 10.sp, modifier = Modifier.weight(1f))
+                ScrubValueBar("Width", layer.strokeWidth, Modifier.weight(1.2f), step = 0.5f,
+                    minValue = 0f, maxValue = 80f, valueFormat = "%.1f",
+                    onScrubStart = { editor.beginEdit() }) { value ->
+                    editor.updateLayer(layer.id, push = false) { it.copy(strokeWidth = value) }
+                }
+            }
+        }
+    }
+    if (editingText) {
+        TextInputDialog(title = "Edit text", initial = layer.text, onDone = { value ->
+            editor.updateLayer(layer.id) { it.copy(text = value) }
+            editingText = false
+        }, onDismiss = { editingText = false })
+    }
+}
+
+@Composable
+private fun AppearanceChoice(label: String, selected: Boolean, onClick: () -> Unit) {
+    Box(Modifier.padding(end = 2.dp).height(26.dp).clip(RoundedCornerShape(6.dp))
+        .background(if (selected) KColors.Accent.copy(alpha = 0.14f) else KColors.Bg)
+        .border(1.dp, if (selected) KColors.Accent.copy(alpha = 0.65f) else KColors.Line, RoundedCornerShape(6.dp))
+        .clickable(onClick = onClick).padding(horizontal = 7.dp), contentAlignment = Alignment.Center) {
+        Text(label, color = if (selected) KColors.Accent else KColors.Text,
+            fontSize = 8.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
     }
 }
