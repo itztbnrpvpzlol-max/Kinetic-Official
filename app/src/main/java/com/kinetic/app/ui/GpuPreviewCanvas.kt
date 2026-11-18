@@ -297,7 +297,7 @@ private fun GpuCompositionPreviewCanvas(
     // layer underneath, rather than dropping adjustment layers from preview.
     val adjustmentEffectsByLayer = editor.layers.mapIndexedNotNull { index, layer ->
         if (layer.type == LayerType.ADJUSTMENT) return@mapIndexedNotNull null
-        val effectsAbove = editor.layers.take(index)
+        val effectsAbove = editor.layers.take(index).asReversed()
             .asSequence()
             .filter { it.type == LayerType.ADJUSTMENT && it.visible && it.activeAt(editor.time) }
             .flatMap { it.effectStack.asSequence() }
