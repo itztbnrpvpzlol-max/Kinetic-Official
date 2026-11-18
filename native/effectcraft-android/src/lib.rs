@@ -156,3 +156,221 @@ pub extern "system" fn Java_com_kinetic_app_engine_EffectCraftNative_nativeExecu
         Err(_) => response_string(&mut env, error_response("EffectCraft encountered an internal panic during a command batch")),
     }
 }
+
+
+use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
+
+use effectcraft_engine::project::{Footage, FootageKind, ItemId, ItemKind, LayerId, LayerSource};
+use effectcraft_engine::raster::Image;
+use effectcraft_engine::render::FootageSource;
+use effectcraft_engine::time::Tick;
+
+struct MemoryFootage {
+    item: ItemId,
+    frame: RwLock<Arc<Image>>,
+}
+
+impl MemoryFootage {
+    fn replace(&self, rgba: &[u8], width: u32, height: u32) -> Result<(), String> {
+        let expected = width as usize * height as usize * 4;
+        if width == 0 || height == 0 || rgba.len() != expected {
+            return Err("Invalid input frame dimensions".into());
+        }
+        let mut image = Image::new(width, height);
+        for (dst, src) in image.data.iter_mut().zip(rgba.chunks_exact(4)) {
+            let a = f32::from(src[3]) / 255.0;
+            *dst = [
+                (f32::from(src[0]) / 255.0) * a,
+                (f32::from(src[1]) / 255.0) * a,
+                (f32::from(src[2]) / 255.0) * a,
+                a,
+            ];
+        }
+        *self.frame.write().map_err(|_| "Frame buffer lock unavailable")? = Arc::new(image);
+        Ok(())
+    }
+}
+
+impl FootageSource for MemoryFootage {
+    fn frame(&self, item: ItemId, _footage: &Footage, _time: Tick) -> Option<Arc<Image>> {
+        if item != self.item { return None; }
+        self.frame.read().ok().map(|image| image.clone())
+    }
+}
+
+struct RenderContext {
+    session: Session,
+    source: Arc<MemoryFootage>,
+    comp: ItemId,
+    layer: LayerId,
+    width: u32,
+    height: u32,
+    effect_ids: String,
+    parameter_state: String,
+}
+
+static RENDER_CONTEXTS: OnceLock<Mutex<HashMap<String, RenderContext>>> = OnceLock::new();
+
+fn render_contexts() -> &'static Mutex<HashMap<String, RenderContext>> {
+    RENDER_CONTEXTS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn create_render_context(width: u32, height: u32, effects: &Value, rgba: &[u8]) -> Result<RenderContext, String> {
+    if width == 0 || height == 0 || width > 8192 || height > 8192 {
+        return Err("Unsupported frame dimensions".into());
+    }
+    let mut engine = Session::default();
+    let comp_value = engine.execute("comp.new", json!({
+        "name": "Kinetic Preview",
+        "width": width,
+        "height": height,
+        "frameRate": 30,
+        "duration": 3600.0,
+        "background": [0.0, 0.0, 0.0]
+    })).map_err(|e| e.to_string())?;
+    let comp = ItemId(comp_value.get("comp").and_then(Value::as_u64).ok_or("EffectCraft did not create a composition")?);
+    let layer_value = engine.execute("layer.newSolid", json!({
+        "comp": comp.0,
+        "name": "Kinetic Source Frame",
+        "width": width,
+        "height": height,
+        "color": "#ffffff"
+    })).map_err(|e| e.to_string())?;
+    let layer = LayerId(layer_value.get("layer").and_then(Value::as_u64).ok_or("EffectCraft did not create a source layer")?);
+
+    let mut ids = Vec::new();
+    if let Some(list) = effects.as_array() {
+        for effect in list {
+            let id = effect.get("id").and_then(Value::as_str).or_else(|| effect.get("name").and_then(Value::as_str))
+                .ok_or("Effect entry is missing its EffectCraft ID")?;
+            engine.execute("effect.apply", json!({"comp": comp.0, "layers": [layer.0], "effect": id}))
+                .map_err(|e| format!("Could not apply EffectCraft effect {id}: {e}"))?;
+            ids.push(id);
+        }
+    }
+
+    let solid_item = {
+        let c = engine.project.comp(comp).ok_or("EffectCraft composition disappeared")?;
+        let l = c.layer(layer).ok_or("EffectCraft source layer disappeared")?;
+        match l.source {
+            LayerSource::Solid { item } => item,
+            _ => return Err("EffectCraft source layer is not a solid".into()),
+        }
+    };
+    let source = Arc::new(MemoryFootage {
+        item: solid_item,
+        frame: RwLock::new(Arc::new(Image::new(width, height))),
+    });
+    {
+        let project = Arc::make_mut(&mut engine.project);
+        let item = project.item_mut(solid_item).ok_or("EffectCraft solid item disappeared")?;
+        item.kind = ItemKind::Footage(Footage {
+            path: "kinetic://memory-frame".into(),
+            kind: FootageKind::Still,
+            width,
+            height,
+            pixel_aspect: 1.0,
+            frame_rate: effectcraft_engine::time::FrameRate::FPS_30,
+            duration: Tick::from_seconds_f64(3600.0),
+            has_video: true,
+            ..Footage::default()
+        });
+        let l = project.comp_mut(comp).and_then(|c| c.layer_mut(layer)).ok_or("EffectCraft source layer disappeared")?;
+        l.source = LayerSource::Footage { item: solid_item };
+    }
+    engine.footage = source.clone();
+    engine.bump();
+    source.replace(rgba, width, height)?;
+    Ok(RenderContext {
+        session: engine,
+        source,
+        comp,
+        layer,
+        width,
+        height,
+        effect_ids: serde_json::to_string(&ids).map_err(|e| e.to_string())?,
+        parameter_state: String::new(),
+    })
+}
+
+fn update_effect_parameters(context: &mut RenderContext, effects: &Value) -> Result<(), String> {
+    let state = serde_json::to_string(effects).map_err(|e| e.to_string())?;
+    if state == context.parameter_state {
+        return Ok(());
+    }
+    let mut effect_index = 0usize;
+    if let Some(list) = effects.as_array() {
+        for effect in list {
+            effect_index += 1;
+            let Some(values) = effect.get("values").and_then(Value::as_object) else { continue; };
+            for (name, value) in values {
+                let path = format!("effects/#{effect_index}/{name}");
+                context.session.execute("prop.set", json!({
+                    "comp": context.comp.0,
+                    "layer": context.layer.0,
+                    "path": path,
+                    "value": value,
+                    "merge": "kinetic-effectcraft-preview"
+                })).map_err(|e| format!("Could not set EffectCraft parameter {path}: {e}"))?;
+            }
+        }
+    }
+    context.parameter_state = state;
+    Ok(())
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_kinetic_app_engine_EffectCraftNative_nativeRenderFrame(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    cache_key: JString<'_>,
+    frame: jni::objects::JByteArray<'_>,
+    width: jni::sys::jint,
+    height: jni::sys::jint,
+    effects_json: JString<'_>,
+    time_seconds: jni::sys::jfloat,
+    max_side: jni::sys::jint,
+) -> jni::sys::jbyteArray {
+    let result = catch_unwind(AssertUnwindSafe(|| -> Result<Vec<u8>, String> {
+        let key = env.get_string(&cache_key).map_err(|e| e.to_string())?.to_string_lossy().into_owned();
+        let effects_text = env.get_string(&effects_json).map_err(|e| e.to_string())?.to_string_lossy().into_owned();
+        let effects: Value = serde_json::from_str(&effects_text).map_err(|e| format!("Invalid EffectCraft effect list: {e}"))?;
+        let w = u32::try_from(width).map_err(|_| "Invalid frame width")?;
+        let h = u32::try_from(height).map_err(|_| "Invalid frame height")?;
+        let input_len = env.get_array_length(&frame).map_err(|e| e.to_string())? as usize;
+        let mut input = vec![0i8; input_len];
+        env.get_byte_array_region(&frame, 0, &mut input).map_err(|e| e.to_string())?;
+        let rgba: Vec<u8> = input.into_iter().map(|v| v as u8).collect();
+        if rgba.len() != w as usize * h as usize * 4 {
+            return Err("Input RGBA buffer length does not match its dimensions".into());
+        }
+        let ids = serde_json::to_string(&effects.as_array().unwrap_or(&Vec::new()).iter()
+            .map(|e| e.get("id").or_else(|| e.get("name")).cloned().unwrap_or(Value::Null))
+            .collect::<Vec<_>>()).map_err(|e| e.to_string())?;
+        let mut contexts = render_contexts().lock().map_err(|_| "EffectCraft render cache lock unavailable")?;
+        let rebuild = contexts.get(&key).is_none_or(|c| c.width != w || c.height != h || c.effect_ids != ids);
+        if rebuild {
+            let context = create_render_context(w, h, &effects, &rgba)?;
+            contexts.insert(key.clone(), context);
+        }
+        let context = contexts.get_mut(&key).ok_or("EffectCraft render context unavailable")?;
+        context.source.replace(&rgba, w, h)?;
+        update_effect_parameters(context, &effects)?;
+        let (out_w, out_h, pixels) = context.session.render_rgba8_alpha(
+            context.comp,
+            Tick::from_seconds_f64(f64::from(time_seconds)),
+            u32::try_from(max_side).unwrap_or(0),
+            true,
+        ).map_err(|e| e.to_string())?;
+        let mut out = Vec::with_capacity(8 + pixels.len());
+        out.extend_from_slice(&out_w.to_le_bytes());
+        out.extend_from_slice(&out_h.to_le_bytes());
+        out.extend_from_slice(&pixels);
+        Ok(out)
+    }));
+    match result {
+        Ok(Ok(bytes)) => env.byte_array_from_slice(&bytes).map(|a| a.into_raw()).unwrap_or(std::ptr::null_mut()),
+        _ => std::ptr::null_mut(),
+    }
+}
