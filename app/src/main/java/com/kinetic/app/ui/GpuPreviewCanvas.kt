@@ -124,7 +124,7 @@ fun PreviewCanvas(
     // TextureView is a bottom-layer surface. Keep it only when the one active
     // video is the lowest visual layer; Canvas then draws stills/text/shapes
     // above it without ever copying the decoded video frame into a Bitmap.
-    val hasEffects = activeVisualLayers.any { layer -> layer.effectStack.any { it.enabled } }
+    val hasEffects = activeVisualLayers.any { layer -> layer.effectStack.any { it.enabled && it.effectCraftId == null } }
     val hasComplexMasks = activeVisualLayers.any { it.maskEnabled && it.maskPath != null }
     val directVideo = videoLayers.singleOrNull()
         ?.takeIf {
@@ -256,7 +256,7 @@ private fun GpuCompositionPreviewCanvas(
     // Effect-bearing clips are intentionally excluded and decoded to bounded
     // bitmaps so the independent native CPU engine can process their pixels.
     val videoLayers = activeVideoLayers
-        .filter { failedVideoSources[it.id] != it.uri && it.effectStack.none { effect -> effect.enabled } }
+        .filter { failedVideoSources[it.id] != it.uri && it.effectStack.none { effect -> effect.enabled && effect.effectCraftId == null } }
         .take(decoderLimit)
     val textureVideoIds = videoLayers.mapTo(HashSet<String>()) { it.id }
 
@@ -281,7 +281,7 @@ private fun GpuCompositionPreviewCanvas(
 
     // Untouched video uses SurfaceTexture as a GPU source texture. Effect-bearing
     // video uses the bitmap path above so effects never depend on a GPU shader.
-    val hasEffectVideo = activeVideoLayers.any { layer -> layer.effectStack.any { it.enabled } }
+    val hasEffectVideo = activeVideoLayers.any { layer -> layer.effectStack.any { it.enabled && it.effectCraftId == null } }
     // Keep native CPU effects below the decoder's maximum sample rate on
     // constrained devices; the GL thread remains free to composite each frame.
     val compositionFps = if (hasEffectVideo) {
@@ -439,7 +439,7 @@ private fun GpuCompositionPreviewCanvas(
                     continue
                 }
                 val source = frames[layer.id] ?: continue
-                val activeEffects = layer.effectStack.filter { it.enabled }.take(8)
+                val activeEffects = layer.effectStack.filter { it.enabled && it.effectCraftId == null }.take(8)
                 if (activeEffects.isEmpty()) {
                     val old = effectedFrames.remove(layer.id)
                     if (old != null && old !== source && !old.isRecycled) old.recycle()
