@@ -1,0 +1,55 @@
+name: Build Anime Character Model
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout Kinetic
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install CPU export dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch==2.3.1 torchvision==0.18.1 --index-url https://download.pytorch.org/whl/cpu
+          pip install onnx==1.16.1
+
+      - name: Export AnimeCV ResNet18 embedding model
+        run: |
+          python tools/export_animecv_onnx.py \
+            --checkpoint "$RUNNER_TEMP/res18_0222.mdl" \
+            --output "$RUNNER_TEMP/anime-character-resnet18.onnx"
+
+      - name: Validate ONNX graph
+        run: |
+          python - <<'PY'
+          import onnx
+          path = "$RUNNER_TEMP/anime-character-resnet18.onnx"
+          model = onnx.load(path)
+          onnx.checker.check_model(model)
+          print("ONNX graph validated")
+          PY
+
+      - name: Publish model release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh release view kinetic-ai-models-v1 >/dev/null 2>&1; then
+            gh release create kinetic-ai-models-v1 \
+              --title "Kinetic AI Models v1" \
+              --notes "AnimeCV ResNet18 character embedding model exported to ONNX. Upstream model implementation: MIT-licensed AnimeCV; checkpoint provided by its author. Optical flow model is downloaded separately from OpenCV Zoo."
+          fi
+          gh release upload kinetic-ai-models-v1 \
+            "$RUNNER_TEMP/anime-character-resnet18.onnx" --clobber
