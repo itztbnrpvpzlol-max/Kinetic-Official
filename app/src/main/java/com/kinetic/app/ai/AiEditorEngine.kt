@@ -47,7 +47,9 @@ object AiEditorEngine {
         val visualEnergy: Float,
         val cutStrength: Float,
         val motionEnergy: Float = 0f,
-        val stylizedVisualScore: Float = 0f
+        val stylizedVisualScore: Float = 0f,
+        val identityEmbedding: FloatArray? = null,
+        val characterMatchScore: Float = 0f
     ) {
         val duration: Float get() = (end - start).coerceAtLeast(0.1f)
     }
@@ -89,16 +91,24 @@ object AiEditorEngine {
     suspend fun generate(context: Context, request: Request, fps: Int, resolution: Int): GeneratedProject {
         require(request.footage.isNotEmpty()) { "Add at least one video before generating." }
         val effectiveRequest = applyPromptIntent(request)
-        val videos = effectiveRequest.footage.map { analyzeVideo(context, it) }
+        val videos = effectiveRequest.footage.map { analyzeVideo(context, it, useIdentityModel = true) }
         require(videos.any { it.scenes.isNotEmpty() }) { "Kinetic couldn't decode usable frames from the selected videos." }
 
         val audioUri = effectiveRequest.audio.firstOrNull()
         val audio = audioUri?.let { analyzeAudio(context, it) }
         val audioDuration = audioUri?.let { probeAudioDuration(context, it) } ?: audio?.duration
         val referenceVideos = effectiveRequest.references.filter { isVideo(context, it) }
-            .take(6).mapNotNull { runCatching { analyzeVideo(context, it) }.getOrNull() }
-        val imageFeatures = request.references.filterNot { isVideo(context, it) }
-            .take(12).mapNotNull { analyzeImageFeatures(context, it) }
+            .take(6).mapNotNull { runCatching { analyzeVideo(context, it, useIdentityModel = true) }.getOrNull() }
+        val imageReferences = effectiveRequest.references.filterNot { isVideo(context, it) }.take(12)
+        val imageFeatures = imageReferences.mapNotNull { analyzeImageFeatures(context, it) }
+        val identityReferences = referenceVideos.flatMap { video -> video.scenes.mapNotNull { it.identityEmbedding } } +
+            imageReferences.mapNotNull { uri -> runCatching { analyzeImageIdentity(context, uri) }.getOrNull() }
+        val rankedScenes = videos.flatMap { it.scenes }.map { scene ->
+            val identityScore = if (identityReferences.isEmpty() || scene.identityEmbedding == null) 0f else
+                identityReferences.maxOf { reference -> AiNeuralModels.cosineSimilarity(scene.identityEmbedding, reference) }
+                    .coerceIn(0f, 1f)
+            scene.copy(characterMatchScore = identityScore)
+        }
         val profile = buildStyleProfile(context, referenceVideos, imageFeatures, effectiveRequest.styleNotes)
         persistStyleProfile(context, profile)
         val styleTrainingSamples = referenceVideos.flatMap { it.scenes }.map { scene ->
@@ -109,7 +119,7 @@ object AiEditorEngine {
         val styleModel = AiStyleModel.trainOrLoad(context, styleTrainingSamples)
 
         val totalDuration = effectiveRequest.durationSeconds.coerceIn(10f, 120f)
-        val plan = planEdit(videos.flatMap { it.scenes }, audio?.beats.orEmpty(), profile, effectiveRequest, totalDuration, styleModel)
+        val plan = planEdit(rankedScenes, audio?.beats.orEmpty(), profile, effectiveRequest, totalDuration, styleModel)
         val colorGrade = if ("Color grading" in effectiveRequest.priorities) {
             runCatching {
                 EffectCraftCatalog.load().getOrNull()?.firstOrNull { effect ->
@@ -129,9 +139,11 @@ object AiEditorEngine {
             append(videos.sumOf { it.scenes.size }).append(" candidate scenes")
             if (audio != null) append("; detected ").append(audio.beats.size).append(" music accents")
             if (referenceVideos.isNotEmpty()) append("; extracted pacing from ").append(referenceVideos.size).append(" reference video(s)")
+            if (identityReferences.isNotEmpty()) append("; matched ").append(identityReferences.size).append(" anime character reference embedding(s)")
             if (styleModel.trainingSamples > 0) append("; trained the on-device style clustering model from ").append(styleModel.trainingSamples).append(" reference shots")
             append(". Built ").append(plan.size).append(" selected shots with editable motion and title layers.")
-            append(" Prompt intent was applied to pacing and effect priorities. Scene selection is not semantic anime-character or story recognition.")
+            append(" Prompt intent was applied to pacing and effect priorities.")
+            if (identityReferences.isEmpty()) append(" Add anime character reference images to enable identity matching once the model is installed.")
         }
         return GeneratedProject(
             name = "AI Edit • ${effectiveRequest.style}",
@@ -154,7 +166,7 @@ object AiEditorEngine {
         return request.copy(priorities = priorities)
     }
 
-    private fun analyzeVideo(context: Context, uri: Uri): VideoAnalysis {
+    private fun analyzeVideo(context: Context, uri: Uri, useIdentityModel: Boolean = false): VideoAnalysis {
         val retriever = MediaMetadataRetriever()
         try {
             retriever.setDataSource(context, uri)
@@ -166,10 +178,14 @@ object AiEditorEngine {
             if (rotation == 90 || rotation == 270) { val swap = width; width = height; height = swap }
             val name = queryName(context, uri)
             val sampleStep = max(0.45f, duration / 150f)
-            data class FrameSample(val time: Float, val energy: Float, val change: Float, val motion: Float, val style: Float)
+            data class FrameSample(
+                val time: Float, val energy: Float, val change: Float,
+                val motion: Float, val style: Float, val identity: FloatArray?
+            )
             val frames = ArrayList<FrameSample>()
             var previous: FloatArray? = null
             var previousMotionFrame: FloatArray? = null
+            var nextIdentitySampleAt = 0f
             var t = 0f
             while (t < duration && frames.size < 180) {
                 val bitmap = runCatching {
@@ -184,7 +200,11 @@ object AiEditorEngine {
                         features[3] * 0.38f).coerceIn(0f, 1f)
                     val stylized = (features[3] * 0.48f + features[2] * 0.32f +
                         features[4] * 0.20f).coerceIn(0f, 1f)
-                    frames.add(FrameSample(t, energy, difference, motion, stylized))
+                    val identity = if (useIdentityModel && t >= nextIdentitySampleAt) {
+                        nextIdentitySampleAt = t + 1.5f
+                        runCatching { AiNeuralModels.animeEmbedding(bitmap) }.getOrNull()
+                    } else null
+                    frames.add(FrameSample(t, energy, difference, motion, stylized, identity))
                     previous = features
                     previousMotionFrame = motionFrame
                     if (!bitmap.isRecycled) bitmap.recycle()
@@ -216,7 +236,8 @@ object AiEditorEngine {
                 val motion = samples.map { it.motion }.average().takeIf { it.isFinite() }?.toFloat() ?: 0f
                 val style = samples.map { it.style }.average().takeIf { it.isFinite() }?.toFloat() ?: 0f
                 val cutStrength = cuts.firstOrNull { abs(it.first - start) < sampleStep * 1.5f }?.second ?: 0f
-                Scene(uri, name, start, end, energy, cutStrength, motion, style)
+                val identity = averageEmbeddings(samples.mapNotNull { it.identity })
+                Scene(uri, name, start, end, energy, cutStrength, motion, style, identity)
             }
             return VideoAnalysis(uri, name, duration, width, height, scenes)
         } finally {
@@ -331,6 +352,25 @@ object AiEditorEngine {
             }
         }
         return if (blocks == 0) 0f else (displacement / blocks / 2.828427).toFloat().coerceIn(0f, 1f)
+    }
+
+    private fun analyzeImageIdentity(context: Context, uri: Uri): FloatArray? {
+        val bitmap = context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) } ?: return null
+        return try { AiNeuralModels.animeEmbedding(bitmap) } finally { bitmap.recycle() }
+    }
+
+    private fun averageEmbeddings(embeddings: List<FloatArray>): FloatArray? {
+        if (embeddings.isEmpty()) return null
+        val size = embeddings.first().size
+        if (embeddings.any { it.size != size }) return null
+        val mean = FloatArray(size)
+        embeddings.forEach { embedding ->
+            for (index in mean.indices) mean[index] += embedding[index] / embeddings.size
+        }
+        val norm = sqrt(mean.sumOf { (it * it).toDouble() }).toFloat()
+        if (norm <= 1e-8f) return null
+        for (index in mean.indices) mean[index] /= norm
+        return mean
     }
 
     private fun featureDistance(a: FloatArray, b: FloatArray): Float =
@@ -563,6 +603,7 @@ object AiEditorEngine {
             val learnedStyleMatch = styleModel.similarity(scene.duration, scene.visualEnergy, scene.cutStrength, scene.motionEnergy, scene.stylizedVisualScore)
             learnedStyleMatch * 0.46f + scene.visualEnergy * 0.16f + scene.cutStrength * 0.12f +
                 scene.motionEnergy * motionPreference + scene.stylizedVisualScore * (0.25f - motionPreference) +
+                scene.characterMatchScore * 0.28f +
                 if ("Impact shakes" in request.priorities) scene.cutStrength * 0.08f else 0f
         }
         val selected = ArrayList<Scene>()
