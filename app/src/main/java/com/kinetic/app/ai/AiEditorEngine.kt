@@ -185,6 +185,8 @@ object AiEditorEngine {
             val frames = ArrayList<FrameSample>()
             var previous: FloatArray? = null
             var previousMotionFrame: FloatArray? = null
+            var previousOpticalFrame: Bitmap? = null
+            var lastOpticalSampleAt = -10f
             var nextIdentitySampleAt = 0f
             var t = 0f
             while (t < duration && frames.size < 180) {
@@ -200,10 +202,21 @@ object AiEditorEngine {
                         features[3] * 0.38f).coerceIn(0f, 1f)
                     val stylized = (features[3] * 0.48f + features[2] * 0.32f +
                         features[4] * 0.20f).coerceIn(0f, 1f)
+                    val opticalMidpoint = if (previousOpticalFrame != null && t - lastOpticalSampleAt >= 4f) {
+                        lastOpticalSampleAt = t
+                        runCatching { AiNeuralModels.interpolateFrame(previousOpticalFrame!!, bitmap, 0.5f) }.getOrNull()
+                    } else null
                     val identity = if (useIdentityModel && t >= nextIdentitySampleAt) {
                         nextIdentitySampleAt = t + 1.5f
-                        runCatching { AiNeuralModels.animeEmbedding(bitmap) }.getOrNull()
+                        val currentEmbedding = runCatching { AiNeuralModels.animeEmbedding(bitmap) }.getOrNull()
+                        val midpointEmbedding = opticalMidpoint?.let {
+                            runCatching { AiNeuralModels.animeEmbedding(it) }.getOrNull()
+                        }
+                        averageEmbeddings(listOfNotNull(currentEmbedding, midpointEmbedding))
                     } else null
+                    opticalMidpoint?.recycle()
+                    previousOpticalFrame?.recycle()
+                    previousOpticalFrame = Bitmap.createBitmap(bitmap)
                     frames.add(FrameSample(t, energy, difference, motion, stylized, identity))
                     previous = features
                     previousMotionFrame = motionFrame
@@ -211,6 +224,7 @@ object AiEditorEngine {
                 }
                 t += sampleStep
             }
+            previousOpticalFrame?.recycle()
             if (frames.isEmpty()) {
                 return VideoAnalysis(uri, name, duration, width, height,
                     listOf(Scene(uri, name, 0f, duration, 0.35f, 0f)))
