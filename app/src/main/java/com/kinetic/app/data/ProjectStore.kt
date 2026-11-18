@@ -133,7 +133,11 @@ class ProjectStore(context: Context) {
                     }
                     array.put(JSONObject().put("id", effect.id).put("name", effect.name)
                         .put("enabled", effect.enabled).put("parameters", parameters)
-                        .put("parameterKeys", parameterKeys))
+                        .put("parameterKeys", parameterKeys)
+                        .put("effectCraftId", effect.effectCraftId)
+                        .put("effectCraftParameters", JSONObject().also { values ->
+                            effect.effectCraftParameters.forEach { (key, value) -> values.put(key, value) }
+                        }))
                 }
             })
             .put("speed", l.p(PropId.SPEED).base.toDouble()).put("volume", l.p(PropId.VOLUME).base.toDouble())
@@ -214,7 +218,8 @@ class ProjectStore(context: Context) {
                 (0 until array.length()).mapNotNull { index ->
                     val item = array.optJSONObject(index) ?: return@mapNotNull null
                     val name = item.optString("name")
-                    val defaults = createEffect(name)?.parameters ?: return@mapNotNull null
+                    val effectCraftId = item.optString("effectCraftId").takeIf { it.isNotBlank() && it != "null" }
+                    val defaults = if (effectCraftId != null) emptyMap() else createEffect(name)?.parameters ?: return@mapNotNull null
                     val jsonParameters = item.optJSONObject("parameters") ?: JSONObject()
                     val parameters = defaults.toMutableMap()
                     val iterator = jsonParameters.keys()
@@ -237,8 +242,17 @@ class ProjectStore(context: Context) {
                         }.sortedBy { it.t }
                         if (keys.isNotEmpty()) parameterKeys[parameter] = keys
                     }
+                    val effectCraftJson = item.optJSONObject("effectCraftParameters") ?: JSONObject()
+                    val effectCraftParameters = buildMap {
+                        val keys = effectCraftJson.keys()
+                        while (keys.hasNext()) {
+                            val key = keys.next()
+                            put(key, effectCraftJson.optString(key, "null"))
+                        }
+                    }
                     EffectInstance(item.optString("id", UUID.randomUUID().toString()), name,
-                        item.optBoolean("enabled", true), parameters, parameterKeys)
+                        item.optBoolean("enabled", true), parameters, parameterKeys,
+                        effectCraftId, effectCraftParameters)
                 }
             },
             speed = j.optDouble("speed", 1.0).toFloat().coerceIn(0.1f, 4f),
