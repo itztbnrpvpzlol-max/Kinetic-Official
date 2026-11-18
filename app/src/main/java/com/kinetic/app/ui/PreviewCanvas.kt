@@ -211,7 +211,7 @@ fun CpuPreviewCanvas(
                 val timeDependent = playing || activeEffects.any { effect ->
                     effect.name == "Wave Warp" || effect.name == "Warp Shake" ||
                         effect.name == "Oscillate" || effect.parameterKeys.values.any { it.isNotEmpty() }
-                } || activeEffectCraft.any { effect -> effect.parameterKeys.values.any { it.isNotEmpty() } }
+                } || activeEffectCraft.isNotEmpty()
                 val effectSampleFps = if (MediaWorkers.isConstrainedDevice) 12 else MediaLoader.CPU_PREVIEW_SAMPLE_FPS
                 val timeBucket = if (timeDependent) (timelineTime * effectSampleFps).toInt() else 0
                 var key = System.identityHashCode(source).toLong()
