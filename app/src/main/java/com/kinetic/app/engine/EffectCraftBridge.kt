@@ -1,6 +1,7 @@
 package com.kinetic.app.engine
 
 import android.graphics.Bitmap
+import android.util.Log
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import org.json.JSONArray
@@ -129,6 +130,8 @@ object EffectCraftBridge {
             Bitmap.createBitmap(outWidth, outHeight, Bitmap.Config.ARGB_8888).also {
                 it.setPixels(output, 0, outWidth, 0, 0, outWidth, outHeight)
             }
+        }.onFailure { error ->
+            Log.e("KineticEffectCraft", "EffectCraft failed to render layer $cacheKey", error)
         }.getOrNull()
     }
 
