@@ -162,8 +162,6 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use effectcraft_media::MediaPool;
-use effectcraft_engine::project::{FootageKind};
-use effectcraft_engine::render::FootageSource;
 
 static MEDIA_POOL: OnceLock<MediaPool> = OnceLock::new();
 static MEDIA_FOOTAGE: OnceLock<Mutex<HashMap<String, effectcraft_engine::project::Footage>>> = OnceLock::new();
