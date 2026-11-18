@@ -372,12 +372,13 @@ object AiEditorEngine {
         audio: AudioAnalysis?,
         request: Request,
         fps: Int,
-        videos: List<VideoAnalysis>
+        videos: List<VideoAnalysis>,
+        resolution: Int
     ): List<Layer> {
         val layers = ArrayList<Layer>()
         val compDuration = request.durationSeconds.coerceIn(10f, 120f)
-        val baseW = 1920f
-        val baseH = 1080f
+        val baseW = listOf(1280f, 1920f, 2560f, 3840f).getOrElse(resolution.coerceIn(0, 3)) { 1920f }
+        val baseH = baseW * 9f / 16f
         var cursor = 0f
         val beatTimes = audio?.beats.orEmpty()
         plan.forEachIndexed { index, scene ->
