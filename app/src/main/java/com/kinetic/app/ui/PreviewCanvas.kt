@@ -45,10 +45,10 @@ import kotlinx.coroutines.withContext
 import android.graphics.Path as AndroidPath
 
 
-private fun rasterizeEffectCraftLayer(layer: Layer, time: Float): Bitmap? {
+internal fun rasterizeEffectCraftLayer(layer: Layer, time: Float, maxSide: Int = 640): Bitmap? {
     val logicalWidth = layer.width.coerceAtLeast(1f)
     val logicalHeight = layer.height.coerceAtLeast(1f)
-    val scale = minOf(1f, 640f / maxOf(logicalWidth, logicalHeight))
+    val scale = minOf(1f, maxSide.coerceAtLeast(1).toFloat() / maxOf(logicalWidth, logicalHeight))
     val width = (logicalWidth * scale).toInt().coerceAtLeast(1)
     val height = (logicalHeight * scale).toInt().coerceAtLeast(1)
     val bitmap = runCatching { Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888) }.getOrNull() ?: return null
@@ -62,8 +62,8 @@ private fun rasterizeEffectCraftLayer(layer: Layer, time: Float): Bitmap? {
             } else layer.vectorPointsAt(time)
             val path = AndroidPath()
             points.forEachIndexed { index, point ->
-                val x = point.x * logicalWidth
-                val y = point.y * logicalHeight
+                val x = point.x.coerceIn(0f, 1f) * logicalWidth
+                val y = point.y.coerceIn(0f, 1f) * logicalHeight
                 if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
             }
             path.close()
