@@ -352,12 +352,20 @@ pub extern "system" fn Java_com_kinetic_app_engine_EffectCraftNative_nativeRende
         let mut contexts = render_contexts().lock().map_err(|_| "EffectCraft render cache lock unavailable")?;
         let rebuild = contexts.get(&key).is_none_or(|c| c.width != w || c.height != h || c.effect_ids != ids);
         if rebuild {
+            if contexts.len() >= 3 {
+                if let Some(stale) = contexts.keys().find(|existing| *existing != &key).cloned() {
+                    contexts.remove(&stale);
+                }
+            }
             let context = create_render_context(w, h, &effects, &rgba)?;
             contexts.insert(key.clone(), context);
         }
         let context = contexts.get_mut(&key).ok_or("EffectCraft render context unavailable")?;
         context.source.replace(&rgba, w, h)?;
         update_effect_parameters(context, &effects)?;
+        // The memory footage has a stable virtual path but new pixels on every preview tick.
+        // Never let EffectCraft reuse a layer buffer rendered from the previous source frame.
+        context.session.layer_cache.clear();
         let (out_w, out_h, pixels) = context.session.render_rgba8_alpha(
             context.comp,
             Tick::from_seconds_f64(f64::from(time_seconds)),
