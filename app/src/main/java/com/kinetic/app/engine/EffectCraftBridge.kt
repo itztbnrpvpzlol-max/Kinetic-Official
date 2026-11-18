@@ -22,6 +22,7 @@ object EffectCraftBridge {
 
     fun initialize(): Boolean = initializeWithError() == null
 
+    @Synchronized
     fun initializeWithError(): String? {
         if (!EffectCraftNative.available) {
             return "EffectCraft library failed to load: " + (EffectCraftNative.loadError ?: "unknown linker error")
@@ -37,6 +38,7 @@ object EffectCraftBridge {
      * Executes a command using a JSON object for params and returns the engine's JSON response.
      * The caller should invoke this from a background dispatcher/thread.
      */
+    @Synchronized
     fun execute(commandId: String, paramsJson: String = "{}"): String {
         if (!EffectCraftNative.available) {
             return """{"protocolVersion":1,"ok":false,"error":"EffectCraft native library is not packaged"}"""
@@ -52,6 +54,7 @@ object EffectCraftBridge {
      * Stops at the first failed command; earlier successful commands remain committed.
      * The caller is responsible for invoking this from a worker thread.
      */
+    @Synchronized
     fun executeBatch(commandsJson: String): String {
         if (!EffectCraftNative.available) {
             return """{"protocolVersion":1,"ok":false,"error":"EffectCraft native library is not packaged"}"""
@@ -68,6 +71,7 @@ object EffectCraftBridge {
      * Sends the actual decoded Kinetic clip frame through EffectCraft's compositor.
      * Returns null only when the native renderer rejects the frame or cannot render it.
      */
+    @Synchronized
     fun renderFrame(
         source: Bitmap,
         effects: List<EffectInstance>,
