@@ -1,6 +1,12 @@
 name: Build Anime Character Model
 
 on:
+  push:
+    branches:
+      - feat/effectcraft-native-core-migration
+    paths:
+      - "tools/export_animecv_onnx.py"
+      - ".github/workflows/build-anime-character-model.yml"
   workflow_dispatch:
 
 permissions:
