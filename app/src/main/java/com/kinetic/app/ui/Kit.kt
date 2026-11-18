@@ -92,7 +92,7 @@ fun DialogItem(label: String, danger: Boolean = false, onClick: () -> Unit) {
 }
 
 @Composable
-fun TextInputDialog(title: String, initial: String, onDone: (String) -> Unit, onDismiss: () -> Unit) {
+fun TextInputDialog(title: String, initial: String, onDone: (String) -> Unit, onDismiss: () -> Unit, multiline: Boolean = false) {
     var text by remember { mutableStateOf(initial) }
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -100,7 +100,7 @@ fun TextInputDialog(title: String, initial: String, onDone: (String) -> Unit, on
         title = { Text(title, color = KColors.Text) },
         text = {
             OutlinedTextField(
-                value = text, onValueChange = { text = it }, singleLine = true,
+                value = text, onValueChange = { text = it }, singleLine = !multiline, minLines = if (multiline) 3 else 1, maxLines = if (multiline) 6 else 1,
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedTextColor = KColors.Text, unfocusedTextColor = KColors.Text,
                     focusedBorderColor = KColors.Accent, unfocusedBorderColor = KColors.Line,
