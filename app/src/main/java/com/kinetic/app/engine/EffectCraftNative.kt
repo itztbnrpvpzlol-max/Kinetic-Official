@@ -43,4 +43,9 @@ internal object EffectCraftNative {
         timeSeconds: Float,
         maxSide: Int
     ): ByteArray?
+    
+    /** Decodes a local video frame through EffectCraft MediaPool's decoder and bounded LRU. */
+    @JvmStatic
+    external fun nativeDecodeVideoFrame(path: String, timeSeconds: Float, maxSide: Int): ByteArray?
 }
+
