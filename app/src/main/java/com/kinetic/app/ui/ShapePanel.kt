@@ -284,7 +284,7 @@ fun LayerStylePanel(editor: com.kinetic.app.model.EditorState, layer: com.kineti
                 }
             }
             editField = null
-        }, onDismiss = { editField = null })
+        }, onDismiss = { editField = null }, multiline = field == "text")
     }
 }
 
