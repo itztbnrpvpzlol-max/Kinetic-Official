@@ -9,6 +9,9 @@ import android.net.Uri
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import com.kinetic.app.model.*
+import com.kinetic.app.engine.EffectCraftCatalog
+import com.kinetic.app.engine.EffectCraftEffectInfo
+import com.kinetic.app.engine.EffectCraftParameterInfo
 import org.json.JSONObject
 import java.nio.ByteOrder
 import kotlin.math.abs
@@ -99,7 +102,20 @@ object AiEditorEngine {
 
         val totalDuration = request.durationSeconds.coerceIn(10f, 120f)
         val plan = planEdit(videos.flatMap { it.scenes }, audio?.beats.orEmpty(), profile, request, totalDuration)
-        val layers = executePlan(plan, audio, audioDuration, request, fps.coerceIn(12, 60), videos, resolution)
+        val colorGrade = if ("Color grading" in request.priorities) {
+            runCatching {
+                EffectCraftCatalog.load().getOrNull()?.firstOrNull { effect ->
+                    effect.category == "COLOR & LIGHT" && effect.gpu &&
+                        effect.params.any { parameter ->
+                            val id = parameter.id.lowercase()
+                            "saturation" in id || "vibrance" in id || "contrast" in id || "exposure" in id
+                        }
+                } ?: EffectCraftCatalog.load().getOrNull()?.firstOrNull {
+                    it.category == "COLOR & LIGHT" && it.gpu
+                }
+            }.getOrNull()
+        } else null
+        val layers = executePlan(plan, audio, audioDuration, request, fps.coerceIn(12, 60), videos, resolution, colorGrade)
         val report = buildString {
             append("Analysed ").append(videos.size).append(" source video(s) and ")
             append(videos.sumOf { it.scenes.size }).append(" candidate scenes")
@@ -394,7 +410,8 @@ object AiEditorEngine {
         request: Request,
         fps: Int,
         videos: List<VideoAnalysis>,
-        resolution: Int
+        resolution: Int,
+        colorGrade: EffectCraftEffectInfo?
     ): List<Layer> {
         val layers = ArrayList<Layer>()
         val compDuration = request.durationSeconds.coerceIn(10f, 120f)
@@ -411,8 +428,20 @@ object AiEditorEngine {
             val fitScale = min(COMP_W / sourceW, COMP_H / sourceH)
             val w = sourceW * fitScale
             val h = sourceH * fitScale
+            val gradeStack = colorGrade?.let { effect ->
+                listOf(EffectInstance(
+                    name = effect.name,
+                    effectCraftId = effect.id,
+                    effectCraftParameters = effect.params.associate { parameter ->
+                        parameter.id to gradedDefault(parameter)
+                    }
+                ))
+            }.orEmpty()
             var video = newLayer(LayerType.VIDEO, scene.sourceName, cursor, duration, w, h,
-                scene.uri.toString(), info?.duration ?: scene.end).copy(srcOffset = scene.start)
+                scene.uri.toString(), info?.duration ?: scene.end).copy(
+                    srcOffset = scene.start,
+                    effectStack = gradeStack
+                )
             val fadeDuration = min(0.22f, duration * 0.22f)
             val opacityKeys = if ("Transitions" in request.priorities) {
                 listOf(
@@ -475,6 +504,21 @@ object AiEditorEngine {
             layers.add(text)
         }
         return layers.sortedByDescending { if (it.type == LayerType.TEXT) 2 else if (it.type == LayerType.AUDIO) 0 else 1 }
+    }
+
+    private fun gradedDefault(parameter: EffectCraftParameterInfo): String {
+        val base = parameter.defaultJson.toDoubleOrNull() ?: return parameter.defaultJson
+        val id = parameter.id.lowercase()
+        val adjusted = when {
+            "saturation" in id || "vibrance" in id -> if (abs(base) <= 1.5) base + 0.12 else base + 12.0
+            "contrast" in id -> if (abs(base) <= 2.0) base + 0.12 else base + 10.0
+            "exposure" in id -> base + 0.12
+            else -> base
+        }
+        return adjusted.coerceIn(
+            parameter.min ?: Double.NEGATIVE_INFINITY,
+            parameter.max ?: Double.POSITIVE_INFINITY
+        ).toString()
     }
 
     private fun isVideo(context: Context, uri: Uri): Boolean {
