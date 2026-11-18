@@ -39,4 +39,20 @@ object EffectCraftBridge {
             """{"protocolVersion":1,"ok":false,"error":"Native bridge call failed"}"""
         }
     }
+    /**
+     * Executes ordered commands against the same persistent EffectCraft session.
+     * Stops at the first failed command; earlier successful commands remain committed.
+     * The caller is responsible for invoking this from a worker thread.
+     */
+    fun executeBatch(commandsJson: String): String {
+        if (!EffectCraftNative.available) {
+            return """{"protocolVersion":1,"ok":false,"error":"EffectCraft native library is not packaged"}"""
+        }
+        return runCatching {
+            EffectCraftNative.nativeExecuteBatch(commandsJson)
+        }.getOrElse { error ->
+            """{"protocolVersion":1,"ok":false,"error":"Native batch call failed: ${error.javaClass.simpleName}"}"""
+        }
+    }
+
 }
