@@ -67,7 +67,6 @@ def main():
         dynamic_axes={"images": {0: "batch"}, "embedding": {0: "batch"}},
         opset_version=17,
         do_constant_folding=True,
-        dynamo=False,
     )
     if args.output.stat().st_size < 5_000_000:
         raise RuntimeError("Exported AnimeCV model is unexpectedly small.")
