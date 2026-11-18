@@ -365,7 +365,9 @@ object AiEditorEngine {
                     (beats.isEmpty() || time - beats.last() >= 0.24f)
                 ) beats.add(time)
             }
-            return AudioAnalysis(energies.size * 0.08f, beats, energies.toFloatArray())
+            val tempoGrid = detectBeatGrid(energies)
+            val selectedBeats = if (tempoGrid.size >= 3) tempoGrid else beats
+            return AudioAnalysis(energies.size * 0.08f, selectedBeats, energies.toFloatArray())
         } catch (_: Exception) {
             return null
         } finally {
@@ -373,6 +375,60 @@ object AiEditorEngine {
             runCatching { decoder?.release() }
             runCatching { extractor.release() }
         }
+    }
+
+    /**
+     * Estimates a stable beat grid from the decoded RMS envelope using
+     * onset autocorrelation. Times are returned in seconds (80 ms analysis hops).
+     */
+    private fun detectBeatGrid(energy: List<Float>): List<Float> {
+        if (energy.size < 32) return emptyList()
+        val onset = FloatArray(energy.size) { index ->
+            if (index == 0) 0f else (energy[index] - energy[index - 1]).coerceAtLeast(0f)
+        }
+        val minLag = 5 // 150 BPM
+        val maxLag = minOf(16, energy.size / 3) // about 47 BPM
+        if (maxLag <= minLag) return emptyList()
+        var bestLag = -1
+        var bestScore = 0.0
+        for (lag in minLag..maxLag) {
+            var correlation = 0.0
+            var energyA = 0.0
+            var energyB = 0.0
+            for (index in lag until onset.size) {
+                val a = onset[index].toDouble()
+                val b = onset[index - lag].toDouble()
+                correlation += a * b
+                energyA += a * a
+                energyB += b * b
+            }
+            val score = correlation / kotlin.math.sqrt((energyA * energyB).coerceAtLeast(1e-12))
+            if (score > bestScore) {
+                bestScore = score
+                bestLag = lag
+            }
+        }
+        if (bestLag < 0 || bestScore < 0.12) return emptyList()
+        val phase = (0 until bestLag).maxByOrNull { offset ->
+            var score = 0.0
+            var index = offset
+            while (index < onset.size) {
+                score += onset[index]
+                index += bestLag
+            }
+            score
+        } ?: 0
+        val result = ArrayList<Float>()
+        var grid = phase
+        while (grid < onset.size) {
+            val from = max(0, grid - 2)
+            val to = min(onset.lastIndex, grid + 2)
+            val peak = (from..to).maxByOrNull { onset[it] } ?: grid
+            val time = peak * 0.08f
+            if (result.isEmpty() || time - result.last() >= 0.28f) result.add(time)
+            grid += bestLag
+        }
+        return result
     }
 
     private fun analyzeImageFeatures(context: Context, uri: Uri): FloatArray? {
