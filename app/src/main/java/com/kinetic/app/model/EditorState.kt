@@ -719,6 +719,55 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
         }
     }
 
+    /** Scrub a numeric EffectCraft property; edits its base value or the key at playhead. */
+    fun updateEffectCraftNumericParameter(layerId: String, effectId: String, parameter: String, value: Float) {
+        if (!value.isFinite()) return
+        val t = time
+        updateLayer(layerId, push = false) { layer ->
+            layer.copy(effectStack = layer.effectStack.map { effect ->
+                if (effect.id != effectId || effect.effectCraftId == null) effect else {
+                    val base = effect.effectCraftParameters[parameter]?.toFloatOrNull() ?: value
+                    val updated = Prop(base, effect.parameterKeys[parameter].orEmpty())
+                        .withValueAt(t, value, frame / 2f)
+                    effect.copy(
+                        effectCraftParameters = effect.effectCraftParameters + (parameter to updated.base.toString()),
+                        parameterKeys = if (updated.keys.isEmpty()) effect.parameterKeys - parameter
+                            else effect.parameterKeys + (parameter to updated.keys)
+                    )
+                }
+            })
+        }
+    }
+
+    /** Toggle a numeric EffectCraft property's keyframe at the current playhead. */
+    fun toggleEffectCraftParameterKey(layerId: String, effectId: String, parameter: String) {
+        val t = time
+        updateLayer(layerId) { layer ->
+            layer.copy(effectStack = layer.effectStack.map { effect ->
+                if (effect.id != effectId || effect.effectCraftId == null) effect else {
+                    val base = effect.effectCraftParameters[parameter]?.toFloatOrNull() ?: 0f
+                    val keys = effect.parameterKeys[parameter].orEmpty()
+                    val index = keys.indexOfFirst { abs(it.t - t) <= frame / 2f }
+                    if (index >= 0) {
+                        val removed = keys[index]
+                        val remaining = keys.filterIndexed { i, _ -> i != index }
+                        effect.copy(
+                            effectCraftParameters = if (remaining.isEmpty())
+                                effect.effectCraftParameters + (parameter to removed.v.toString())
+                                else effect.effectCraftParameters,
+                            parameterKeys = if (remaining.isEmpty()) effect.parameterKeys - parameter
+                                else effect.parameterKeys + (parameter to remaining)
+                        )
+                    } else {
+                        val current = Prop(base, keys).valueAt(t)
+                        effect.copy(parameterKeys = effect.parameterKeys +
+                            (parameter to (keys + Keyframe(t, current)).sortedBy { it.t }))
+                    }
+                }
+            })
+        }
+    }
+
     fun addEffect(layerId: String, name: String): Boolean {
         if (layers.none { it.id == layerId }) return false
         val effect = createEffect(name) ?: return false
