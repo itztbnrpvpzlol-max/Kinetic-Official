@@ -46,7 +46,9 @@ object AiEditorEngine {
         val start: Float,
         val end: Float,
         val visualEnergy: Float,
-        val cutStrength: Float
+        val cutStrength: Float,
+        val motionEnergy: Float = 0f,
+        val stylizedVisualScore: Float = 0f
     ) {
         val duration: Float get() = (end - start).coerceAtLeast(0.1f)
     }
@@ -154,7 +156,8 @@ object AiEditorEngine {
             if (rotation == 90 || rotation == 270) { val swap = width; width = height; height = swap }
             val name = queryName(context, uri)
             val sampleStep = max(0.45f, duration / 150f)
-            val frames = ArrayList<Pair<Float, Float>>()
+            data class FrameSample(val time: Float, val energy: Float, val motion: Float, val style: Float)
+            val frames = ArrayList<FrameSample>()
             var previous: FloatArray? = null
             var t = 0f
             while (t < duration && frames.size < 180) {
@@ -164,8 +167,11 @@ object AiEditorEngine {
                 if (bitmap != null) {
                     val features = frameFeatures(bitmap)
                     val difference = previous?.let { featureDistance(it, features) } ?: 0f
-                    val energy = (features[1] * 0.55f + features[2] * 0.45f).coerceIn(0f, 1f)
-                    frames.add(t to (energy + difference * 0.65f).coerceIn(0f, 1f))
+                    val energy = (features[1] * 0.34f + features[2] * 0.28f +
+                        features[3] * 0.38f).coerceIn(0f, 1f)
+                    val stylized = (features[3] * 0.48f + features[2] * 0.32f +
+                        features[4] * 0.20f).coerceIn(0f, 1f)
+                    frames.add(FrameSample(t, energy, difference, stylized))
                     previous = features
                     if (!bitmap.isRecycled) bitmap.recycle()
                 }
@@ -180,20 +186,23 @@ object AiEditorEngine {
             frames.forEachIndexed { index, item ->
                 if (index > 0) {
                     val prior = frames[index - 1]
-                    val strength = abs(item.second - prior.second)
-                    if (strength > 0.22f && item.first - lastCut >= 0.8f) {
-                        cuts.add(item.first to strength)
-                        lastCut = item.first
+                    val strength = (item.motion * 0.72f + abs(item.energy - prior.energy) * 0.28f)
+                        .coerceIn(0f, 1f)
+                    if (strength > 0.20f && item.time - lastCut >= 0.8f) {
+                        cuts.add(item.time to strength)
+                        lastCut = item.time
                     }
                 }
             }
             val boundaries = (listOf(0f) + cuts.map { it.first } + duration).distinct().sorted()
             val scenes = boundaries.zipWithNext().mapNotNull { (start, end) ->
                 if (end - start < 0.25f) return@mapNotNull null
-                val samples = frames.filter { it.first >= start && it.first < end }
-                val energy = samples.map { it.second }.average().takeIf { it.isFinite() }?.toFloat() ?: 0.35f
+                val samples = frames.filter { it.time >= start && it.time < end }
+                val energy = samples.map { it.energy }.average().takeIf { it.isFinite() }?.toFloat() ?: 0.35f
+                val motion = samples.map { it.motion }.average().takeIf { it.isFinite() }?.toFloat() ?: 0f
+                val style = samples.map { it.style }.average().takeIf { it.isFinite() }?.toFloat() ?: 0f
                 val cutStrength = cuts.firstOrNull { abs(it.first - start) < sampleStep * 1.5f }?.second ?: 0f
-                Scene(uri, name, start, end, energy, cutStrength)
+                Scene(uri, name, start, end, energy, cutStrength, motion, style)
             }
             return VideoAnalysis(uri, name, duration, width, height, scenes)
         } finally {
@@ -212,13 +221,17 @@ object AiEditorEngine {
         var luminance = 0.0
         var luminanceSquared = 0.0
         var saturation = 0.0
-        pixels.forEach { pixel ->
+        var colorfulness = 0.0
+        val gray = FloatArray(pixels.size)
+        pixels.forEachIndexed { index, pixel ->
             val r = ((pixel shr 16) and 255) / 255.0
             val g = ((pixel shr 8) and 255) / 255.0
             val b = (pixel and 255) / 255.0
             val y = 0.2126 * r + 0.7152 * g + 0.0722 * b
             val hi = max(r, max(g, b))
             val lo = min(r, min(g, b))
+            gray[index] = y.toFloat()
+            colorfulness += hi - lo
             luminance += y
             luminanceSquared += y * y
             saturation += if (hi <= 0.0001) 0.0 else (hi - lo) / hi
@@ -226,11 +239,33 @@ object AiEditorEngine {
         val count = pixels.size.toDouble()
         val mean = luminance / count
         val variance = (luminanceSquared / count - mean * mean).coerceAtLeast(0.0)
-        return floatArrayOf(mean.toFloat(), sqrt(variance).toFloat().coerceIn(0f, 1f), (saturation / count).toFloat())
+        var edgeSum = 0.0
+        var edgeCount = 0
+        for (y in 0 until h) for (x in 0 until w) {
+            val index = y * w + x
+            if (x + 1 < w) {
+                edgeSum += abs(gray[index] - gray[index + 1])
+                edgeCount++
+            }
+            if (y + 1 < h) {
+                edgeSum += abs(gray[index] - gray[index + w])
+                edgeCount++
+            }
+        }
+        val edgeDensity = if (edgeCount == 0) 0f else (edgeSum / edgeCount * 3.2).toFloat().coerceIn(0f, 1f)
+        return floatArrayOf(
+            mean.toFloat(),
+            sqrt(variance).toFloat().coerceIn(0f, 1f),
+            (saturation / count).toFloat(),
+            edgeDensity,
+            (colorfulness / count).toFloat()
+        )
     }
 
     private fun featureDistance(a: FloatArray, b: FloatArray): Float =
-        (abs(a[0] - b[0]) * 0.7f + abs(a[1] - b[1]) * 0.8f + abs(a[2] - b[2]) * 0.5f).coerceIn(0f, 1f)
+        (abs(a[0] - b[0]) * 0.52f + abs(a[1] - b[1]) * 0.66f +
+            abs(a[2] - b[2]) * 0.42f + abs(a[3] - b[3]) * 0.78f +
+            abs(a[4] - b[4]) * 0.42f).coerceIn(0f, 1f)
 
     private fun probeAudioDuration(context: Context, uri: Uri): Float? {
         val extractor = MediaExtractor()
@@ -388,7 +423,8 @@ object AiEditorEngine {
         }
         val sorted = scenes.sortedByDescending { scene ->
             val learnedStyleMatch = styleModel.similarity(scene.duration, scene.visualEnergy, scene.cutStrength)
-            learnedStyleMatch * 0.62f + scene.visualEnergy * 0.23f + scene.cutStrength * 0.15f +
+            learnedStyleMatch * 0.46f + scene.visualEnergy * 0.16f + scene.cutStrength * 0.12f +
+                scene.motionEnergy * 0.13f + scene.stylizedVisualScore * 0.13f +
                 if ("Impact shakes" in request.priorities) scene.cutStrength * 0.08f else 0f
         }
         val selected = ArrayList<Scene>()
