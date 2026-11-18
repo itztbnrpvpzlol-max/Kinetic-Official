@@ -102,9 +102,9 @@ object AiEditorEngine {
         val profile = buildStyleProfile(context, referenceVideos, imageFeatures, request.styleNotes)
         persistStyleProfile(context, profile)
         val styleTrainingSamples = referenceVideos.flatMap { it.scenes }.map { scene ->
-            floatArrayOf(kotlin.math.ln(scene.duration.coerceAtLeast(0.1f)), scene.visualEnergy, scene.cutStrength)
+            floatArrayOf(kotlin.math.ln(scene.duration.coerceAtLeast(0.1f)), scene.visualEnergy, scene.cutStrength, scene.motionEnergy, scene.stylizedVisualScore)
         } + imageFeatures.map { features ->
-            floatArrayOf(kotlin.math.ln(profile.averageShotSeconds.coerceAtLeast(0.1f)), features[0], features[1])
+            floatArrayOf(kotlin.math.ln(profile.averageShotSeconds.coerceAtLeast(0.1f)), features[0], features[1], 0f, features[1])
         }
         val styleModel = AiStyleModel.trainOrLoad(context, styleTrainingSamples)
 
@@ -422,7 +422,7 @@ object AiEditorEngine {
             else -> profile.averageShotSeconds.coerceIn(1.0f, 2.6f)
         }
         val sorted = scenes.sortedByDescending { scene ->
-            val learnedStyleMatch = styleModel.similarity(scene.duration, scene.visualEnergy, scene.cutStrength)
+            val learnedStyleMatch = styleModel.similarity(scene.duration, scene.visualEnergy, scene.cutStrength, scene.motionEnergy, scene.stylizedVisualScore)
             learnedStyleMatch * 0.46f + scene.visualEnergy * 0.16f + scene.cutStrength * 0.12f +
                 scene.motionEnergy * 0.13f + scene.stylizedVisualScore * 0.13f +
                 if ("Impact shakes" in request.priorities) scene.cutStrength * 0.08f else 0f
