@@ -396,18 +396,14 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
         if (showEffectsScreen) {
             EffectsBrowserScreen(
                 onClose = { showEffectsScreen = false },
-                onAddEffect = { name ->
+                onAddEffect = { effect ->
                     val layer = editor.selected
                     when {
                         layer == null -> {
                             Toast.makeText(ctx, "Select a layer before adding an effect", Toast.LENGTH_SHORT).show()
                         }
-                        !NativeEffectsEngine.available -> {
-                            val reason = NativeEffectsEngine.loadError?.take(96) ?: "unknown linker error"
-                            Toast.makeText(ctx, "CPU effects engine failed: $reason", Toast.LENGTH_LONG).show()
-                        }
-                        !editor.addEffect(layer.id, name) -> {
-                            Toast.makeText(ctx, "The native engine could not create $name", Toast.LENGTH_LONG).show()
+                        !editor.addEffectCraftEffect(layer.id, effect) -> {
+                            Toast.makeText(ctx, "Could not add EffectCraft effect ${effect.name}", Toast.LENGTH_LONG).show()
                         }
                         else -> {
                             showEffectsScreen = false
