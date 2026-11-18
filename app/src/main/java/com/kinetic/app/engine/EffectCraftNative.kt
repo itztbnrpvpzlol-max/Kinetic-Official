@@ -47,5 +47,10 @@ internal object EffectCraftNative {
     /** Decodes a local video frame through EffectCraft MediaPool's decoder and bounded LRU. */
     @JvmStatic
     external fun nativeDecodeVideoFrame(path: String, timeSeconds: Float, maxSide: Int): ByteArray?
+    
+    /** Drops decoded EffectCraft frames while keeping the native bridge reusable. */
+    @JvmStatic
+    external fun nativeClearMediaFrames()
 }
+
 
