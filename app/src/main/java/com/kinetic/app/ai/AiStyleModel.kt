@@ -18,20 +18,20 @@ internal class AiStyleModel private constructor(
     private val centroids: List<FloatArray>,
     val trainingSamples: Int
 ) {
-    fun similarity(durationSeconds: Float, visualEnergy: Float, cutStrength: Float): Float {
+    fun similarity(durationSeconds: Float, visualEnergy: Float, cutStrength: Float, motionEnergy: Float = 0f, stylizedVisualScore: Float = 0f): Float {
         if (centroids.isEmpty()) return 0.5f
-        val sample = features(durationSeconds, visualEnergy, cutStrength)
+        val sample = features(durationSeconds, visualEnergy, cutStrength, motionEnergy, stylizedVisualScore)
         val distance = centroids.minOf { center -> euclidean(sample, center) }
         return exp(-distance * 2.4f).toFloat().coerceIn(0f, 1f)
     }
 
     companion object {
         private const val PREFS = "kinetic_ai_style_model"
-        private const val KEY = "kmeans_v1"
+        private const val KEY = "kmeans_v2"
 
         fun trainOrLoad(context: Context, samples: List<FloatArray>): AiStyleModel {
             val valid = samples.filter { it.size >= 3 && it.all(Float::isFinite) }
-                .map { floatArrayOf(it[0], it[1].coerceIn(0f, 1f), it[2].coerceIn(0f, 1f)) }
+                .map { sample -> FloatArray(5) { axis -> if (axis == 0) sample[0] else sample[axis].coerceIn(0f, 1f) } }
             if (valid.isNotEmpty()) {
                 val model = train(valid)
                 persist(context, model)
@@ -87,17 +87,17 @@ internal class AiStyleModel private constructor(
                 val array = json.getJSONArray("centroids")
                 val centers = (0 until array.length()).map { index ->
                     val values = array.getJSONArray(index)
-                    floatArrayOf(values.getDouble(0).toFloat(), values.getDouble(1).toFloat(), values.getDouble(2).toFloat())
+                    FloatArray(5) { axis -> values.optDouble(axis, 0.0).toFloat() }
                 }
                 AiStyleModel(centers, json.optInt("samples"))
             }.getOrNull()
         }
 
-        private fun features(duration: Float, energy: Float, cut: Float) =
-            floatArrayOf(ln(duration.coerceAtLeast(0.1f)), energy.coerceIn(0f, 1f), cut.coerceIn(0f, 1f))
+        private fun features(duration: Float, energy: Float, cut: Float, motion: Float, style: Float) =
+            floatArrayOf(ln(duration.coerceAtLeast(0.1f)), energy.coerceIn(0f, 1f), cut.coerceIn(0f, 1f), motion.coerceIn(0f, 1f), style.coerceIn(0f, 1f))
 
         private fun euclidean(a: FloatArray, b: FloatArray): Float =
-            sqrt((0..2).sumOf { axis ->
+            sqrt((0..4).sumOf { axis ->
                 val delta = (a[axis] - b[axis]).toDouble()
                 delta * delta
             }).toFloat()
