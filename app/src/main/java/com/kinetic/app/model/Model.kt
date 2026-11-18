@@ -317,6 +317,13 @@ data class EffectInstance(
         return NativeEffectsEngine.evaluateParameter(base, parameterKeys[key].orEmpty(), time)
             .takeIf { it.isFinite() } ?: fallback
     }
+
+    /** Numeric EffectCraft properties share Kinetic's keyframe timeline and interpolation. */
+    fun effectCraftParameterAt(key: String, time: Float, fallback: Float = 0f): Float {
+        val base = effectCraftParameters[key]?.toFloatOrNull() ?: fallback
+        return NativeEffectsEngine.evaluateParameter(base, parameterKeys[key].orEmpty(), time)
+            .takeIf { it.isFinite() } ?: fallback
+    }
 }
 
 fun createEffect(name: String): EffectInstance? {
