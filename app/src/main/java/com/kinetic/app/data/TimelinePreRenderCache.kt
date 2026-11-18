@@ -79,11 +79,17 @@ class TimelinePreRenderCache(context: Context, projectId: String) {
         synchronized(lock) {
             if (activeFingerprint != fingerprint || activeDirectory?.exists() != true) {
                 generation.incrementAndGet()
-                projectRoot.listFiles()?.forEach { it.deleteRecursively() }
-                val directory = File(projectRoot, fingerprint).also { it.mkdirs() }
-                File(directory, "session.meta").writeText(
-                    "fps=$fps\nframes=$frameCount\nwidth=$width\nheight=$height\n"
-                )
+                val directory = File(projectRoot, fingerprint)
+                // Preserve a matching completed cache across app restarts, but
+                // remove every stale fingerprint after an actual timeline edit.
+                projectRoot.listFiles()?.filter { it != directory }?.forEach { it.deleteRecursively() }
+                directory.mkdirs()
+                val metadata = File(directory, "session.meta")
+                if (!metadata.exists()) {
+                    metadata.writeText(
+                        "fps=$fps\nframes=$frameCount\nwidth=$width\nheight=$height\n"
+                    )
+                }
                 activeFingerprint = fingerprint
                 activeDirectory = directory
             }
