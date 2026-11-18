@@ -34,6 +34,7 @@ import com.kinetic.app.model.COMP_H
 import com.kinetic.app.model.COMP_W
 import com.kinetic.app.model.EditorState
 import com.kinetic.app.model.LayerType
+import com.kinetic.app.model.Layer
 import com.kinetic.app.model.PropId
 import com.kinetic.app.model.VectorPoint
 import com.kinetic.app.model.sourceElapsedAt
@@ -42,6 +43,90 @@ import com.kinetic.app.engine.NativeEffectsEngine
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import android.graphics.Path as AndroidPath
+
+
+private fun rasterizeEffectCraftLayer(layer: Layer, time: Float): Bitmap? {
+    val logicalWidth = layer.width.coerceAtLeast(1f)
+    val logicalHeight = layer.height.coerceAtLeast(1f)
+    val scale = minOf(1f, 640f / maxOf(logicalWidth, logicalHeight))
+    val width = (logicalWidth * scale).toInt().coerceAtLeast(1)
+    val height = (logicalHeight * scale).toInt().coerceAtLeast(1)
+    val bitmap = runCatching { Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888) }.getOrNull() ?: return null
+    val canvas = android.graphics.Canvas(bitmap)
+    canvas.scale(scale, scale)
+    val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+    when (layer.type) {
+        LayerType.SHAPE -> {
+            val points = if (layer.vectorPoints.isEmpty()) {
+                listOf(VectorPoint(0f, 0f), VectorPoint(1f, 0f), VectorPoint(1f, 1f), VectorPoint(0f, 1f))
+            } else layer.vectorPointsAt(time)
+            val path = AndroidPath()
+            points.forEachIndexed { index, point ->
+                val x = point.x * logicalWidth
+                val y = point.y * logicalHeight
+                if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
+            }
+            path.close()
+            if (layer.fillEnabled) {
+                paint.style = Paint.Style.FILL
+                paint.color = layer.color
+                canvas.drawPath(path, paint)
+            }
+            if (layer.strokeEnabled && layer.strokeWidth > 0f) {
+                paint.style = Paint.Style.STROKE
+                paint.strokeWidth = layer.strokeWidth
+                paint.strokeJoin = Paint.Join.ROUND
+                paint.strokeCap = Paint.Cap.ROUND
+                paint.color = layer.strokeColor
+                canvas.drawPath(path, paint)
+            }
+        }
+        LayerType.TEXT -> {
+            val family = when (layer.fontFamily) {
+                "Serif" -> Typeface.SERIF
+                "Monospace" -> Typeface.MONOSPACE
+                "Sans Serif" -> Typeface.SANS_SERIF
+                else -> Typeface.DEFAULT
+            }
+            val style = when {
+                layer.textBold && layer.textItalic -> Typeface.BOLD_ITALIC
+                layer.textBold -> Typeface.BOLD
+                layer.textItalic -> Typeface.ITALIC
+                else -> Typeface.NORMAL
+            }
+            paint.typeface = Typeface.create(family, style)
+            paint.textSize = layer.fontSize.coerceIn(1f, 1000f)
+            paint.textAlign = when (layer.textAlign) {
+                "Left" -> Paint.Align.LEFT
+                "Right" -> Paint.Align.RIGHT
+                else -> Paint.Align.CENTER
+            }
+            val x = when (layer.textAlign) {
+                "Left" -> 0f
+                "Right" -> logicalWidth
+                else -> logicalWidth / 2f
+            }
+            val baseline = logicalHeight / 2f + layer.fontSize * 0.34f
+            if (layer.fillEnabled) {
+                paint.style = Paint.Style.FILL
+                paint.color = layer.color
+                canvas.drawText(layer.text, x, baseline, paint)
+            }
+            if (layer.strokeEnabled && layer.strokeWidth > 0f) {
+                paint.style = Paint.Style.STROKE
+                paint.strokeWidth = layer.strokeWidth
+                paint.strokeJoin = Paint.Join.ROUND
+                paint.color = layer.strokeColor
+                canvas.drawText(layer.text, x, baseline, paint)
+            }
+        }
+        else -> {
+            bitmap.recycle()
+            return null
+        }
+    }
+    return bitmap
+}
 
 private class CpuPreviewClock {
     @Volatile var timeSec: Float = 0f
@@ -58,6 +143,7 @@ fun CpuPreviewCanvas(
     val bitmaps = remember { mutableStateMapOf<String, Bitmap>() }
     val effectedBitmaps = remember { mutableStateMapOf<String, Bitmap>() }
     val motionTileBitmaps = remember { mutableStateMapOf<String, Bitmap>() }
+    val effectCraftLayerBitmaps = remember { mutableStateMapOf<String, Bitmap>() }
     val previewClock = remember(editor) { CpuPreviewClock() }
     val mediaLayers = editor.layers.filter {
         it.id != directVideoLayerId && it.uri != null && (it.type == LayerType.IMAGE || it.type == LayerType.VIDEO)
@@ -65,6 +151,11 @@ fun CpuPreviewCanvas(
     val mediaLayerSignature = mediaLayers.map {
         "${it.id}|${it.uri}|${it.type}|${it.start}|${it.duration}|${it.srcOffset}|${it.p(PropId.SPEED)}|${it.visible}|${it.effectStack.hashCode()}"
     }
+    val effectCraftLayers = editor.layers.filter { layer ->
+        (layer.type == LayerType.TEXT || layer.type == LayerType.SHAPE) &&
+            layer.effectStack.any { it.enabled && it.effectCraftId != null }
+    }
+    val effectCraftLayerSignature = effectCraftLayers.map { "${it.id}|${it.hashCode()}" }
 
     // Observe the master clock outside composition. Updating this volatile
     // holder does not invalidate the editor UI on every playback tick.
@@ -178,6 +269,57 @@ fun CpuPreviewCanvas(
             }
 
             delay(if (hadActiveMedia) 16L else 40L)
+        }
+    }
+
+
+    // Rasterize text/vector layers before passing them through the same EffectCraft
+    // compositor used for footage. The layer's opacity, transform and mask remain
+    // in Kinetic's compositor, while EffectCraft receives the actual rendered pixels.
+    LaunchedEffect(effectCraftLayerSignature) {
+        val validIds = effectCraftLayers.map { it.id }.toSet()
+        effectCraftLayerBitmaps.keys.toList().filterNot { it in validIds }.forEach { id ->
+            effectCraftLayerBitmaps.remove(id)?.let { if (!it.isRecycled) it.recycle() }
+        }
+        if (effectCraftLayers.isEmpty()) return@LaunchedEffect
+        val lastProcessed = mutableMapOf<String, Long>()
+        val retryAfterNs = mutableMapOf<String, Long>()
+        while (true) {
+            val timelineTime = previewClock.timeSec
+            val sampleFps = if (MediaWorkers.isConstrainedDevice) 12 else 24
+            val timeBucket = (timelineTime * sampleFps).toInt()
+            for (layer in effectCraftLayers) {
+                if (!layer.visible || !layer.activeAt(timelineTime)) continue
+                val activeEffects = layer.effectStack.filter { it.enabled && it.effectCraftId != null }.take(8)
+                if (activeEffects.isEmpty()) continue
+                var key = layer.hashCode().toLong()
+                key = key * 31L + timeBucket.toLong()
+                key = key * 31L + if (layer.type == LayerType.SHAPE) layer.vectorPointsAt(timelineTime).hashCode().toLong() else 0L
+                if (lastProcessed[layer.id] == key) continue
+                val retryAt = retryAfterNs[layer.id]
+                if (retryAt != null && System.nanoTime() < retryAt) continue
+                val rendered = withContext(Dispatchers.Default) {
+                    val source = rasterizeEffectCraftLayer(layer, timelineTime) ?: return@withContext null
+                    try {
+                        com.kinetic.app.engine.EffectCraftBridge.renderFrame(
+                            source, activeEffects, timelineTime, 640, "kinetic-layer-${layer.id}"
+                        )
+                    } finally {
+                        if (!source.isRecycled) source.recycle()
+                    }
+                }
+                val stillCurrent = ((previewClock.timeSec * sampleFps).toInt() == timeBucket)
+                if (rendered != null && stillCurrent) {
+                    retryAfterNs.remove(layer.id)
+                    lastProcessed[layer.id] = key
+                    val previous = effectCraftLayerBitmaps.put(layer.id, rendered)
+                    if (previous != null && previous !== rendered && !previous.isRecycled) previous.recycle()
+                } else {
+                    if (rendered != null && !rendered.isRecycled) rendered.recycle()
+                    retryAfterNs[layer.id] = System.nanoTime() + 350_000_000L
+                }
+            }
+            delay(if (previewClock.playing) 40L else 80L)
         }
     }
 
@@ -358,70 +500,84 @@ fun CpuPreviewCanvas(
                         // persist through animated transforms and transitions.
                     }
                     LayerType.SHAPE -> {
-                        val points = if (l.vectorPoints.isEmpty()) listOf(VectorPoint(0f, 0f), VectorPoint(1f, 0f), VectorPoint(1f, 1f), VectorPoint(0f, 1f)) else l.vectorPointsAt(time)
-                        val path = shapePaths.getOrPut(l.id) { android.graphics.Path() }
-                        path.reset()
-                        points.forEachIndexed { index, point ->
-                            val px = point.x * l.width; val py = point.y * l.height
-                            if (index == 0) path.moveTo(px, py) else path.lineTo(px, py)
-                        }
-                        path.close()
-                        paint.xfermode = blendModes[l.blendMode]
-                        paint.colorFilter = if ("Grayscale" in l.effects) grayscaleFilter else null
-                        if (l.fillEnabled) {
+                        val effectBitmap = effectCraftLayerBitmaps[l.id]
+                        if (effectBitmap != null && !effectBitmap.isRecycled) {
+                            paint.color = android.graphics.Color.WHITE
+                            paint.alpha = alpha
+                            nc.drawBitmap(effectBitmap, null, RectF(0f, 0f, l.width, l.height), paint)
+                        } else {
+                            val points = if (l.vectorPoints.isEmpty()) listOf(VectorPoint(0f, 0f), VectorPoint(1f, 0f), VectorPoint(1f, 1f), VectorPoint(0f, 1f)) else l.vectorPointsAt(time)
+                            val path = shapePaths.getOrPut(l.id) { android.graphics.Path() }
+                            path.reset()
+                            points.forEachIndexed { index, point ->
+                                val px = point.x * l.width; val py = point.y * l.height
+                                if (index == 0) path.moveTo(px, py) else path.lineTo(px, py)
+                            }
+                            path.close()
+                            if (l.fillEnabled) {
+                                paint.style = Paint.Style.FILL
+                                paint.color = l.color
+                                paint.alpha = alpha
+                                nc.drawPath(path, paint)
+                            }
+                            if (l.strokeEnabled && l.strokeWidth > 0f) {
+                                paint.style = Paint.Style.STROKE
+                                paint.strokeJoin = Paint.Join.ROUND
+                                paint.strokeCap = Paint.Cap.ROUND
+                                paint.strokeWidth = l.strokeWidth
+                                paint.color = l.strokeColor
+                                paint.alpha = alpha
+                                nc.drawPath(path, paint)
+                            }
                             paint.style = Paint.Style.FILL
-                            paint.color = l.color
-                            paint.alpha = alpha
-                            nc.drawPath(path, paint)
                         }
-                        if (l.strokeEnabled && l.strokeWidth > 0f) {
-                            paint.style = Paint.Style.STROKE
-                            paint.strokeJoin = Paint.Join.ROUND
-                            paint.strokeCap = Paint.Cap.ROUND
-                            paint.strokeWidth = l.strokeWidth
-                            paint.color = l.strokeColor
-                            paint.alpha = alpha
-                            nc.drawPath(path, paint)
-                        }
-                        paint.style = Paint.Style.FILL
                     }
                     LayerType.TEXT -> {
-                        textPaint.textSize = l.fontSize.coerceIn(1f, 1000f)
-                        val family = when (l.fontFamily) {
-                            "Serif" -> Typeface.SERIF
-                            "Monospace" -> Typeface.MONOSPACE
-                            "Sans Serif" -> Typeface.SANS_SERIF
-                            else -> Typeface.DEFAULT
-                        }
-                        val style = when {
-                            l.textBold && l.textItalic -> Typeface.BOLD_ITALIC
-                            l.textBold -> Typeface.BOLD
-                            l.textItalic -> Typeface.ITALIC
-                            else -> Typeface.NORMAL
-                        }
-                        textPaint.typeface = Typeface.create(family, style)
-                        textPaint.textAlign = when (l.textAlign) {
-                            "Left" -> Paint.Align.LEFT
-                            "Right" -> Paint.Align.RIGHT
-                            else -> Paint.Align.CENTER
-                        }
-                        textPaint.xfermode = blendModes[l.blendMode]
-                        textPaint.colorFilter = if ("Grayscale" in l.effects) grayscaleFilter else null
-                        if (l.fillEnabled) {
+                        val effectBitmap = effectCraftLayerBitmaps[l.id]
+                        if (effectBitmap != null && !effectBitmap.isRecycled) {
+                            paint.color = android.graphics.Color.WHITE
+                            paint.alpha = alpha
+                            nc.drawBitmap(effectBitmap, null, RectF(0f, 0f, l.width, l.height), paint)
+                        } else {
+                            textPaint.textSize = l.fontSize.coerceIn(1f, 1000f)
+                            val family = when (l.fontFamily) {
+                                "Serif" -> Typeface.SERIF
+                                "Monospace" -> Typeface.MONOSPACE
+                                "Sans Serif" -> Typeface.SANS_SERIF
+                                else -> Typeface.DEFAULT
+                            }
+                            val style = when {
+                                l.textBold && l.textItalic -> Typeface.BOLD_ITALIC
+                                l.textBold -> Typeface.BOLD
+                                l.textItalic -> Typeface.ITALIC
+                                else -> Typeface.NORMAL
+                            }
+                            textPaint.typeface = Typeface.create(family, style)
+                            textPaint.textAlign = when (l.textAlign) {
+                                "Left" -> Paint.Align.LEFT
+                                "Right" -> Paint.Align.RIGHT
+                                else -> Paint.Align.CENTER
+                            }
+                            textPaint.xfermode = blendModes[l.blendMode]
+                            textPaint.colorFilter = if ("Grayscale" in l.effects) grayscaleFilter else null
+                            val x = when (l.textAlign) { "Left" -> 0f; "Right" -> l.width; else -> l.width / 2f }
+                            val baseline = l.height / 2f + l.fontSize * 0.34f
+                            if (l.fillEnabled) {
+                                textPaint.style = Paint.Style.FILL
+                                textPaint.color = l.color
+                                textPaint.alpha = alpha
+                                nc.drawText(l.text, x, baseline, textPaint)
+                            }
+                            if (l.strokeEnabled && l.strokeWidth > 0f) {
+                                textPaint.style = Paint.Style.STROKE
+                                textPaint.strokeWidth = l.strokeWidth
+                                textPaint.strokeJoin = Paint.Join.ROUND
+                                textPaint.color = l.strokeColor
+                                textPaint.alpha = alpha
+                                nc.drawText(l.text, x, baseline, textPaint)
+                            }
                             textPaint.style = Paint.Style.FILL
-                            textPaint.color = l.color
-                            textPaint.alpha = alpha
-                            nc.drawText(l.text, when (l.textAlign) { "Left" -> 0f; "Right" -> l.width; else -> l.width / 2f }, l.height / 2f + l.fontSize * 0.34f, textPaint)
                         }
-                        if (l.strokeEnabled && l.strokeWidth > 0f) {
-                            textPaint.style = Paint.Style.STROKE
-                            textPaint.strokeWidth = l.strokeWidth
-                            textPaint.strokeJoin = Paint.Join.ROUND
-                            textPaint.color = l.strokeColor
-                            textPaint.alpha = alpha
-                            nc.drawText(l.text, when (l.textAlign) { "Left" -> 0f; "Right" -> l.width; else -> l.width / 2f }, l.height / 2f + l.fontSize * 0.34f, textPaint)
-                        }
-                        textPaint.style = Paint.Style.FILL
                     }
                     else -> Unit
                 }
