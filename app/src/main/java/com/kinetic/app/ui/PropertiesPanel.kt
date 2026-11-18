@@ -183,7 +183,7 @@ fun ScrubValueBar(
                 ) { change, drag ->
                     change.consume()
                     dragTotal += drag / density
-                    val raw = dragStartValue + dragTotal * step
+                    val raw = dragStartValue + dragTotal * step * 4f
                     val increment = snapStep?.takeIf { it.isFinite() && it > 0f }
                     val next = if (increment != null) kotlin.math.round(raw / increment) * increment else raw
                     latestChange(next.coerceIn(minValue, maxValue))
