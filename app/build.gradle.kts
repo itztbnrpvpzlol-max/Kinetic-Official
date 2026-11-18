@@ -7,6 +7,19 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose") version "2.2.10"
 }
 
+val kineticAbis = providers.gradleProperty("KINETIC_ABIS")
+    .orElse("armeabi-v7a")
+    .get()
+    .split(",")
+    .map { it.trim() }
+    .filter { it.isNotEmpty() }
+
+val rustTargetByAbi = mapOf(
+    "armeabi-v7a" to "armv7-linux-androideabi",
+    "arm64-v8a" to "aarch64-linux-android",
+    "x86_64" to "x86_64-linux-android"
+)
+
 val manropeGeneratedRes = layout.buildDirectory.dir("generated/res/manrope")
 val manropeGeneratedAssets = layout.buildDirectory.dir("generated/assets/manrope")
 
@@ -23,7 +36,7 @@ android {
         versionCode = providers.gradleProperty("KINETIC_VERSION_CODE").orElse("3").get().toInt()
         versionName = providers.gradleProperty("KINETIC_VERSION_NAME").orElse("0.3").get()
         ndk {
-            abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
+            abiFilters += kineticAbis
         }
         externalNativeBuild {
             cmake {
@@ -94,13 +107,14 @@ val buildEffectCraftAndroid by tasks.registering(Exec::class) {
     group = "build"
     description = "Build the EffectCraft Rust JNI library for Kinetic's Android ABIs."
     workingDir(rootProject.file("native/effectcraft-android"))
+    val cargoTargets = kineticAbis.flatMap { abi ->
+        listOf("-t", rustTargetByAbi[abi] ?: error("Unsupported KINETIC_ABIS entry: $abi"))
+    }
     commandLine(
-        "cargo", "ndk",
-        "-t", "arm64-v8a",
-        "-t", "armeabi-v7a",
-        "-t", "x86_64",
-        "-o", rootProject.file("app/src/main/jniLibs").absolutePath,
-        "build", "--release"
+        listOf("cargo", "ndk") + cargoTargets + listOf(
+            "-o", rootProject.file("app/src/main/jniLibs").absolutePath,
+            "build", "--release"
+        )
     )
 }
 
