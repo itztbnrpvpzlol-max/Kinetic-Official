@@ -465,3 +465,13 @@ pub extern "system" fn Java_com_kinetic_app_engine_EffectCraftNative_nativeDecod
         _ => std::ptr::null_mut(),
     }
 }
+
+
+/// Release decoded-frame memory when Android reports memory pressure.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_kinetic_app_engine_EffectCraftNative_nativeClearMediaFrames(
+    _env: JNIEnv<'_>,
+    _class: JClass<'_>,
+) {
+    let _ = catch_unwind(|| media_pool().clear_frames());
+}
