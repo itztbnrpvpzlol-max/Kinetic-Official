@@ -27,4 +27,8 @@ internal object EffectCraftNative {
      */
     @JvmStatic
     external fun nativeExecute(commandId: String, paramsJson: String): String
+
+    /** Executes ordered commands against the same persistent EffectCraft session. */
+    @JvmStatic
+    external fun nativeExecuteBatch(commandsJson: String): String
 }
