@@ -406,8 +406,11 @@ object AiEditorEngine {
             if (cursor >= compDuration) return@forEachIndexed
             val duration = min(scene.duration, compDuration - cursor).coerceAtLeast(0.25f)
             val info = videos.firstOrNull { it.uri == scene.uri }
-            val w = info?.width?.takeIf { it > 0 }?.toFloat() ?: baseW
-            val h = info?.height?.takeIf { it > 0 }?.toFloat() ?: baseH
+            val sourceW = info?.width?.takeIf { it > 0 }?.toFloat() ?: baseW
+            val sourceH = info?.height?.takeIf { it > 0 }?.toFloat() ?: baseH
+            val fitScale = min(COMP_W / sourceW, COMP_H / sourceH)
+            val w = sourceW * fitScale
+            val h = sourceH * fitScale
             var video = newLayer(LayerType.VIDEO, scene.sourceName, cursor, duration, w, h,
                 scene.uri.toString(), info?.duration ?: scene.end).copy(srcOffset = scene.start)
             val fadeDuration = min(0.22f, duration * 0.22f)
