@@ -106,18 +106,20 @@ internal fun rasterizeEffectCraftLayer(layer: Layer, time: Float, maxSide: Int =
                 "Right" -> logicalWidth
                 else -> logicalWidth / 2f
             }
-            val baseline = logicalHeight / 2f + layer.fontSize * 0.34f
+            val lines = layer.text.split('\n')
+            val lineHeight = layer.fontSize.coerceIn(1f, 1000f) * 1.2f
+            val firstBaseline = (logicalHeight - (lines.size - 1) * lineHeight) / 2f + layer.fontSize * 0.34f
             if (layer.fillEnabled) {
                 paint.style = Paint.Style.FILL
                 paint.color = layer.color
-                canvas.drawText(layer.text, x, baseline, paint)
+                lines.forEachIndexed { index, line -> canvas.drawText(line, x, firstBaseline + index * lineHeight, paint) }
             }
             if (layer.strokeEnabled && layer.strokeWidth > 0f) {
                 paint.style = Paint.Style.STROKE
                 paint.strokeWidth = layer.strokeWidth
                 paint.strokeJoin = Paint.Join.ROUND
                 paint.color = layer.strokeColor
-                canvas.drawText(layer.text, x, baseline, paint)
+                lines.forEachIndexed { index, line -> canvas.drawText(line, x, firstBaseline + index * lineHeight, paint) }
             }
         }
         else -> {
@@ -561,12 +563,14 @@ fun CpuPreviewCanvas(
                             textPaint.xfermode = blendModes[l.blendMode]
                             textPaint.colorFilter = if ("Grayscale" in l.effects) grayscaleFilter else null
                             val x = when (l.textAlign) { "Left" -> 0f; "Right" -> l.width; else -> l.width / 2f }
-                            val baseline = l.height / 2f + l.fontSize * 0.34f
+                            val lines = l.text.split('\n')
+                            val lineHeight = l.fontSize.coerceIn(1f, 1000f) * 1.2f
+                            val firstBaseline = (l.height - (lines.size - 1) * lineHeight) / 2f + l.fontSize * 0.34f
                             if (l.fillEnabled) {
                                 textPaint.style = Paint.Style.FILL
                                 textPaint.color = l.color
                                 textPaint.alpha = alpha
-                                nc.drawText(l.text, x, baseline, textPaint)
+                                lines.forEachIndexed { index, line -> nc.drawText(line, x, firstBaseline + index * lineHeight, textPaint) }
                             }
                             if (l.strokeEnabled && l.strokeWidth > 0f) {
                                 textPaint.style = Paint.Style.STROKE
@@ -574,7 +578,7 @@ fun CpuPreviewCanvas(
                                 textPaint.strokeJoin = Paint.Join.ROUND
                                 textPaint.color = l.strokeColor
                                 textPaint.alpha = alpha
-                                nc.drawText(l.text, x, baseline, textPaint)
+                                lines.forEachIndexed { index, line -> nc.drawText(line, x, firstBaseline + index * lineHeight, textPaint) }
                             }
                             textPaint.style = Paint.Style.FILL
                         }
