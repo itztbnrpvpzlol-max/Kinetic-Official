@@ -306,7 +306,11 @@ data class EffectInstance(
     val name: String,
     val enabled: Boolean = true,
     val parameters: Map<String, Float> = emptyMap(),
-    val parameterKeys: Map<String, List<Keyframe>> = emptyMap()
+    val parameterKeys: Map<String, List<Keyframe>> = emptyMap(),
+    /** Stable EffectCraft registry ID; null only for legacy Kinetic effects. */
+    val effectCraftId: String? = null,
+    /** EffectCraft values are JSON scalars/arrays/objects, not forced into floats. */
+    val effectCraftParameters: Map<String, String> = emptyMap()
 ) {
     fun parameterAt(key: String, time: Float, fallback: Float = 0f): Float {
         val base = parameters[key] ?: fallback
