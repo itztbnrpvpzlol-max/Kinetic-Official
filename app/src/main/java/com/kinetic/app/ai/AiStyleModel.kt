@@ -59,7 +59,7 @@ internal class AiStyleModel private constructor(
                 for (i in centers.indices) {
                     val bucket = buckets[i]
                     if (bucket.isNotEmpty()) {
-                        centers[i] = FloatArray(3) { axis ->
+                        centers[i] = FloatArray(5) { axis ->
                             bucket.map { it[axis] }.average().toFloat()
                         }
                     }
@@ -73,7 +73,7 @@ internal class AiStyleModel private constructor(
                 .put("samples", model.trainingSamples)
                 .put("centroids", JSONArray().apply {
                     model.centroids.forEach { center ->
-                        put(JSONArray().put(center[0].toDouble()).put(center[1].toDouble()).put(center[2].toDouble()))
+                        put(JSONArray().apply { center.forEach { put(it.toDouble()) } })
                     }
                 })
             context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
