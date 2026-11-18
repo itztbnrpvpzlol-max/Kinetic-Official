@@ -33,11 +33,13 @@ jobs:
             --output "$RUNNER_TEMP/anime-character-resnet18.onnx"
 
       - name: Validate ONNX graph
+        env:
+          MODEL_PATH: ${{ runner.temp }}/anime-character-resnet18.onnx
         run: |
           python - <<'PY'
+          import os
           import onnx
-          path = "$RUNNER_TEMP/anime-character-resnet18.onnx"
-          model = onnx.load(path)
+          model = onnx.load(os.environ["MODEL_PATH"])
           onnx.checker.check_model(model)
           print("ONNX graph validated")
           PY
