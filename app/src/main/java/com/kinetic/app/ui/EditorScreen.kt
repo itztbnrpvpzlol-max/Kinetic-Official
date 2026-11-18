@@ -328,13 +328,18 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                             onRename = { renameTarget = activeLayer }, onParent = { parentPicker = true },
                             modifier = Modifier.fillMaxWidth().height(adaptivePanelHeight.dp))
                     } else {
-                        ToolEditPanel(dockTool, editor, activeLayer,
-                            onClose = { showToolPanel = false },
-                            onExtractAudio = { editor.extractAudio(activeLayer.id); showToolPanel = false },
-                            maskTool = maskTool, onMaskToolChange = { maskTool = it },
-                            rotoForeground = rotoForeground, onRotoForegroundChange = { rotoForeground = it },
-                            onOpenEffects = { showEffectsScreen = true },
-                            modifier = Modifier.fillMaxWidth().height(adaptivePanelHeight.dp))
+                        if (dockTool == "Text" || dockTool == "Appearance") {
+                            LayerStylePanel(editor, activeLayer, onClose = { showToolPanel = false },
+                                modifier = Modifier.fillMaxWidth().height(adaptivePanelHeight.dp))
+                        } else {
+                            ToolEditPanel(dockTool, editor, activeLayer,
+                                onClose = { showToolPanel = false },
+                                onExtractAudio = { editor.extractAudio(activeLayer.id); showToolPanel = false },
+                                maskTool = maskTool, onMaskToolChange = { maskTool = it },
+                                rotoForeground = rotoForeground, onRotoForegroundChange = { rotoForeground = it },
+                                onOpenEffects = { showEffectsScreen = true },
+                                modifier = Modifier.fillMaxWidth().height(adaptivePanelHeight.dp))
+                        }
                     }
                 }
             } else if (showShapePanel && !compactHeight) {
@@ -354,7 +359,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
             }
             FloatingEditingDock(
                 dockTool,
-                activeLayer != null
+                activeLayer
             ) { tool ->
                 dockTool = tool
                 when (tool) {
@@ -367,6 +372,15 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                             showShapePanel = false
                             editor.extractAudio(activeLayer.id)
                         } else Toast.makeText(ctx, "Select a video layer first", Toast.LENGTH_SHORT).show()
+                    }
+                    "Text", "Appearance" -> {
+                        if (activeLayer != null && (tool != "Text" || activeLayer.type == LayerType.TEXT)) {
+                            showPropertiesPanel = false
+                            showShapePanel = false
+                            showToolPanel = true
+                        } else if (tool == "Text") {
+                            editor.addText()
+                        }
                     }
                     "Speed", "Volume", "Masking", "Effects", "Blending", "Blend modes", "Flip" -> {
                         if (activeLayer != null) {
@@ -521,11 +535,13 @@ private fun TopBar(editor: EditorState, onMenuHome: () -> Unit, onOpenSettings: 
 
 
 @Composable
-private fun FloatingEditingDock(active: String, hasSelection: Boolean, onSelect: (String) -> Unit) {
+private fun FloatingEditingDock(active: String, layer: Layer?, onSelect: (String) -> Unit) {
     // Keep Import inside the capsule, but visually separate it from the tools.
-    val tools = if (hasSelection) {
-        listOf(
+    val tools = if (layer != null) {
+        listOfNotNull(
             "Properties" to IconKind.SLIDERS,
+            if (layer.type == LayerType.TEXT) "Text" to IconKind.TEXT else null,
+            if (layer.type == LayerType.TEXT || layer.type == LayerType.SHAPE) "Appearance" to IconKind.PALETTE else null,
             "Speed" to IconKind.STOPWATCH,
             "Volume" to IconKind.VOLUME,
             "Masking" to IconKind.MASK,
