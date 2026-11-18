@@ -344,6 +344,21 @@ private fun EffectCraftParameterLine(
     val raw = effect.effectCraftParameters[parameter.id] ?: parameter.defaultJson
     val type = parameter.type.lowercase()
     val booleanValue = raw.equals("true", true) || raw == "1"
+    val numericDefault = parameter.defaultJson.toFloatOrNull()
+    val isNumeric = numericDefault != null || type.contains("float") ||
+        type.contains("double") || type.contains("number") || type.contains("integer") || type == "int"
+    val numericFallback = numericDefault ?: raw.toFloatOrNull() ?: 0f
+    val numericMin = (parameter.sliderMin ?: parameter.min ?: (numericFallback.toDouble() - 100.0)).toFloat()
+    val numericMaxRaw = (parameter.sliderMax ?: parameter.max ?: (numericFallback.toDouble() + 100.0)).toFloat()
+    val numericMax = if (numericMaxRaw > numericMin) numericMaxRaw else numericMin + 100f
+    val decimals = (parameter.decimals ?: if (type.contains("int")) 0 else 2).coerceIn(0, 6)
+    val snapStep = if (decimals == 0) 1f else Math.pow(10.0, -decimals.toDouble()).toFloat()
+    val current = effect.effectCraftParameterAt(parameter.id, editor.time, numericFallback)
+        .coerceIn(numericMin, numericMax)
+    val keys = effect.parameterKeys[parameter.id].orEmpty()
+    val selected = editor.selectedEffectId == effect.id &&
+        editor.selectedEffectParameter == parameter.id
+    val hasCurrentKey = keys.any { kotlin.math.abs(it.t - editor.time) <= 1f / 120f }
     var editing by remember(effect.id, parameter.id) { mutableStateOf(false) }
     var input by remember(effect.id, parameter.id, raw) { mutableStateOf(raw.trim('"')) }
     var menuOpen by remember(effect.id, parameter.id) { mutableStateOf(false) }
@@ -353,7 +368,22 @@ private fun EffectCraftParameterLine(
             .padding(horizontal = 5.dp, vertical = 5.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
-        Text(parameter.name, color = KColors.Text, fontSize = 9.sp, fontWeight = FontWeight.SemiBold)
+        Row(Modifier.fillMaxWidth().height(24.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(parameter.name, color = if (selected) KColors.Accent else KColors.Text,
+                fontSize = 9.sp, fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.weight(1f).clickable {
+                    editor.selectEffectParameter(layer.id, effect.id, parameter.id)
+                })
+            if (isNumeric) {
+                Text(if (hasCurrentKey) "◆" else "◇",
+                    color = if (hasCurrentKey || selected) KColors.Accent else KColors.Muted,
+                    fontSize = 15.sp,
+                    modifier = Modifier.clickable {
+                        editor.selectEffectParameter(layer.id, effect.id, parameter.id)
+                        editor.toggleEffectCraftParameterKey(layer.id, effect.id, parameter.id)
+                    }.padding(horizontal = 5.dp))
+            }
+        }
         when {
             type.contains("bool") || type.contains("toggle") -> {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -383,6 +413,28 @@ private fun EffectCraftParameterLine(
                             })
                         }
                     }
+                }
+            }
+            isNumeric -> {
+                ScrubValueBar(
+                    parameter.name,
+                    current,
+                    Modifier.fillMaxWidth(),
+                    step = snapStep / 10f,
+                    snapStep = snapStep,
+                    selected = selected,
+                    onSelect = { editor.selectEffectParameter(layer.id, effect.id, parameter.id) },
+                    minValue = numericMin,
+                    maxValue = numericMax,
+                    valueFormat = "%." + decimals + "f",
+                    onScrubStart = {
+                        editor.selectEffectParameter(layer.id, effect.id, parameter.id)
+                        editor.beginEdit()
+                    }
+                ) { value ->
+                    editor.updateEffectCraftNumericParameter(
+                        layer.id, effect.id, parameter.id, value.coerceIn(numericMin, numericMax)
+                    )
                 }
             }
             else -> {
