@@ -29,6 +29,7 @@ import java.util.Date
 @Composable
 fun HomeScreen(
     onNewComposition: () -> Unit,
+    onOpenAiEditor: () -> Unit,
     onImportProject: () -> Unit,
     onImportPlugin: () -> Unit,
     onOpenSettings: () -> Unit,
@@ -41,6 +42,8 @@ fun HomeScreen(
         Column(Modifier.widthIn(max = 900.dp).fillMaxSize().align(Alignment.CenterHorizontally).padding(horizontal = 18.dp)) {
             Spacer(Modifier.height(16.dp))
             NewCompositionCard(onNewComposition)
+            Spacer(Modifier.height(12.dp))
+            AiEditorCard(onOpenAiEditor)
             Spacer(Modifier.height(12.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 ActionButton("Import Project", onImportProject, Modifier.weight(1f))
@@ -134,5 +137,32 @@ private fun ActionButton(label: String, onClick: () -> Unit, modifier: Modifier 
     val shape = RoundedCornerShape(16.dp)
     Box(modifier.clip(shape).background(KColors.Surface).border(1.dp, KColors.Line, shape).clickable(onClick = onClick).padding(vertical = 16.dp), contentAlignment = Alignment.Center) {
         Text(label, color = KColors.Text, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+    }
+}
+
+@Composable
+private fun AiEditorCard(onClick: () -> Unit) {
+    val shape = RoundedCornerShape(22.dp)
+    Row(
+        Modifier.fillMaxWidth().clip(shape)
+            .background(Color(0xFF211D35))
+            .border(1.dp, Color(0xFF51406F), shape)
+            .clickable(onClick = onClick)
+            .padding(18.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        Box(
+            Modifier.size(46.dp).clip(RoundedCornerShape(14.dp))
+                .background(Color(0xFF7652B8)),
+            contentAlignment = Alignment.Center
+        ) {
+            Text("AI", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+        }
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text("AI Editor", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+            Text("Build anime edits from your footage, music and creative direction", color = Color(0xFFC5B9D8), fontSize = 12.sp)
+        }
+        Text("→", color = Color.White, fontSize = 22.sp)
     }
 }
