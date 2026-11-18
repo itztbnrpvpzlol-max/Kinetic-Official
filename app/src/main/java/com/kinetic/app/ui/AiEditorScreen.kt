@@ -49,6 +49,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kinetic.app.ai.AiEditorEngine
+import com.kinetic.app.ai.AiAutoExporter
 import com.kinetic.app.ai.AiNeuralModels
 import com.kinetic.app.data.AppSettings
 import com.kinetic.app.model.EditorState
@@ -297,8 +298,9 @@ fun AiEditorScreen(settings: AppSettings, onBack: () -> Unit, onOpenEditor: (Edi
                             }
                             generating = false
                             exportResult.onSuccess { exported ->
-                                val audioMessage = if (exported.audioIncluded) "Soundtrack included." else
-                                    "Video saved; the selected audio format could not be muxed into MP4."
+                                val audioMessage = if (exported.audioIncluded) "Soundtrack included." else if (soundtrack.isEmpty()) {
+                                    "No soundtrack was selected."
+                                } else "Video saved; this soundtrack format could not be muxed into MP4."
                                 android.widget.Toast.makeText(
                                     context,
                                     "AI edit exported to Movies/Kinetic. $audioMessage",
