@@ -255,7 +255,7 @@ fun AiEditorScreen(settings: AppSettings, onBack: () -> Unit, onOpenEditor: (Edi
                         else -> 37.5f
                     }
                     scope.launch {
-                        val result = runCatching {
+                        val generatedResult = runCatching {
                             val modelStatus = withContext(Dispatchers.IO) {
                                 AiNeuralModels.prepare(context)
                             }
@@ -278,13 +278,40 @@ fun AiEditorScreen(settings: AppSettings, onBack: () -> Unit, onOpenEditor: (Edi
                                 )
                             }
                         }
-                        generating = false
-                        result.onSuccess { generated ->
+                        generatedResult.onSuccess { generated ->
                             val project = EditorState(settings, projectName = generated.name)
                             project.restoreProject(generated.duration, settings.resolution, generated.layers, 0f)
-                            android.widget.Toast.makeText(context, generated.report, android.widget.Toast.LENGTH_LONG).show()
-                            onOpenEditor(project)
+                            generationStatus = "Applying EffectCraft effects and rendering your finished video…"
+                            val exportResult = runCatching {
+                                withContext(Dispatchers.IO) {
+                                    AiAutoExporter.export(
+                                        context,
+                                        generated.layers,
+                                        generated.duration,
+                                        settings.fps,
+                                        settings.resolution
+                                    ) { progress, message ->
+                                        generationStatus = message
+                                    }
+                                }
+                            }
+                            generating = false
+                            exportResult.onSuccess { exported ->
+                                val audioMessage = if (exported.audioIncluded) "Soundtrack included." else
+                                    "Video saved; the selected audio format could not be muxed into MP4."
+                                android.widget.Toast.makeText(
+                                    context,
+                                    "AI edit exported to Movies/Kinetic. $audioMessage",
+                                    android.widget.Toast.LENGTH_LONG
+                                ).show()
+                                onOpenEditor(project)
+                            }.onFailure { error ->
+                                generationStatus = "The edit was created, but export failed: ${error.message ?: "unknown error"}"
+                                android.widget.Toast.makeText(context, generationStatus, android.widget.Toast.LENGTH_LONG).show()
+                                onOpenEditor(project)
+                            }
                         }.onFailure { error ->
+                            generating = false
                             generationStatus = error.message ?: "Couldn't generate this edit. Check the selected media and try again."
                         }
                     }
