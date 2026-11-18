@@ -18,6 +18,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Switch
@@ -34,6 +37,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.kinetic.app.engine.EffectCraftCatalog
+import com.kinetic.app.engine.EffectCraftEffectInfo
+import com.kinetic.app.engine.EffectCraftParameterInfo
 import com.kinetic.app.model.EditorState
 import com.kinetic.app.model.EffectInstance
 import com.kinetic.app.model.Layer
@@ -118,6 +124,10 @@ fun EffectControlsPanel(editor: EditorState, layer: Layer, onBrowseEffects: () -
     // Reopening the panel never auto-expands the most recently added effect.
     // Expansion is a deliberate user action for this panel session.
     var expandedEffectId by remember(layer.id) { mutableStateOf<String?>(null) }
+    var effectCraftCatalog by remember { mutableStateOf<Map<String, EffectCraftEffectInfo>>(emptyMap()) }
+    LaunchedEffect(Unit) {
+        EffectCraftCatalog.load().onSuccess { effects -> effectCraftCatalog = effects.associateBy { it.id } }
+    }
     LaunchedEffect(layer.id) { editor.clearEffectParameterSelection() }
     Column(
         Modifier.fillMaxSize().background(KColors.Surface)
@@ -189,11 +199,23 @@ fun EffectControlsPanel(editor: EditorState, layer: Layer, onBrowseEffects: () -
                         verticalArrangement = Arrangement.spacedBy(3.dp)
                     ) {
                         Box(Modifier.fillMaxWidth().height(1.dp).background(KColors.Line))
-                        controlsFor(effect).forEach { spec ->
-                            val selected = editor.selectedEffectId == effect.id &&
-                                editor.selectedEffectParameter == spec.key
-                            EffectParameterLine(editor, layer, liveEffect, spec, selected) {
-                                editor.selectEffectParameter(layer.id, effect.id, spec.key)
+                        if (effect.effectCraftId != null) {
+                            val definition = effectCraftCatalog[effect.effectCraftId]
+                            if (definition == null) {
+                                Text("Loading EffectCraft parameters…", color = KColors.Muted, fontSize = 9.sp,
+                                    modifier = Modifier.padding(8.dp))
+                            } else {
+                                definition.params.forEach { parameter ->
+                                    EffectCraftParameterLine(editor, layer, liveEffect, parameter)
+                                }
+                            }
+                        } else {
+                            controlsFor(effect).forEach { spec ->
+                                val selected = editor.selectedEffectId == effect.id &&
+                                    editor.selectedEffectParameter == spec.key
+                                EffectParameterLine(editor, layer, liveEffect, spec, selected) {
+                                    editor.selectEffectParameter(layer.id, effect.id, spec.key)
+                                }
                             }
                         }
                     }
@@ -311,3 +333,105 @@ private fun EffectParameterLine(
     }
 }
 
+
+@Composable
+private fun EffectCraftParameterLine(
+    editor: EditorState,
+    layer: Layer,
+    effect: EffectInstance,
+    parameter: EffectCraftParameterInfo
+) {
+    val raw = effect.effectCraftParameters[parameter.id] ?: parameter.defaultJson
+    val type = parameter.type.lowercase()
+    val booleanValue = raw.equals("true", true) || raw == "1"
+    var editing by remember(effect.id, parameter.id) { mutableStateOf(false) }
+    var input by remember(effect.id, parameter.id, raw) { mutableStateOf(raw.trim('"')) }
+    var menuOpen by remember(effect.id, parameter.id) { mutableStateOf(false) }
+
+    Column(
+        Modifier.fillMaxWidth().background(KColors.Surface.copy(alpha = 0.22f))
+            .padding(horizontal = 5.dp, vertical = 5.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Text(parameter.name, color = KColors.Text, fontSize = 9.sp, fontWeight = FontWeight.SemiBold)
+        when {
+            type.contains("bool") || type.contains("toggle") -> {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(if (booleanValue) "On" else "Off", color = KColors.Muted, fontSize = 9.sp,
+                        modifier = Modifier.weight(1f))
+                    Switch(checked = booleanValue, onCheckedChange = {
+                        editor.beginEdit()
+                        editor.updateEffectCraftParameter(layer.id, effect.id, parameter.id, it.toString())
+                    }, modifier = Modifier.size(width = 42.dp, height = 28.dp))
+                }
+            }
+            parameter.options.isNotEmpty() -> {
+                Box {
+                    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(7.dp)).background(KColors.Bg)
+                        .clickable { menuOpen = true }.padding(horizontal = 10.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Text(parameter.options.firstOrNull { it.valueJson == raw }?.label ?: raw,
+                            color = KColors.Text, fontSize = 9.sp, modifier = Modifier.weight(1f))
+                        Text("▾", color = KColors.Muted, fontSize = 10.sp)
+                    }
+                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                        parameter.options.forEach { option ->
+                            DropdownMenuItem(text = { Text(option.label, fontSize = 10.sp) }, onClick = {
+                                editor.beginEdit()
+                                editor.updateEffectCraftParameter(layer.id, effect.id, parameter.id, option.valueJson)
+                                menuOpen = false
+                            })
+                        }
+                    }
+                }
+            }
+            else -> {
+                Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(7.dp)).background(KColors.Bg)
+                    .clickable { input = raw.trim('"'); editing = true }
+                    .padding(horizontal = 10.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(raw, color = KColors.Text, fontSize = 9.sp, modifier = Modifier.weight(1f), maxLines = 2)
+                    Text("EDIT", color = KColors.Accent, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+
+    if (editing) {
+        AlertDialog(
+            onDismissRequest = { editing = false },
+            title = { Text(parameter.name) },
+            text = {
+                OutlinedTextField(value = input, onValueChange = { input = it },
+                    label = { Text(parameter.type) }, singleLine = true)
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val trimmed = input.trim()
+                    val encoded = when {
+                        type.contains("string") || type.contains("color") || type.contains("file") ->
+                            org.json.JSONObject.quote(trimmed)
+                        else -> runCatching {
+                            val parsed = org.json.JSONTokener(trimmed).nextValue()
+                            when (parsed) {
+                                is Number -> {
+                                    val number = parsed.toDouble()
+                                    if (!number.isFinite()) null
+                                    else number.coerceIn(parameter.min ?: Double.NEGATIVE_INFINITY,
+                                        parameter.max ?: Double.POSITIVE_INFINITY).toString()
+                                }
+                                is Boolean, is org.json.JSONArray, is org.json.JSONObject -> parsed.toString()
+                                else -> org.json.JSONObject.quote(trimmed)
+                            }
+                        }.getOrNull()
+                    }
+                    if (encoded != null) {
+                        editor.beginEdit()
+                        editor.updateEffectCraftParameter(layer.id, effect.id, parameter.id, encoded)
+                    }
+                    editing = false
+                }) { Text("Apply") }
+            },
+            dismissButton = { TextButton(onClick = { editing = false }) { Text("Cancel") } }
+        )
+    }
+}
