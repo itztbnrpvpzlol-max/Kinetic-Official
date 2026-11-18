@@ -25,7 +25,7 @@ import com.kinetic.app.ui.HomeScreen
 import com.kinetic.app.ui.KineticTheme
 import com.kinetic.app.ui.SettingsScreen
 
-private enum class Screen { HOME, EDITOR, SETTINGS }
+private enum class Screen { HOME, EDITOR, AI_EDITOR, SETTINGS }
 
 class MainActivity : ComponentActivity() {
     override fun onTrimMemory(level: Int) {
@@ -64,6 +64,7 @@ class MainActivity : ComponentActivity() {
                 when (screen) {
                     Screen.HOME -> HomeScreen(
                         onNewComposition = { editor = EditorState(settings); screen = Screen.EDITOR },
+                        onOpenAiEditor = { screen = Screen.AI_EDITOR },
                         onImportProject = { }, onImportPlugin = { pluginPicker.launch(arrayOf("*/*")) },
                         onOpenSettings = { settingsFrom = Screen.HOME; screen = Screen.SETTINGS },
                         projects = projects,
@@ -91,6 +92,10 @@ class MainActivity : ComponentActivity() {
                             },
                             onOpenSettings = { settingsFrom = Screen.EDITOR; screen = Screen.SETTINGS }
                         )
+                    }
+                    Screen.AI_EDITOR -> {
+                        BackHandler { screen = Screen.HOME }
+                        com.kinetic.app.ui.AiEditorScreen(onBack = { screen = Screen.HOME })
                     }
                     Screen.SETTINGS -> {
                         BackHandler { screen = settingsFrom }
