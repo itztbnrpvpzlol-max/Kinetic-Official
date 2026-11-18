@@ -541,7 +541,7 @@ private fun FloatingEditingDock(active: String, layer: Layer?, onSelect: (String
         listOfNotNull(
             "Properties" to IconKind.SLIDERS,
             if (layer.type == LayerType.TEXT) "Text" to IconKind.TEXT else null,
-            if (layer.type == LayerType.TEXT || layer.type == LayerType.SHAPE) "Appearance" to IconKind.PALETTE else null,
+            if (layer.type == LayerType.TEXT || layer.type == LayerType.SHAPE) "Appearance" to IconKind.FILTER else null,
             "Speed" to IconKind.STOPWATCH,
             "Volume" to IconKind.VOLUME,
             "Masking" to IconKind.MASK,
