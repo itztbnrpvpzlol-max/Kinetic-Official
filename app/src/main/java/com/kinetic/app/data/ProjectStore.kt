@@ -115,7 +115,11 @@ class ProjectStore(context: Context) {
             .put("srcOffset", l.srcOffset.toDouble()).put("srcLength", if (l.srcLength.isFinite()) l.srcLength.toDouble() else -1.0)
             .put("width", l.width.toDouble()).put("height", l.height.toDouble()).put("visible", l.visible)
             .put("parentId", l.parentId).put("scaleLinked", l.scaleLinked).put("text", l.text)
-            .put("color", l.color).put("props", props)
+            .put("color", l.color).put("strokeColor", l.strokeColor)
+            .put("strokeWidth", l.strokeWidth.toDouble()).put("fillEnabled", l.fillEnabled)
+            .put("strokeEnabled", l.strokeEnabled).put("fontSize", l.fontSize.toDouble())
+            .put("fontFamily", l.fontFamily).put("textBold", l.textBold)
+            .put("textItalic", l.textItalic).put("textAlign", l.textAlign).put("props", props)
             .put("effects", JSONArray(l.effects))
             .put("effectStack", JSONArray().also { array ->
                 l.effectStack.forEach { effect ->
@@ -212,7 +216,13 @@ class ProjectStore(context: Context) {
             width = j.optDouble("width", 100.0).toFloat(), height = j.optDouble("height", 100.0).toFloat(),
             visible = j.optBoolean("visible", true), parentId = j.optString("parentId").takeIf { it.isNotBlank() && it != "null" },
             scaleLinked = j.optBoolean("scaleLinked", false), text = j.optString("text", "Text"),
-            color = j.optInt("color", 0xFF8D8BA3.toInt()), props = props,
+            color = j.optInt("color", 0xFF8D8BA3.toInt()),
+            strokeColor = j.optInt("strokeColor", 0xFF000000.toInt()),
+            strokeWidth = j.optDouble("strokeWidth", 0.0).toFloat().coerceIn(0f, 200f),
+            fillEnabled = j.optBoolean("fillEnabled", true), strokeEnabled = j.optBoolean("strokeEnabled", false),
+            fontSize = j.optDouble("fontSize", 120.0).toFloat().coerceIn(1f, 1000f),
+            fontFamily = j.optString("fontFamily", "Sans Serif"), textBold = j.optBoolean("textBold", true),
+            textItalic = j.optBoolean("textItalic", false), textAlign = j.optString("textAlign", "Center"), props = props,
             effects = (j.optJSONArray("effects") ?: JSONArray()).let { a -> (0 until a.length()).map { a.optString(it) } },
             effectStack = (j.optJSONArray("effectStack") ?: JSONArray()).let { array ->
                 (0 until array.length()).mapNotNull { index ->
