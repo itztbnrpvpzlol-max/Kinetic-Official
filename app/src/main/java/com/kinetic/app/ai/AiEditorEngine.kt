@@ -789,8 +789,8 @@ object AiEditorEngine {
         if (candidates.isEmpty()) return emptyList()
         val maxStack = when (request.style) {
             "Mograph" -> 4
-            "Velocity" -> 3
-            else -> 2
+            "Velocity" -> 4
+            else -> 3
         }
         val selected = categories.flatMap { category ->
             val group = candidates.filter { it.category == category }.sortedBy { it.id }
