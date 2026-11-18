@@ -113,7 +113,7 @@ fun CpuPreviewCanvas(
                 } else 0f
                 // CPU effects are expensive on low-memory phones. Limit effect-bearing
                 // preview frames to 12 fps instead of queuing 20 fps of native work.
-                val sampleFps = if (MediaWorkers.isConstrainedDevice && layer.effectStack.any { it.enabled && it.effectCraftId == null }) {
+                val sampleFps = if (MediaWorkers.isConstrainedDevice && layer.effectStack.any { it.enabled }) {
                     12
                 } else MediaLoader.CPU_PREVIEW_SAMPLE_FPS
                 val bucket = if (layer.type == LayerType.VIDEO) {
@@ -199,7 +199,8 @@ fun CpuPreviewCanvas(
                 }
                 val source = bitmaps[layer.id] ?: continue
                 val activeEffects = layer.effectStack.filter { it.enabled && it.effectCraftId == null }.take(8)
-                if (activeEffects.isEmpty()) {
+                val activeEffectCraft = layer.effectStack.filter { it.enabled && it.effectCraftId != null }
+                if (activeEffects.isEmpty() && activeEffectCraft.isEmpty()) {
                     val previous = effectedBitmaps.remove(layer.id)
                     if (previous != null && previous !== source && !previous.isRecycled) previous.recycle()
                     motionTileBitmaps.remove(layer.id)?.let { if (!it.isRecycled) it.recycle() }
@@ -210,18 +211,34 @@ fun CpuPreviewCanvas(
                 val timeDependent = playing || activeEffects.any { effect ->
                     effect.name == "Wave Warp" || effect.name == "Warp Shake" ||
                         effect.name == "Oscillate" || effect.parameterKeys.values.any { it.isNotEmpty() }
-                }
+                } || activeEffectCraft.any { effect -> effect.parameterKeys.values.any { it.isNotEmpty() } }
                 val effectSampleFps = if (MediaWorkers.isConstrainedDevice) 12 else MediaLoader.CPU_PREVIEW_SAMPLE_FPS
                 val timeBucket = if (timeDependent) (timelineTime * effectSampleFps).toInt() else 0
                 var key = System.identityHashCode(source).toLong()
                 key = (key * 31L) + activeEffects.hashCode().toLong()
+                key = (key * 31L) + activeEffectCraft.hashCode().toLong()
                 key = (key * 31L) + timeBucket.toLong()
                 if (lastProcessed[layer.id] == key) continue
                 val motionTile = activeEffects.lastOrNull { it.name == "Motion Tile" }
-                val rendered = withContext(Dispatchers.Default) {
-                    NativeEffectsEngine.processBitmap(source, activeEffects.filterNot { it.name == "Motion Tile" }, timelineTime)
-                }
-                val tileSource = rendered ?: source
+                val legacyRendered = if (activeEffects.isNotEmpty()) {
+                    withContext(Dispatchers.Default) {
+                        NativeEffectsEngine.processBitmap(source, activeEffects.filterNot { it.name == "Motion Tile" }, timelineTime)
+                    }
+                } else null
+                val effectInput = legacyRendered ?: source
+                val craftRendered = if (activeEffectCraft.isNotEmpty()) {
+                    withContext(Dispatchers.Default) {
+                        com.kinetic.app.engine.EffectCraftBridge.renderFrame(
+                            effectInput,
+                            activeEffectCraft,
+                            timelineTime,
+                            640,
+                            layer.id
+                        )
+                    }
+                } else null
+                val rendered = craftRendered ?: legacyRendered
+                val tileSource = rendered ?: effectInput
                 val tileRendered = if (motionTile != null) {
                     withContext(Dispatchers.Default) {
                         NativeEffectsEngine.createMotionTileBackground(tileSource, motionTile, timelineTime)
@@ -239,6 +256,7 @@ fun CpuPreviewCanvas(
                     lastProcessed[layer.id] = key
                 } else {
                     if (rendered != null && rendered !== source && !rendered.isRecycled) rendered.recycle()
+                    if (legacyRendered != null && legacyRendered !== source && legacyRendered !== rendered && !legacyRendered.isRecycled) legacyRendered.recycle()
                     if (tileRendered != null && !tileRendered.isRecycled) tileRendered.recycle()
                 }
             }
