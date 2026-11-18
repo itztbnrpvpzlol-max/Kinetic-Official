@@ -224,32 +224,41 @@ fun GraphPanel(editor: EditorState, layer: Layer, modifier: Modifier = Modifier)
 @Composable
 fun EffectGraphPanel(editor: EditorState, layer: Layer, modifier: Modifier = Modifier) {
     val effect = layer.effectStack.firstOrNull { it.id == editor.selectedEffectId }
-    val spec = effect?.let { selected ->
-        controlsFor(selected).firstOrNull { it.key == editor.selectedEffectParameter }
+    var craftCatalog by remember { mutableStateOf<Map<String, com.kinetic.app.engine.EffectCraftEffectInfo>>(emptyMap()) }
+    LaunchedEffect(effect?.effectCraftId) {
+        if (effect?.effectCraftId != null) com.kinetic.app.engine.EffectCraftCatalog.load()
+            .onSuccess { craftCatalog = it.associateBy { item -> item.id } }
     }
-    if (effect == null || spec == null) {
+    val parameterKey = editor.selectedEffectParameter
+    val spec = effect?.let { selected -> controlsFor(selected).firstOrNull { it.key == parameterKey } }
+    val craftParameter = effect?.effectCraftId?.let { craftCatalog[it] }?.params?.firstOrNull { it.id == parameterKey }
+    val parameterLabel = spec?.label ?: craftParameter?.name
+    val parameterDefault = spec?.default ?: craftParameter?.defaultJson?.toFloatOrNull()
+    if (effect == null || parameterKey == null || parameterLabel == null || parameterDefault == null) {
         Box(modifier.fillMaxSize().background(KColors.Surface), contentAlignment = Alignment.Center) {
-            Text("Select an effect property to edit its animation curve.",
+            Text(if (effect?.effectCraftId != null && craftCatalog.isEmpty()) "Loading EffectCraft animation tracks…"
+                else "Select a numeric effect property to edit its animation curve.",
                 color = KColors.Muted, fontSize = 10.sp)
         }
         return
     }
     val liveEffect = editor.layers.firstOrNull { it.id == layer.id }
         ?.effectStack?.firstOrNull { it.id == effect.id } ?: effect
-    val keys = liveEffect.parameterKeys[spec.key].orEmpty()
-    var mode by remember(effect.id, spec.key) { mutableStateOf(GraphMode.EASE) }
+    val keys = liveEffect.parameterKeys[parameterKey].orEmpty()
+    var mode by remember(effect.id, parameterKey) { mutableStateOf(GraphMode.EASE) }
     val graphSelection = editor.selectedEffectKey.takeIf { it in keys.indices } ?: 0
     val segment = graphSegment(keys, graphSelection)
     val segmentKey = keys.getOrNull(segment)
     val hasBezier = segmentKey?.type == KeyType.BEZIER
     val valueAt: (Float) -> Float = { t ->
-        Prop(liveEffect.parameters[spec.key] ?: spec.default, keys).valueAt(t)
+        Prop(spec?.let { liveEffect.parameters[parameterKey] ?: it.default }
+            ?: (liveEffect.effectCraftParameters[parameterKey]?.toFloatOrNull() ?: parameterDefault), keys).valueAt(t)
     }
 
     Column(modifier.fillMaxSize().background(KColors.Surface)) {
         Row(Modifier.fillMaxWidth().height(34.dp).padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically) {
-            Text(effect.name + " · " + spec.label, color = KColors.Text, fontSize = 10.sp,
+            Text(effect.name + " · " + parameterLabel, color = KColors.Text, fontSize = 10.sp,
                 fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f),
                 maxLines = 1)
             GraphModeButton("Ease", mode == GraphMode.EASE) { mode = GraphMode.EASE }
@@ -285,7 +294,7 @@ fun EffectGraphPanel(editor: EditorState, layer: Layer, modifier: Modifier = Mod
 
         if (keys.size < 2) {
             Box(Modifier.weight(1f).fillMaxWidth().padding(18.dp), contentAlignment = Alignment.Center) {
-                Text(if (keys.isEmpty()) "No keyframes on " + spec.label
+                Text(if (keys.isEmpty()) "No keyframes on " + parameterLabel
                     else "Add a second keyframe to shape a transition",
                     color = KColors.Text, fontSize = 13.sp, textAlign = TextAlign.Center)
             }
@@ -308,12 +317,12 @@ fun EffectGraphPanel(editor: EditorState, layer: Layer, modifier: Modifier = Mod
                                 x1 = x.coerceIn(0f, 1f), y1 = y.coerceIn(0f, 1f))
                             else key.copy(type = KeyType.BEZIER,
                                 x2 = x.coerceIn(0f, 1f), y2 = y.coerceIn(0f, 1f))
-                            editor.replaceEffectParameterKey(layer.id, effect.id, spec.key, segment, updated)
+                            editor.replaceEffectParameterKey(layer.id, effect.id, parameterKey, segment, updated)
                         }
                     },
                     onKeyValueChange = { index, value ->
                         if (index in keys.indices) {
-                            editor.replaceEffectParameterKey(layer.id, effect.id, spec.key,
+                            editor.replaceEffectParameterKey(layer.id, effect.id, parameterKey,
                                 index, keys[index].copy(v = value))
                         }
                     }
@@ -338,7 +347,7 @@ fun EffectGraphPanel(editor: EditorState, layer: Layer, modifier: Modifier = Mod
                                     editor.beginEdit()
                                     val updated = keys[segment].copy(type = preset.type,
                                         x1 = preset.x1, y1 = preset.y1, x2 = preset.x2, y2 = preset.y2)
-                                    editor.replaceEffectParameterKey(layer.id, effect.id, spec.key, segment, updated)
+                                    editor.replaceEffectParameterKey(layer.id, effect.id, parameterKey, segment, updated)
                                 }
                             }
                         }
