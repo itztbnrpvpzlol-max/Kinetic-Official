@@ -292,11 +292,28 @@ private fun GpuCompositionPreviewCanvas(
     val latestTimelineTime = androidx.compose.runtime.rememberUpdatedState(editor.time)
     val latestPlaying = androidx.compose.runtime.rememberUpdatedState(editor.playing)
 
+    // Adjustment layers sit above the layers they affect in the editor's
+    // top-first layer list. Apply their EffectCraft stack to every visible
+    // layer underneath, rather than dropping adjustment layers from preview.
+    val adjustmentEffectsByLayer = editor.layers.mapIndexedNotNull { index, layer ->
+        if (layer.type == LayerType.ADJUSTMENT) return@mapIndexedNotNull null
+        val effectsAbove = editor.layers.take(index)
+            .asSequence()
+            .filter { it.type == LayerType.ADJUSTMENT && it.visible && it.activeAt(editor.time) }
+            .flatMap { it.effectStack.asSequence() }
+            .filter { it.enabled && it.effectCraftId != null }
+            .toList()
+        if (effectsAbove.isEmpty()) null else layer.id to effectsAbove
+    }.toMap()
+
     val effectCraftVectorLayers = editor.layers.filter { layer ->
         (layer.type == LayerType.TEXT || layer.type == LayerType.SHAPE) &&
-            layer.effectStack.any { it.enabled && it.effectCraftId != null }
+            (layer.effectStack.any { it.enabled && it.effectCraftId != null } ||
+                adjustmentEffectsByLayer[layer.id].orEmpty().isNotEmpty())
     }
-    val effectCraftVectorSignature = effectCraftVectorLayers.map { "${it.id}|${it.hashCode()}" }
+    val effectCraftVectorSignature = effectCraftVectorLayers.map {
+        "${it.id}|${it.hashCode()}|${adjustmentEffectsByLayer[it.id].hashCode()}"
+    }
     LaunchedEffect(effectCraftVectorSignature, effectSampleFps) {
         val validIds = effectCraftVectorLayers.map { it.id }.toSet()
         effectCraftLayerBitmaps.keys.toList().filterNot { it in validIds }.forEach { id ->
@@ -311,7 +328,8 @@ private fun GpuCompositionPreviewCanvas(
             val timeBucket = (now * effectSampleFps).toInt()
             for (layer in effectCraftVectorLayers) {
                 if (!layer.visible || !layer.activeAt(now)) continue
-                val activeEffects = layer.effectStack.filter { it.enabled && it.effectCraftId != null }.take(8)
+                val activeEffects = (layer.effectStack + adjustmentEffectsByLayer[layer.id].orEmpty())
+                    .filter { it.enabled && it.effectCraftId != null }.take(8)
                 if (activeEffects.isEmpty()) continue
                 var keyValue = layer.hashCode().toLong()
                 keyValue = keyValue * 31L + timeBucket.toLong()
@@ -383,7 +401,7 @@ private fun GpuCompositionPreviewCanvas(
                         context,
                         Uri.parse(uri),
                         LayerType.VIDEO,
-                        layer.srcOffset.coerceAtLeast(0f),
+                        (layer.srcOffset + minOf(0.12f, 2f / compositionFps.coerceAtLeast(1))).coerceAtLeast(0f),
                         sampleFps = compositionFps,
                         maxEdge = if (MediaWorkers.isConstrainedDevice) 320 else 448,
                         persistToDisk = true
@@ -528,7 +546,8 @@ private fun GpuCompositionPreviewCanvas(
                 }
                 val source = frames[layer.id] ?: continue
                 val activeEffects = layer.effectStack.filter { it.enabled && it.effectCraftId == null }.take(8)
-                val activeEffectCraft = layer.effectStack.filter { it.enabled && it.effectCraftId != null }
+                val activeEffectCraft = (layer.effectStack + adjustmentEffectsByLayer[layer.id].orEmpty())
+                    .filter { it.enabled && it.effectCraftId != null }
                 if (activeEffects.isEmpty() && activeEffectCraft.isEmpty()) {
                     val old = effectedFrames.remove(layer.id)
                     if (old != null && old !== source && !old.isRecycled) old.recycle()
@@ -977,6 +996,7 @@ private class CompositionGlRenderer(
         val texture: SurfaceTexture,
         val surface: Surface,
         val transform: FloatArray = FloatArray(16),
+        val decodedFrameCount: AtomicInteger = AtomicInteger(0),
         @Volatile var hasFrame: Boolean = false
     )
     fun submit(next: GpuScene) { scene = next }
@@ -1010,7 +1030,11 @@ private class CompositionGlRenderer(
         val output = VideoOutput(names[0], texture, surface)
         videoOutputs[id] = output
         texture.setOnFrameAvailableListener {
-            output.hasFrame = true
+            // Ignore the first decoder startup buffers. Some codecs expose a
+            // cleared SurfaceTexture before the first usable decoded picture.
+            // Keep the independently decoded poster visible until several
+            // actual frame callbacks have arrived.
+            output.hasFrame = output.decodedFrameCount.incrementAndGet() >= 4
             onFrameAvailable(id)
         }
         Log.i("KineticVideo", "Created OES output for layer $id at ${videoOutputWidth}x${videoOutputHeight}")
