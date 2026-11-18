@@ -766,6 +766,11 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
                 }
             })
         }
+    
+        val updatedKeys = layers.firstOrNull { it.id == layerId }
+            ?.effectStack?.firstOrNull { it.id == effectId }
+            ?.parameterKeys?.get(parameter).orEmpty()
+        selectedEffectKey = updatedKeys.indexOfFirst { abs(it.t - t) <= frame / 2f }
     }
 
     fun addEffect(layerId: String, name: String): Boolean {
