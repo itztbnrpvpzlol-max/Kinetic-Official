@@ -13,6 +13,7 @@ import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.provider.OpenableColumns
 import android.util.LruCache
+import com.kinetic.app.engine.EffectCraftBridge
 import com.kinetic.app.model.LayerType
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
@@ -210,10 +211,21 @@ object MediaLoader {
                 val bmp = ramBitmap ?: diskBitmap ?: try {
                     if (type == LayerType.IMAGE) decodeImage(ctx, uri, maxEdge)
                     else {
-                        if (lowPriorityRequest) {
-                            // Timeline thumbnails must never hold the shared
-                            // sequential decoder lock. A retriever request may
-                            // finish in the background, but cannot stall preview.
+                        // Local files use EffectCraft's persistent FilmCraft decoder and
+                        // byte-budgeted MediaPool cache first. Content-provider URIs and
+                        // unsupported files retain the Android compatibility path.
+                        val localPath = when (uri.scheme) {
+                            "file" -> uri.path
+                            null -> uri.toString()
+                            else -> null
+                        }?.takeIf { path -> File(path).isFile }
+                        val effectCraftFrame = localPath?.let { path ->
+                            EffectCraftBridge.decodeVideoFrame(
+                                path, bucket / sampleFps.toFloat(), maxEdge
+                            )
+                        }
+                        effectCraftFrame ?: if (lowPriorityRequest) {
+                            // Timeline thumbnails never hold the Android sequential decoder lock.
                             videoFrame(
                                 ctx, uri, bucket / sampleFps.toFloat(), maxEdge,
                                 MediaMetadataRetriever.OPTION_CLOSEST
