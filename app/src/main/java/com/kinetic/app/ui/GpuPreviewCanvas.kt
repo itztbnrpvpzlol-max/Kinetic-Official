@@ -579,9 +579,10 @@ private fun GpuCompositionPreviewCanvas(
                     continue
                 }
                 val source = frames[layer.id] ?: continue
-                val activeEffects = layer.effectStack.filter { it.enabled && it.effectCraftId == null }.take(8)
-                val activeEffectCraft = (layer.effectStack + adjustmentEffectsByLayer[layer.id].orEmpty())
-                    .filter { it.enabled && it.effectCraftId != null }
+                val allLayerEffects = (layer.effectStack + adjustmentEffectsByLayer[layer.id].orEmpty())
+                    .filter { it.enabled }.take(8)
+                val activeEffects = allLayerEffects.filter { it.effectCraftId == null }
+                val activeEffectCraft = allLayerEffects.filter { it.effectCraftId != null }
                 if (activeEffects.isEmpty() && activeEffectCraft.isEmpty()) {
                     val old = effectedFrames.remove(layer.id)
                     if (old != null && old !== source && !old.isRecycled) old.recycle()
