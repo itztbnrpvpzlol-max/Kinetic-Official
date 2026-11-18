@@ -15,7 +15,7 @@ permissions:
 jobs:
   export:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 36
     steps:
       - name: Checkout Kinetic
         uses: actions/checkout@v4
