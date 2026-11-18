@@ -97,7 +97,7 @@ object AiEditorEngine {
 
         val totalDuration = request.durationSeconds.coerceIn(10f, 120f)
         val plan = planEdit(videos.flatMap { it.scenes }, audio?.beats.orEmpty(), profile, request, totalDuration)
-        val layers = executePlan(plan, audio, request, fps.coerceIn(12, 60), videos)
+        val layers = executePlan(plan, audio, request, fps.coerceIn(12, 60), videos, resolution)
         val report = buildString {
             append("Analysed ").append(videos.size).append(" source video(s) and ")
             append(videos.sumOf { it.scenes.size }).append(" candidate scenes")
