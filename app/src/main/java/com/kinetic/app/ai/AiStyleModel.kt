@@ -30,7 +30,7 @@ internal class AiStyleModel private constructor(
         private const val KEY = "kmeans_v2"
 
         fun trainOrLoad(context: Context, samples: List<FloatArray>): AiStyleModel {
-            val valid = samples.filter { it.size >= 3 && it.all(Float::isFinite) }
+            val valid = samples.filter { it.size >= 5 && it.all(Float::isFinite) }
                 .map { sample -> FloatArray(5) { axis -> if (axis == 0) sample[0] else sample[axis].coerceIn(0f, 1f) } }
             if (valid.isNotEmpty()) {
                 val model = train(valid)
