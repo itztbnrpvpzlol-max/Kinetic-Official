@@ -368,7 +368,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                             editor.extractAudio(activeLayer.id)
                         } else Toast.makeText(ctx, "Select a video layer first", Toast.LENGTH_SHORT).show()
                     }
-                    "Speed", "Volume", "Masking", "Effects", "Blending", "Blend modes" -> {
+                    "Speed", "Volume", "Masking", "Effects", "Blending", "Blend modes", "Flip" -> {
                         if (activeLayer != null) {
                             showPropertiesPanel = false
                             showShapePanel = false
@@ -532,6 +532,7 @@ private fun FloatingEditingDock(active: String, hasSelection: Boolean, onSelect:
             "Effects" to IconKind.EFFECTS,
             "Blending" to IconKind.BLEND,
             "Blend modes" to IconKind.GRID,
+            "Flip" to IconKind.MOTION,
             "Extract audio" to IconKind.WAVEFORM
         )
     } else {
@@ -726,6 +727,32 @@ private fun ToolPanelControls(tool: String, editor: EditorState, layer: Layer, d
                 Text("BLEND MODE", color = KColors.Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold)
                 ChoiceStringUnitRow(listOf("Normal" to "Normal", "Multiply" to "Multiply", "Screen" to "Screen", "Add" to "Add"),
                     layer.blendMode) { mode -> editor.updateLayer(layer.id) { it.copy(blendMode = mode) } }
+            }
+            "Flip" -> {
+                Text("ORIENTATION", color = KColors.Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                Text("Flip the selected layer without changing its position or rotation.", color = KColors.Muted, fontSize = 9.sp)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    UnitAction("Flip Horizontal", selected = layer.p(PropId.SCALE_X).valueAt(displayTime) < 0f) {
+                        val current = layer.p(PropId.SCALE_X).valueAt(displayTime)
+                        editor.beginEdit()
+                        if (layer.scaleLinked) editor.updateLayer(layer.id, push = false) { it.copy(scaleLinked = false) }
+                        editor.setPropValue(layer.id, PropId.SCALE_X, -current)
+                    }
+                    UnitAction("Flip Vertical", selected = layer.p(PropId.SCALE_Y).valueAt(displayTime) < 0f) {
+                        val current = layer.p(PropId.SCALE_Y).valueAt(displayTime)
+                        editor.beginEdit()
+                        if (layer.scaleLinked) editor.updateLayer(layer.id, push = false) { it.copy(scaleLinked = false) }
+                        editor.setPropValue(layer.id, PropId.SCALE_Y, -current)
+                    }
+                }
+                UnitAction("Reset flips") {
+                    val sx = kotlin.math.abs(layer.p(PropId.SCALE_X).valueAt(displayTime))
+                    val sy = kotlin.math.abs(layer.p(PropId.SCALE_Y).valueAt(displayTime))
+                    editor.beginEdit()
+                    if (layer.scaleLinked) editor.updateLayer(layer.id, push = false) { it.copy(scaleLinked = false) }
+                    editor.setPropValue(layer.id, PropId.SCALE_X, sx)
+                    editor.setPropValue(layer.id, PropId.SCALE_Y, sy)
+                }
             }
         }
     }
