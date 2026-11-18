@@ -120,20 +120,11 @@ object AiEditorEngine {
 
         val totalDuration = effectiveRequest.durationSeconds.coerceIn(10f, 120f)
         val plan = planEdit(rankedScenes, audio?.beats.orEmpty(), profile, effectiveRequest, totalDuration, styleModel)
-        val colorGrade = if ("Color grading" in effectiveRequest.priorities) {
-            runCatching {
-                EffectCraftCatalog.load().getOrNull()?.firstOrNull { effect ->
-                    effect.category == "COLOR & LIGHT" && effect.gpu &&
-                        effect.params.any { parameter ->
-                            val id = parameter.id.lowercase()
-                            "saturation" in id || "vibrance" in id || "contrast" in id || "exposure" in id
-                        }
-                } ?: EffectCraftCatalog.load().getOrNull()?.firstOrNull {
-                    it.category == "COLOR & LIGHT" && it.gpu
-                }
-            }.getOrNull()
-        } else null
-        val layers = executePlan(plan, audio, audioDuration, effectiveRequest, fps.coerceIn(12, 60), videos, resolution, colorGrade, effectiveRequest.prompt)
+        val effectCatalog = EffectCraftCatalog.load().getOrElse { error ->
+            throw IllegalStateException("EffectCraft's built-in effect registry couldn't be loaded: ${error.message}", error)
+        }
+        val layers = executePlan(plan, audio, audioDuration, effectiveRequest, fps.coerceIn(12, 60),
+            videos, resolution, effectCatalog, effectiveRequest.prompt)
         val report = buildString {
             append("Analysed ").append(videos.size).append(" source video(s) and ")
             append(videos.sumOf { it.scenes.size }).append(" candidate scenes")
@@ -141,7 +132,8 @@ object AiEditorEngine {
             if (referenceVideos.isNotEmpty()) append("; extracted pacing from ").append(referenceVideos.size).append(" reference video(s)")
             if (identityReferences.isNotEmpty()) append("; matched ").append(identityReferences.size).append(" anime character reference embedding(s)")
             if (styleModel.trainingSamples > 0) append("; trained the on-device style clustering model from ").append(styleModel.trainingSamples).append(" reference shots")
-            append(". Built ").append(plan.size).append(" selected shots with editable motion and title layers.")
+            append("; loaded ").append(effectCatalog.size).append(" built-in EffectCraft effects")
+            append(". Built ").append(plan.size).append(" selected shots with EffectCraft effect stacks, editable motion and title layers.")
             append(" Prompt intent was applied to pacing and effect priorities.")
             if (identityReferences.isEmpty()) append(" Add anime character reference images to enable identity matching once the model is installed.")
         }
@@ -649,7 +641,7 @@ object AiEditorEngine {
         fps: Int,
         videos: List<VideoAnalysis>,
         resolution: Int,
-        colorGrade: EffectCraftEffectInfo?,
+        effectCatalog: List<EffectCraftEffectInfo>,
         prompt: String
     ): List<Layer> {
         val layers = ArrayList<Layer>()
@@ -667,15 +659,7 @@ object AiEditorEngine {
             val fitScale = min(COMP_W / sourceW, COMP_H / sourceH)
             val w = sourceW * fitScale
             val h = sourceH * fitScale
-            val gradeStack = colorGrade?.let { effect ->
-                listOf(EffectInstance(
-                    name = effect.name,
-                    effectCraftId = effect.id,
-                    effectCraftParameters = effect.params.associate { parameter ->
-                        parameter.id to gradedDefault(parameter, prompt)
-                    }
-                ))
-            }.orEmpty()
+            val gradeStack = selectEffectStack(effectCatalog, request, scene, index, prompt)
             var video = newLayer(LayerType.VIDEO, scene.sourceName, cursor, duration, w, h,
                 scene.uri.toString(), info?.duration ?: scene.end).copy(
                     srcOffset = scene.start,
@@ -768,6 +752,59 @@ object AiEditorEngine {
             layers.add(text)
         }
         return layers.sortedByDescending { if (it.type == LayerType.TEXT) 2 else if (it.type == LayerType.AUDIO) 0 else 1 }
+    }
+
+    /**
+     * Builds a restrained, style-aware stack from EffectCraft's live registry.
+     * The planner deliberately selects effects by intent instead of blindly
+     * stacking every effect (which would destroy the footage).
+     */
+    private fun selectEffectStack(
+        catalog: List<EffectCraftEffectInfo>,
+        request: Request,
+        scene: Scene,
+        sceneIndex: Int,
+        prompt: String
+    ): List<EffectInstance> {
+        val mood = prompt.lowercase()
+        val categories = linkedSetOf("COLOR & LIGHT")
+        if ("Time remapping" in request.priorities || request.style == "Velocity" ||
+            listOf("velocity", "speed ramp", "slow motion", "slow-mo").any { it in mood }) {
+            categories.add("MOTION")
+        }
+        if ("Impact shakes" in request.priorities || listOf("shake", "impact", "distort", "warp").any { it in mood }) {
+            categories.add("DISTORTION & WARP")
+        }
+        if (request.style == "Mograph" || listOf("anime", "glow", "neon", "stylized", "vfx").any { it in mood }) {
+            categories.add("STYLIZE")
+            categories.add("PROCEDURAL")
+        }
+        if (listOf("blur", "soft", "dreamy", "depth").any { it in mood }) categories.add("BLUR")
+        if (listOf("3d", "three dimensional", "parallax", "perspective").any { it in mood }) categories.add("3D")
+        if ("Color grading" in request.priorities) categories.add("COLOR & LIGHT")
+        val registry = catalog.filter { it.category in categories }
+        val preferred = registry.filter { it.gpu }
+        val candidates = (preferred.ifEmpty { registry })
+        if (candidates.isEmpty()) return emptyList()
+        val maxStack = when (request.style) {
+            "Mograph" -> 4
+            "Velocity" -> 3
+            else -> 2
+        }
+        val selected = categories.flatMap { category ->
+            val group = candidates.filter { it.category == category }.sortedBy { it.id }
+            if (group.isEmpty()) emptyList() else listOf(group[(sceneIndex + (scene.motionEnergy * 10f).toInt()) % group.size])
+        }.distinctBy { it.id }.take(maxStack)
+        return selected.map { effect ->
+            EffectInstance(
+                name = effect.name,
+                effectCraftId = effect.id,
+                effectCraftParameters = effect.params.associate { parameter ->
+                    parameter.id to if (effect.category == "COLOR & LIGHT") gradedDefault(parameter, prompt)
+                    else parameter.defaultJson
+                }
+            )
+        }
     }
 
     private fun gradedDefault(parameter: EffectCraftParameterInfo, prompt: String): String {
