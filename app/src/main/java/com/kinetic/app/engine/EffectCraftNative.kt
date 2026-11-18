@@ -30,5 +30,17 @@ internal object EffectCraftNative {
 
     /** Executes ordered commands against the same persistent EffectCraft session. */
     @JvmStatic
-    external fun nativeExecuteBatch(commandsJson: String): String
+    external fun nativeExecuteBatch(commandsJson: String)
+
+    /** Renders a decoded Kinetic clip frame through EffectCraft's compositor and effect registry. */
+    @JvmStatic
+    external fun nativeRenderFrame(
+        cacheKey: String,
+        frameRgba: ByteArray,
+        width: Int,
+        height: Int,
+        effectsJson: String,
+        timeSeconds: Float,
+        maxSide: Int
+    ): ByteArray?
 }
