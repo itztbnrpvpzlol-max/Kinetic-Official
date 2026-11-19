@@ -78,9 +78,11 @@ internal object EffectCraftAiComposer {
         val projectDirectory = File(context.filesDir, "kinetic-ai-projects/${System.currentTimeMillis()}").apply {
             check(mkdirs() || isDirectory) { "Kinetic couldn't create a folder for the native EffectCraft project." }
         }
-        val staged = footage.mapIndexed { index, uri -> stage(context, uri, index, projectDirectory) }
+        val stagedVideo = footage.mapIndexed { index, uri -> stage(context, uri, index, projectDirectory) }
+        val stagedAudio = audio.firstOrNull()?.let { stage(context, it, footage.size, projectDirectory) }
+        val staged = stagedVideo + listOfNotNull(stagedAudio)
         onProgress("Importing source footage into EffectCraft…")
-        val paths = JSONArray().apply { staged.forEach { put(it.absolutePath) } }
+        val paths = JSONArray().apply { stagedVideo.forEach { put(it.absolutePath) } }
         val imported = command("file.import", JSONObject().put("paths", paths))
         val errors = imported.optJSONArray("errors")
         if (errors != null && errors.length() > 0) {
@@ -91,7 +93,7 @@ internal object EffectCraftAiComposer {
             ?: throw IllegalStateException("EffectCraft returned no imported footage items.")
         check(items.length() > 0) { "EffectCraft could not import any selected video files." }
 
-        val sourceDurations = footage.take(usableCount(items, staged)).map { probeDuration(context, it) }
+        val sourceDurations = footage.take(usableCount(items, stagedVideo)).map { probeDuration(context, it) }
         onProgress("Learning visual pacing from your reference media and analysing the soundtrack…")
         val referenceSamples = styleReferences.take(12).flatMap { uri ->
             runCatching { analyzeStyleReference(context, uri) }.getOrDefault(emptyList())
@@ -99,7 +101,7 @@ internal object EffectCraftAiComposer {
         val audioBeats = audio.firstOrNull()?.let {
             runCatching { analyzeAudioBeats(context, it, duration) }.getOrDefault(emptyList())
         }.orEmpty()
-        val usable = min(items.length(), staged.size)
+        val usable = min(items.length(), stagedVideo.size)
         val learnedShotLength = referenceSamples.map { kotlin.math.exp(it[0].toDouble()).toFloat() }
             .average().takeIf { it.isFinite() }?.toFloat()?.coerceIn(0.45f, 8f)
         val styleDefaultShot = when (style.lowercase(Locale.ROOT)) {
@@ -194,6 +196,21 @@ internal object EffectCraftAiComposer {
             shotIndex++
         }
         check(videoLayers.isNotEmpty()) { "EffectCraft could not create any video layers." }
+        if (stagedAudio != null) {
+            onProgress("Adding the soundtrack as a native EffectCraft audio layer…")
+            val audioImport = command("file.import", JSONObject().put("paths", JSONArray().put(stagedAudio.absolutePath)))
+            val audioErrors = audioImport.optJSONArray("errors")
+            check(audioErrors == null || audioErrors.length() == 0) {
+                "EffectCraft couldn't import the soundtrack: ${audioErrors?.toString()}"
+            }
+            val audioItems = audioImport.optJSONArray("items")
+            val audioItem = audioItems?.optLong(0, -1L) ?: -1L
+            check(audioItem > 0L) { "EffectCraft didn't return an imported soundtrack item." }
+            command(
+                "layer.addItem",
+                JSONObject().put("comp", comp).put("item", audioItem).put("time", 0.0).put("index", 1)
+            )
+        }
         val finalDuration = duration
         addNativeMotionGraphics(comp, width, height, duration, style, prompt, frameRate)
         addOptionalNativeAdjustment(comp, videoLayers.firstOrNull())
