@@ -131,7 +131,7 @@ object AiEditorEngine {
             if (audio != null) append("; detected ").append(audio.beats.size).append(" music accents")
             if (referenceVideos.isNotEmpty()) append("; extracted pacing from ").append(referenceVideos.size).append(" reference video(s)")
             if (identityReferences.isNotEmpty()) append("; matched ").append(identityReferences.size).append(" anime character reference embedding(s)")
-            if (styleModel.trainingSamples > 0) append("; trained the on-device style clustering model from ").append(styleModel.trainingSamples).append(" reference shots")
+            if (styleModel.trainingSamples > 0) append("; retrained the persistent on-device AMV style model from ").append(styleModel.trainingSamples).append(" accumulated reference-shot examples")
             append("; loaded ").append(effectCatalog.size).append(" built-in EffectCraft effects")
             append(". Built ").append(plan.size).append(" selected shots with EffectCraft effect stacks, editable motion and title layers.")
             append(" Prompt intent was applied to pacing and effect priorities.")
