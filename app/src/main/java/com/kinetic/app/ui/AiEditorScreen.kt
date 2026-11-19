@@ -48,9 +48,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.kinetic.app.ai.AiEditorEngine
 import com.kinetic.app.ai.AiAutoExporter
-import com.kinetic.app.ai.AiNeuralModels
 import com.kinetic.app.data.AppSettings
 import com.kinetic.app.model.EditorState
 import kotlinx.coroutines.Dispatchers
@@ -311,7 +309,7 @@ fun AiEditorScreen(settings: AppSettings, onBack: () -> Unit, onOpenEditor: (Edi
                 Text(if (generating) "Analysing & building…" else "Generate my edit", fontWeight = FontWeight.SemiBold)
             }
             Text(
-                generationStatus.ifBlank { "Local scene analysis, anime reference matching, optical-flow inference, music-beat detection and editable timeline generation." },
+                generationStatus.ifBlank { "Native EffectCraft composition authoring, animated Mograph layers, varied shot motion and automatic MP4 export." },
                 color = KColors.Muted, fontSize = 10.sp,
                 modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 6.dp)
             )
