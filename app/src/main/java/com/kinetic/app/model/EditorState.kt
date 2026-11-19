@@ -229,6 +229,82 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
         addLayer(layer)
     }
 
+    fun addVectorLayer(): String {
+        val layer = newLayer(LayerType.SHAPE, nextName("Shape"), time, remaining(), COMP_W, COMP_H, color = 0xFFFFFFFF.toInt())
+            .copy(shapeKind = "Vector", vectorClosed = false)
+        addLayer(layer)
+        return layer.id
+    }
+
+    fun addVectorPoint(layerId: String, x: Float, y: Float, smooth: Boolean) {
+        updateLayer(layerId, push = true) { layer ->
+            val index = layer.vectorPoints.size
+            val cx = x.coerceIn(0f, 1f)
+            val cy = y.coerceIn(0f, 1f)
+            var props = layer.props
+            PropId.vectorPoint(index, 'X')?.let { props = props + (it to Prop(cx)) }
+            PropId.vectorPoint(index, 'Y')?.let { props = props + (it to Prop(cy)) }
+            val flags = layer.vectorSmooth.toMutableList()
+            while (flags.size < index) flags.add(false)
+            flags.add(smooth)
+            layer.copy(vectorPoints = layer.vectorPoints + VectorPoint(cx, cy), vectorSmooth = flags, props = props)
+        }
+    }
+
+    fun moveVectorPoint(layerId: String, index: Int, x: Float, y: Float, push: Boolean) {
+        val t = time
+        val eps = frame / 2f
+        updateLayer(layerId, push = push) { layer ->
+            if (index !in layer.vectorPoints.indices) layer else {
+                val old = layer.vectorPoints[index]
+                val nx = x.coerceIn(0f, 1f)
+                val ny = y.coerceIn(0f, 1f)
+                var props = layer.props
+                val xi = PropId.vectorPoint(index, 'X')
+                val yi = PropId.vectorPoint(index, 'Y')
+                if (xi != null) props = props + (xi to (props[xi] ?: Prop(old.x)).withValueAt(t, nx, eps))
+                if (yi != null) props = props + (yi to (props[yi] ?: Prop(old.y)).withValueAt(t, ny, eps))
+                val bx = xi?.let { props[it]?.base } ?: nx
+                val by = yi?.let { props[it]?.base } ?: ny
+                layer.copy(props = props, vectorPoints = layer.vectorPoints.toMutableList().also { it[index] = VectorPoint(bx, by) })
+            }
+        }
+    }
+
+    fun removeVectorPoint(layerId: String, index: Int) {
+        updateLayer(layerId, push = true) { layer ->
+            if (index !in layer.vectorPoints.indices) layer else {
+                val shifted = LinkedHashMap<PropId, Prop>()
+                layer.props.forEach { (id, prop) ->
+                    if (!id.isVectorPoint) shifted[id] = prop
+                    else if (id.vectorPointIndex < index) shifted[id] = prop
+                    else if (id.vectorPointIndex > index) PropId.vectorPoint(id.vectorPointIndex - 1, id.vectorPointAxis)?.let { shifted[it] = prop }
+                }
+                val flags = layer.vectorSmooth.toMutableList()
+                if (index < flags.size) flags.removeAt(index)
+                layer.copy(
+                    vectorPoints = layer.vectorPoints.toMutableList().also { it.removeAt(index) },
+                    vectorSmooth = flags, props = shifted
+                )
+            }
+        }
+    }
+
+    fun setVectorSmooth(layerId: String, index: Int, smooth: Boolean) {
+        updateLayer(layerId, push = true) { layer ->
+            if (index !in layer.vectorPoints.indices) layer else {
+                val flags = layer.vectorSmooth.toMutableList()
+                while (flags.size < layer.vectorPoints.size) flags.add(false)
+                flags[index] = smooth
+                layer.copy(vectorSmooth = flags)
+            }
+        }
+    }
+
+    fun setVectorClosed(layerId: String, closed: Boolean) {
+        updateLayer(layerId, push = true) { it.copy(vectorClosed = closed) }
+    }
+
     fun updateShapePoint(layerId: String, index: Int, x: Float? = null, y: Float? = null) {
         if (x != null) selectProp(PropId.vectorPoint(index, 'X'))
         if (y != null) selectProp(PropId.vectorPoint(index, 'Y'))

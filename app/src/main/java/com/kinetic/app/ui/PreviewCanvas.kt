@@ -340,14 +340,21 @@ fun CpuPreviewCanvas(
                     }
                     LayerType.SHAPE -> {
                         paint.color = l.color; paint.alpha = alpha
-                        val points = if (l.vectorPoints.isEmpty()) listOf(VectorPoint(0f, 0f), VectorPoint(1f, 0f), VectorPoint(1f, 1f), VectorPoint(0f, 1f)) else l.vectorPointsAt(time)
-                        val path = shapePaths.getOrPut(l.id) { android.graphics.Path() }
-                        path.reset()
-                        points.forEachIndexed { index, point ->
-                            val px = point.x * l.width; val py = point.y * l.height
-                            if (index == 0) path.moveTo(px, py) else path.lineTo(px, py)
+                        val points = if (l.vectorPoints.isEmpty() && !l.isVector) listOf(VectorPoint(0f, 0f), VectorPoint(1f, 0f), VectorPoint(1f, 1f), VectorPoint(0f, 1f)) else l.vectorPointsAt(time)
+                        if (points.size >= 2) {
+                            val path = shapePaths.getOrPut(l.id) { android.graphics.Path() }
+                            com.kinetic.app.model.buildVectorPath(points, l.vectorSmooth, l.vectorClosed, l.width, l.height, path)
+                            if (l.vectorClosed) nc.drawPath(path, paint) else {
+                                paint.style = Paint.Style.STROKE
+                                paint.strokeWidth = com.kinetic.app.model.VECTOR_STROKE
+                                paint.strokeCap = Paint.Cap.ROUND
+                                paint.strokeJoin = Paint.Join.ROUND
+                                nc.drawPath(path, paint)
+                                paint.style = Paint.Style.FILL
+                                paint.strokeCap = Paint.Cap.BUTT
+                                paint.strokeJoin = Paint.Join.MITER
+                            }
                         }
-                        path.close(); nc.drawPath(path, paint)
                     }
                     LayerType.TEXT -> {
                         textPaint.color = l.color; textPaint.alpha = alpha

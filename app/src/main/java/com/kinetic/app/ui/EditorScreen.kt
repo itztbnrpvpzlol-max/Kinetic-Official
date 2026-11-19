@@ -100,6 +100,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
     val scope = rememberCoroutineScope()
     var showImport by remember { mutableStateOf(false) }
     var showCompSettings by remember { mutableStateOf(false) }
+    var editVectorId by remember { mutableStateOf<String?>(null) }
     var showLayers by remember { mutableStateOf(false) }
     var showLeave by remember { mutableStateOf(false) }
     var panelTab by remember { mutableIntStateOf(0) }
@@ -292,7 +293,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
 
         if (previewExpanded) {
             Box(Modifier.weight(1f).fillMaxWidth()) {
-            PreviewCanvas(editor, Modifier.fillMaxSize(), editor.settings.previewQualityIndex, playback = playback)
+            if (editVectorId == null) PreviewCanvas(editor, Modifier.fillMaxSize(), editor.settings.previewQualityIndex, playback = playback)
             PreviewQualityControl(editor, Modifier.align(Alignment.TopStart).padding(8.dp))
                 if (editor.settings.showPreviewDiagnostics) {
                     PreviewDiagnosticsBadge(editor.playing, Modifier.align(Alignment.BottomEnd).padding(8.dp))
@@ -301,7 +302,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
         } else {
             val visiblePreviewHeight = if (showPropertiesPanel || showToolPanel || showShapePanel) minOf(adaptivePreviewHeight, 150f) else adaptivePreviewHeight
             Box(Modifier.fillMaxWidth().height(visiblePreviewHeight.dp)) {
-                PreviewCanvas(editor, Modifier.fillMaxSize(), editor.settings.previewQualityIndex, playback = playback)
+                if (editVectorId == null) PreviewCanvas(editor, Modifier.fillMaxSize(), editor.settings.previewQualityIndex, playback = playback)
                 if (showToolPanel && dockTool == "Masking") {
                     MaskEditingOverlay(editor, maskTool, rotoForeground, Modifier.fillMaxSize())
                 }
@@ -349,6 +350,11 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                 val adaptivePanelHeight = (windowMaxHeight.value * 0.27f).coerceIn(180f, 228f)
                 ShapeLibraryPanel(
                     onClose = { showShapePanel = false },
+                    onDraw = {
+                        showShapePanel = false
+                        editor.playing = false
+                        editVectorId = editor.addVectorLayer()
+                    },
                     onSelect = { preset ->
                         editor.addShape(preset.name, preset.points)
                         showShapePanel = false
@@ -376,7 +382,16 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                             editor.extractAudio(activeLayer.id)
                         } else Toast.makeText(ctx, "Select a video layer first", Toast.LENGTH_SHORT).show()
                     }
-                    "Speed", "Volume", "Masking", "Effects", "Blending", "Blend modes" -> {
+                    "Masking" -> {
+                        showPropertiesPanel = false
+                        showToolPanel = false
+                        showShapePanel = false
+                        editor.playing = false
+                        val current = activeLayer
+                        editVectorId = if (current != null && current.isVector) current.id else editor.addVectorLayer()
+                        dockTool = "Select"
+                    }
+                    "Speed", "Volume", "Effects", "Blending", "Blend modes" -> {
                         if (activeLayer != null) {
                             showPropertiesPanel = false
                             showShapePanel = false
@@ -427,6 +442,15 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                 }
             )
         }
+        val vectorId = editVectorId
+        if (vectorId != null) EditPointsScreen(
+            editor, vectorId, playback,
+            onClose = {
+                editor.playing = false
+                editor.layers.firstOrNull { it.id == vectorId }?.let { if (it.vectorPoints.size < 2) editor.deleteLayer(it.id) }
+                editVectorId = null
+            }
+        )
     }
 
     if (showImport) {

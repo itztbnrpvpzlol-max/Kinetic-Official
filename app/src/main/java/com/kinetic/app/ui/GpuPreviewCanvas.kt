@@ -621,7 +621,8 @@ private fun GpuCompositionPreviewCanvas(
                     ((layer.text.hashCode() * 31 + layer.color) * 31 +
                         logicalWidth * 7 + logicalHeight)
                 else (((layer.color * 31 + logicalWidth * 7 + logicalHeight) * 31 +
-                    layer.shapeKind.hashCode()) * 31 + layer.vectorPointsAt(editor.time).hashCode())
+                    layer.shapeKind.hashCode()) * 31 + layer.vectorPointsAt(editor.time).hashCode() * 31 +
+                    layer.vectorSmooth.hashCode() * 7 + layer.vectorClosed.hashCode())
                 val cached = textTextures[layer.id]
                 if (cached == null || cached.first != signature || cached.second.isRecycled) {
                     // Text and vector layers are rasterized at preview scale.
@@ -643,7 +644,7 @@ private fun GpuCompositionPreviewCanvas(
                         paint.typeface = Typeface.DEFAULT_BOLD
                         canvas.drawText(layer.text, logicalWidth / 2f, logicalHeight / 2f + 40f, paint)
                     } else {
-                        val points = if (layer.vectorPoints.isEmpty()) {
+                        val points = if (layer.vectorPoints.isEmpty() && !layer.isVector) {
                             listOf(
                                 com.kinetic.app.model.VectorPoint(0f, 0f),
                                 com.kinetic.app.model.VectorPoint(1f, 0f),
@@ -651,14 +652,19 @@ private fun GpuCompositionPreviewCanvas(
                                 com.kinetic.app.model.VectorPoint(0f, 1f)
                             )
                         } else layer.vectorPointsAt(editor.time)
-                        val path = android.graphics.Path()
-                        points.forEachIndexed { index, point ->
-                            val x = point.x.coerceIn(0f, 1f) * logicalWidth
-                            val y = point.y.coerceIn(0f, 1f) * logicalHeight
-                            if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
+                        if (points.size >= 2) {
+                            val path = com.kinetic.app.model.buildVectorPath(
+                                points, layer.vectorSmooth, layer.vectorClosed,
+                                logicalWidth.toFloat(), logicalHeight.toFloat()
+                            )
+                            if (!layer.vectorClosed) {
+                                paint.style = Paint.Style.STROKE
+                                paint.strokeWidth = com.kinetic.app.model.VECTOR_STROKE
+                                paint.strokeCap = Paint.Cap.ROUND
+                                paint.strokeJoin = Paint.Join.ROUND
+                            }
+                            canvas.drawPath(path, paint)
                         }
-                        path.close()
-                        canvas.drawPath(path, paint)
                     }
                     textTextures[layer.id] = signature to generated
                     generated

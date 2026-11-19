@@ -148,6 +148,8 @@ class ProjectStore(context: Context) {
             .put("maskEnabled", l.maskEnabled).put("blendMode", l.blendMode)
             .put("shapeKind", l.shapeKind)
             .put("vectorPoints", JSONArray().also { points -> l.vectorPoints.forEach { point -> points.put(JSONObject().put("x", point.x.toDouble()).put("y", point.y.toDouble())) } })
+            .put("vectorSmooth", JSONArray().also { a -> l.vectorSmooth.forEach { a.put(it) } })
+            .put("vectorClosed", l.vectorClosed)
             .put("maskPath", maskJson)
     }
 
@@ -254,6 +256,8 @@ class ProjectStore(context: Context) {
             maskEnabled = j.optBoolean("maskEnabled", false), blendMode = j.optString("blendMode", "Normal"),
             shapeKind = j.optString("shapeKind", "Rectangle"),
             vectorPoints = (j.optJSONArray("vectorPoints") ?: JSONArray()).let { points -> (0 until points.length()).mapNotNull { index -> points.optJSONObject(index)?.let { point -> VectorPoint(point.optDouble("x", 0.5).toFloat(), point.optDouble("y", 0.5).toFloat()) } } },
+            vectorSmooth = (j.optJSONArray("vectorSmooth") ?: JSONArray()).let { a -> (0 until a.length()).map { a.optBoolean(it, false) } },
+            vectorClosed = j.optBoolean("vectorClosed", true),
             maskPath = maskPath)
     }
 }

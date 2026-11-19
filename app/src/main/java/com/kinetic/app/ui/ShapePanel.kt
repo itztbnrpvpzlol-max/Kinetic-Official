@@ -116,7 +116,7 @@ private fun category(name: String) = when (name) {
 val ShapePresets: List<ShapePreset> = shapeNames.map { ShapePreset(it,category(it),pointsFor(it)) }
 
 @Composable
-fun ShapeLibraryPanel(onClose: () -> Unit, onSelect: (ShapePreset) -> Unit, modifier: Modifier = Modifier) {
+fun ShapeLibraryPanel(onClose: () -> Unit, onSelect: (ShapePreset) -> Unit, modifier: Modifier = Modifier, onDraw: () -> Unit = {}) {
     var category by remember { mutableStateOf("Basic") }
     val categories = listOf("Basic","Polygons","Stars","Arrows","Symbols")
     val visible = remember(category) { ShapePresets.filter { it.category == category } }
@@ -124,6 +124,7 @@ fun ShapeLibraryPanel(onClose: () -> Unit, onSelect: (ShapePreset) -> Unit, modi
     Column(modifier.clip(panelShape).background(KColors.Surface).border(1.dp,KColors.Line,panelShape)) {
         Row(Modifier.fillMaxWidth().height(38.dp).padding(start=13.dp,end=5.dp),verticalAlignment=Alignment.CenterVertically) {
             Text("Shape Library  ·  ${ShapePresets.size} vector shapes",color=KColors.Text,fontSize=12.sp,fontWeight=FontWeight.SemiBold,modifier=Modifier.weight(1f))
+            Text("Draw path",color=KColors.Accent,fontSize=12.sp,fontWeight=FontWeight.SemiBold,modifier=Modifier.clip(RoundedCornerShape(6.dp)).clickable(onClick=onDraw).padding(horizontal=10.dp,vertical=6.dp))
             Box(Modifier.size(32.dp).clickable(onClick=onClose),contentAlignment=Alignment.Center) { KIcon(IconKind.CLOSE,KColors.Muted,Modifier.size(16.dp)) }
         }
         Row(Modifier.weight(1f).fillMaxWidth()) {

@@ -365,6 +365,8 @@ data class Layer(
     val blendMode: String = "Normal",
     val shapeKind: String = "Rectangle",
     val vectorPoints: List<VectorPoint> = emptyList(),
+    val vectorSmooth: List<Boolean> = emptyList(),
+    val vectorClosed: Boolean = true,
     val maskPath: LayerMask? = null
 ) {
     val end: Float get() = start + duration
@@ -387,6 +389,42 @@ data class Layer(
         VectorPoint(x.coerceIn(0f, 1f), y.coerceIn(0f, 1f))
     }
     fun activeAt(t: Float): Boolean = t >= start && t < end
+    val isVector: Boolean get() = type == LayerType.SHAPE && shapeKind == "Vector"
+}
+
+const val VECTOR_STROKE = 10f
+
+fun buildVectorPath(
+    points: List<VectorPoint>, smooth: List<Boolean>, closed: Boolean, w: Float, h: Float,
+    path: android.graphics.Path = android.graphics.Path()
+): android.graphics.Path {
+    path.reset()
+    val n = points.size
+    if (n == 0) return path
+    val loop = closed && n > 2
+    fun px(i: Int) = points[i].x * w
+    fun py(i: Int) = points[i].y * h
+    fun sm(i: Int) = smooth.getOrElse(i) { false }
+    fun prev(i: Int) = if (i > 0) i - 1 else if (loop) n - 1 else i
+    fun next(i: Int) = if (i < n - 1) i + 1 else if (loop) 0 else i
+    path.moveTo(px(0), py(0))
+    val segments = if (loop) n else n - 1
+    for (a in 0 until segments) {
+        val b = (a + 1) % n
+        val aSmooth = sm(a)
+        val bSmooth = sm(b)
+        if (!aSmooth && !bSmooth) {
+            path.lineTo(px(b), py(b))
+        } else {
+            val c1x = if (aSmooth) px(a) + (px(next(a)) - px(prev(a))) / 6f else px(a)
+            val c1y = if (aSmooth) py(a) + (py(next(a)) - py(prev(a))) / 6f else py(a)
+            val c2x = if (bSmooth) px(b) - (px(next(b)) - px(prev(b))) / 6f else px(b)
+            val c2y = if (bSmooth) py(b) - (py(next(b)) - py(prev(b))) / 6f else py(b)
+            path.cubicTo(c1x, c1y, c2x, c2y, px(b), py(b))
+        }
+    }
+    if (loop) path.close()
+    return path
 }
 
 fun newLayer(
