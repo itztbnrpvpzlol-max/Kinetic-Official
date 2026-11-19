@@ -334,6 +334,121 @@ internal object EffectCraftAiComposer {
         }
     }
 
+
+    private fun analyzeAudioBeats(context: Context, uri: Uri, maxDuration: Float): List<Float> {
+        val extractor = MediaExtractor()
+        var decoder: MediaCodec? = null
+        try {
+            extractor.setDataSource(context, uri, null)
+            val track = (0 until extractor.trackCount).firstOrNull { index ->
+                extractor.getTrackFormat(index).getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true
+            } ?: return emptyList()
+            extractor.selectTrack(track)
+            val sourceFormat = extractor.getTrackFormat(track)
+            val mime = sourceFormat.getString(MediaFormat.KEY_MIME) ?: return emptyList()
+            decoder = MediaCodec.createDecoderByType(mime)
+            decoder.configure(sourceFormat, null, null, 0)
+            decoder.start()
+            var sampleRate = sourceFormat.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+            var channels = sourceFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+            var encoding = AudioFormat.ENCODING_PCM_16BIT
+            var inputEnded = false
+            var outputEnded = false
+            var windowSamples = (sampleRate / 20).coerceAtLeast(128) * channels
+            var sumSquares = 0.0
+            var sampleCount = 0
+            val envelope = ArrayList<Float>()
+            val info = MediaCodec.BufferInfo()
+            while (!outputEnded) {
+                if (!inputEnded) {
+                    val inputIndex = decoder.dequeueInputBuffer(10_000L)
+                    if (inputIndex >= 0) {
+                        val input = decoder.getInputBuffer(inputIndex)
+                            ?: throw IllegalStateException("Audio decoder input buffer unavailable.")
+                        input.clear()
+                        val size = if (extractor.sampleTime >= 0L && extractor.sampleTime < maxDuration * 1_000_000L) {
+                            extractor.readSampleData(input, 0)
+                        } else -1
+                        if (size < 0) {
+                            decoder.queueInputBuffer(inputIndex, 0, 0, 0L, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                            inputEnded = true
+                        } else {
+                            decoder.queueInputBuffer(inputIndex, 0, size, extractor.sampleTime, 0)
+                            extractor.advance()
+                        }
+                    }
+                }
+                when (val outputIndex = decoder.dequeueOutputBuffer(info, 10_000L)) {
+                    MediaCodec.INFO_TRY_AGAIN_LATER -> Unit
+                    MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
+                        val out = decoder.outputFormat
+                        sampleRate = out.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+                        channels = out.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+                        encoding = if (Build.VERSION.SDK_INT >= 24 && out.containsKey(MediaFormat.KEY_PCM_ENCODING)) {
+                            out.getInteger(MediaFormat.KEY_PCM_ENCODING)
+                        } else AudioFormat.ENCODING_PCM_16BIT
+                        windowSamples = (sampleRate / 20).coerceAtLeast(128) * channels
+                    }
+                    else -> if (outputIndex >= 0) {
+                        val output = decoder.getOutputBuffer(outputIndex)
+                        if (output != null && info.size > 0) {
+                            val pcm = output.duplicate().order(java.nio.ByteOrder.LITTLE_ENDIAN)
+                            pcm.position(info.offset)
+                            pcm.limit(info.offset + info.size)
+                            if (encoding == AudioFormat.ENCODING_PCM_FLOAT) {
+                                while (pcm.remaining() >= 4) {
+                                    val value = pcm.float.toDouble()
+                                    sumSquares += value * value
+                                    sampleCount++
+                                    if (sampleCount >= windowSamples) {
+                                        envelope.add(sqrt(sumSquares / sampleCount).toFloat())
+                                        sumSquares = 0.0
+                                        sampleCount = 0
+                                    }
+                                }
+                            } else {
+                                while (pcm.remaining() >= 2) {
+                                    val value = pcm.short.toDouble() / 32768.0
+                                    sumSquares += value * value
+                                    sampleCount++
+                                    if (sampleCount >= windowSamples) {
+                                        envelope.add(sqrt(sumSquares / sampleCount).toFloat())
+                                        sumSquares = 0.0
+                                        sampleCount = 0
+                                    }
+                                }
+                            }
+                        }
+                        outputEnded = (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0
+                        decoder.releaseOutputBuffer(outputIndex, false)
+                    }
+                }
+            }
+            if (sampleCount > 0) envelope.add(sqrt(sumSquares / sampleCount).toFloat())
+            if (envelope.size < 4) return emptyList()
+            val mean = envelope.average().toFloat()
+            val variance = envelope.map { (it - mean) * (it - mean) }.average().toFloat()
+            val threshold = mean + sqrt(variance) * 0.35f
+            val beats = ArrayList<Float>()
+            var last = -1f
+            for (index in 1 until envelope.lastIndex) {
+                val value = envelope[index]
+                if (value >= threshold && value >= envelope[index - 1] && value > envelope[index + 1]) {
+                    val time = index * 0.05f
+                    if (time - last >= 0.24f) {
+                        beats.add(time)
+                        last = time
+                    }
+                }
+            }
+            return beats
+        } finally {
+            runCatching { decoder?.stop() }
+            runCatching { decoder?.release() }
+            runCatching { extractor.release() }
+        }
+    }
+
     private fun transitionFor(index: Int, energy: Float, style: String): Pair<String, Float> {
         // IDs and durations come from EffectCraft's pinned built-in transitions.json.
         // Hard cuts are intentional for the first shot and selected high-energy accents.
