@@ -180,10 +180,10 @@ object EffectCraftAiComposer {
             ).optLong("layer", -1L)
             check(layerId > 0L) { "EffectCraft couldn't place source shot ${shotIndex + 1}." }
             videoLayers.add(layerId)
-            animateShot(layerId, shotIndex, clipDuration)
-            if ("Impact shakes" in priorities) addImpactShake(layerId, clipDuration, chosen.energy)
+            animateShot(layerId, shotIndex, clipDuration, chosen.sourceStart)
+            if ("Impact shakes" in priorities) addImpactShake(layerId, clipDuration, chosen.energy, chosen.sourceStart)
             if ("Time remapping" in priorities) addSpeedRamp(layerId, chosen.sourceStart, clipDuration)
-            if (shotIndex > 0 && overlap > 0f) applyNativeTransition(layerId, transition.first)
+            if (shotIndex > 0 && overlap > 0f) applyNativeTransition(layerId, transition.first, chosen.sourceStart)
             previousSource = chosen.sourceIndex
             previousStart = chosen.sourceStart
             cursor += clipDuration
@@ -515,40 +515,40 @@ object EffectCraftAiComposer {
         return options[offset]
     }
 
-    private fun applyNativeTransition(layer: Long, preset: String) {
+    private fun applyNativeTransition(layer: Long, preset: String, localStart: Float) {
         when (preset) {
-            "fade" -> { key(layer, "transform/opacity", 0.0, 0.0); key(layer, "transform/opacity", 0.32, 100.0) }
-            "push" -> { key(layer, "transform/position", 0.0, JSONArray().put(1320).put(360).put(0)); key(layer, "transform/position", 0.42, JSONArray().put(640).put(360).put(0)) }
-            "zoom" -> { key(layer, "transform/scale", 0.0, JSONArray().put(128).put(128).put(100)); key(layer, "transform/scale", 0.36, JSONArray().put(100).put(100).put(100)) }
-            "wipe" -> { key(layer, "transform/position", 0.0, JSONArray().put(570).put(360).put(0)); key(layer, "transform/position", 0.40, JSONArray().put(640).put(360).put(0)); key(layer, "transform/opacity", 0.0, 15.0); key(layer, "transform/opacity", 0.40, 100.0) }
+            "fade" -> { key(layer, "transform/opacity", localStart.toDouble(), 0.0); key(layer, "transform/opacity", (localStart + 0.32f).toDouble(), 100.0) }
+            "push" -> { key(layer, "transform/position", localStart.toDouble(), JSONArray().put(1320).put(360).put(0)); key(layer, "transform/position", (localStart + 0.42f).toDouble(), JSONArray().put(640).put(360).put(0)) }
+            "zoom" -> { key(layer, "transform/scale", localStart.toDouble(), JSONArray().put(128).put(128).put(100)); key(layer, "transform/scale", (localStart + 0.36f).toDouble(), JSONArray().put(100).put(100).put(100)) }
+            "wipe" -> { key(layer, "transform/position", localStart.toDouble(), JSONArray().put(570).put(360).put(0)); key(layer, "transform/position", (localStart + 0.40f).toDouble(), JSONArray().put(640).put(360).put(0)); key(layer, "transform/opacity", localStart.toDouble(), 15.0); key(layer, "transform/opacity", (localStart + 0.40f).toDouble(), 100.0) }
             else -> Unit
         }
     }
 
-    private fun animateShot(layer: Long, index: Int, duration: Float) {
+    private fun animateShot(layer: Long, index: Int, duration: Float, localStart: Float) {
         when (index % 4) {
             0 -> Unit // deliberate hard cut
             1 -> {
-                key(layer, "transform/opacity", 0.0, 0.0)
-                key(layer, "transform/opacity", 0.14, 100.0)
+                key(layer, "transform/opacity", localStart.toDouble(), 0.0)
+                key(layer, "transform/opacity", (localStart + 0.14f).toDouble(), 100.0)
             }
             2 -> {
-                key(layer, "transform/scale", 0.0, JSONArray().put(100).put(100).put(100))
-                key(layer, "transform/scale", 0.16, JSONArray().put(106).put(106).put(100))
-                key(layer, "transform/scale", 0.42, JSONArray().put(100).put(100).put(100))
+                key(layer, "transform/scale", localStart.toDouble(), JSONArray().put(100).put(100).put(100))
+                key(layer, "transform/scale", (localStart + 0.16f).toDouble(), JSONArray().put(106).put(106).put(100))
+                key(layer, "transform/scale", (localStart + 0.42f).toDouble(), JSONArray().put(100).put(100).put(100))
             }
             else -> {
-                key(layer, "transform/position", 0.0, JSONArray().put(640 - 46).put(360).put(0))
-                key(layer, "transform/position", 0.22, JSONArray().put(640).put(360).put(0))
+                key(layer, "transform/position", localStart.toDouble(), JSONArray().put(640 - 46).put(360).put(0))
+                key(layer, "transform/position", (localStart + 0.22f).toDouble(), JSONArray().put(640).put(360).put(0))
             }
         }
         if (duration > 1.2f && index % 3 == 2) {
-            key(layer, "transform/scale", (duration - 0.25).toDouble(), JSONArray().put(100).put(100).put(100))
-            key(layer, "transform/scale", duration.toDouble(), JSONArray().put(104).put(104).put(100))
+            key(layer, "transform/scale", (localStart + duration - 0.25f).toDouble(), JSONArray().put(100).put(100).put(100))
+            key(layer, "transform/scale", (localStart + duration).toDouble(), JSONArray().put(104).put(104).put(100))
         }
     }
 
-    private fun addImpactShake(layer: Long, duration: Float, energy: Float) {
+    private fun addImpactShake(layer: Long, duration: Float, energy: Float, localStart: Float) {
         val amplitude = (5f + energy.coerceIn(0f, 1f) * 18f).toInt()
         val points = listOf(
             0.00f to 0,
@@ -559,17 +559,17 @@ object EffectCraftAiComposer {
             0.25f to 0
         )
         points.filter { it.first < duration }.forEach { (time, x) ->
-            key(layer, "transform/position", time.toDouble(), JSONArray().put(640 + x).put(360).put(0))
+            key(layer, "transform/position", (localStart + time).toDouble(), JSONArray().put(640 + x).put(360).put(0))
         }
     }
 
     private fun addSpeedRamp(layer: Long, sourceStart: Float, duration: Float) {
         if (duration < 0.55f) return
         command("layer.enableTimeRemap", JSONObject().put("layers", JSONArray().put(layer)).put("value", true))
-        key(layer, "timeRemap", 0.0, sourceStart.toDouble())
-        key(layer, "timeRemap", (duration * 0.35f).toDouble(), (sourceStart + duration * 0.72f).toDouble())
-        key(layer, "timeRemap", (duration * 0.68f).toDouble(), (sourceStart + duration * 0.84f).toDouble())
-        key(layer, "timeRemap", duration.toDouble(), (sourceStart + duration).toDouble())
+        key(layer, "timeRemap", sourceStart.toDouble(), sourceStart.toDouble())
+        key(layer, "timeRemap", (sourceStart + duration * 0.35f).toDouble(), (sourceStart + duration * 0.72f).toDouble())
+        key(layer, "timeRemap", (sourceStart + duration * 0.68f).toDouble(), (sourceStart + duration * 0.84f).toDouble())
+        key(layer, "timeRemap", (sourceStart + duration).toDouble(), (sourceStart + duration).toDouble())
     }
 
     private fun addNativeMotionGraphics(
