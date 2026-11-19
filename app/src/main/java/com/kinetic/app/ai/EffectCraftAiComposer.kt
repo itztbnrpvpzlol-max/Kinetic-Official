@@ -1,6 +1,7 @@
 package com.kinetic.app.ai
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.provider.OpenableColumns
@@ -9,6 +10,8 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.util.Locale
+import kotlin.math.abs
+import kotlin.math.max
 import kotlin.math.min
 
 /**
@@ -19,6 +22,8 @@ import kotlin.math.min
  * importer consumes paths, then native commands author the complete composition.
  */
 internal object EffectCraftAiComposer {
+    private data class SourceShot(val sourceIndex: Int, val sourceStart: Float, val duration: Float, val energy: Float)
+
     data class Composition(
         val compId: Long,
         val durationSeconds: Float,
@@ -71,21 +76,42 @@ internal object EffectCraftAiComposer {
             ?: throw IllegalStateException("EffectCraft returned no imported footage items.")
         check(items.length() > 0) { "EffectCraft could not import any selected video files." }
 
-        val sourceDurations = footage.map { probeDuration(context, it) }
+        val sourceDurations = footage.take(usableCount(items, staged)).map { probeDuration(context, it) }
         val usable = min(items.length(), staged.size)
-        val lengths = sourceDurations.take(usable)
-        val totalSource = lengths.sum().coerceAtLeast(0.1f)
-        val scale = min(1f, duration / totalSource)
-        val clipLengths = lengths.map { (it * scale).coerceAtLeast(0.35f) }
+        val targetShotLength = when (style.lowercase(Locale.ROOT)) {
+            "velocity" -> 1.55f
+            "mograph" -> 2.1f
+            else -> 2.8f
+        }
+        onProgress("Detecting scene changes and selecting distinct source moments…")
+        val uniqueShots = (0 until usable).flatMap { sourceIndex ->
+            detectShots(context, footage[sourceIndex], sourceDurations[sourceIndex], targetShotLength)
+                .map { it.copy(sourceIndex = sourceIndex) }
+        }
+        check(uniqueShots.isNotEmpty()) { "No usable scene segments were found in the selected footage." }
+        val remainingShots = uniqueShots.toMutableList()
+        var previousSource = -1
+        var previousStart = -1f
         var cursor = 0f
+        var shotIndex = 0
         val videoLayers = ArrayList<Long>()
-        onProgress("Building native footage layers and varied transitions…")
-        for (index in 0 until usable) {
-            if (cursor >= duration - 0.2f) break
-            val itemId = items.optLong(index, -1L)
-            if (itemId <= 0L) continue
-            val clipDuration = min(clipLengths[index], duration - cursor).coerceAtLeast(0.2f)
-            val overlap = if (index > 0) 0.12f else 0f
+        onProgress("Building native EffectCraft footage layers and varied transitions…")
+        while (cursor < duration - 0.2f) {
+            if (remainingShots.isEmpty()) remainingShots.addAll(uniqueShots)
+            val eligible = remainingShots.filter {
+                it.sourceIndex != previousSource || abs(it.sourceStart - previousStart) > 0.25f
+            }
+            val pool = eligible.ifEmpty { remainingShots }
+            val chosen = when (style.lowercase(Locale.ROOT)) {
+                "velocity" -> pool.maxByOrNull { it.energy } ?: pool.first()
+                "cinematic" -> pool.maxByOrNull { it.duration } ?: pool.first()
+                else -> pool.maxByOrNull { it.energy * 0.7f + (1f / it.duration.coerceAtLeast(0.4f)) * 0.3f } ?: pool.first()
+            }
+            remainingShots.remove(chosen)
+            val itemId = items.optLong(chosen.sourceIndex, -1L)
+            check(itemId > 0L) { "EffectCraft returned an invalid source footage ID." }
+            val clipDuration = min(chosen.duration, duration - cursor).coerceAtLeast(0.2f)
+            val overlap = if (shotIndex > 0) 0.12f else 0f
             val start = (cursor - overlap).coerceAtLeast(0f)
             val out = min(duration, cursor + clipDuration)
             val layerId = command(
@@ -98,19 +124,98 @@ internal object EffectCraftAiComposer {
                     .put("out", out.toDouble())
                     .put("index", 1)
             ).optLong("layer", -1L)
-            check(layerId > 0L) { "EffectCraft couldn't place source clip ${index + 1}." }
+            check(layerId > 0L) { "EffectCraft couldn't place source shot ${shotIndex + 1}." }
+            if (chosen.sourceStart > 0.02f) {
+                command(
+                    "layer.slip",
+                    JSONObject()
+                        .put("layers", JSONArray().put(layerId))
+                        .put("delta", chosen.sourceStart.toDouble())
+                )
+            }
             videoLayers.add(layerId)
-            animateShot(layerId, index, clipDuration)
+            animateShot(layerId, shotIndex, clipDuration)
+            previousSource = chosen.sourceIndex
+            previousStart = chosen.sourceStart
             cursor += clipDuration
+            shotIndex++
         }
         check(videoLayers.isNotEmpty()) { "EffectCraft could not create any video layers." }
-
-        // Fill unused time by extending the final source layer's out point where possible.
-        val finalDuration = maxOf(duration, cursor).coerceAtMost(duration)
+        val finalDuration = duration
         addNativeMotionGraphics(comp, width, height, duration, style, prompt, frameRate)
         addOptionalNativeAdjustment(comp, videoLayers.firstOrNull())
         onProgress("EffectCraft composition authored.")
         return Composition(comp, finalDuration, audio.firstOrNull(), staged)
+    }
+
+    private fun usableCount(items: JSONArray, staged: List<File>): Int = min(items.length(), staged.size)
+
+    /**
+     * Lightweight local cut detector. It samples tiny luminance frames, finds strong
+     * visual discontinuities, then subdivides long scenes into non-identical edit windows.
+     */
+    private fun detectShots(
+        context: Context,
+        uri: Uri,
+        sourceDuration: Float,
+        targetLength: Float
+    ): List<SourceShot> {
+        val retriever = MediaMetadataRetriever()
+        val motion = ArrayList<Pair<Float, Float>>()
+        val boundaries = arrayListOf(0f)
+        var previous: FloatArray? = null
+        var lastCut = 0f
+        val step = max(0.35f, sourceDuration / 160f)
+        try {
+            retriever.setDataSource(context, uri)
+            var time = 0f
+            while (time < sourceDuration) {
+                val frame = runCatching {
+                    retriever.getFrameAtTime((time * 1_000_000L).toLong(), MediaMetadataRetriever.OPTION_CLOSEST)
+                }.getOrNull()
+                if (frame != null) {
+                    val tiny = Bitmap.createScaledBitmap(frame, 16, 9, true)
+                    val pixels = IntArray(16 * 9)
+                    tiny.getPixels(pixels, 0, 16, 0, 0, 16, 9)
+                    if (tiny !== frame) tiny.recycle()
+                    frame.recycle()
+                    val luma = FloatArray(pixels.size) { index ->
+                        val color = pixels[index]
+                        (((color shr 16) and 255) * 0.2126f +
+                            ((color shr 8) and 255) * 0.7152f +
+                            (color and 255) * 0.0722f) / 255f
+                    }
+                    val difference = previous?.let { prior ->
+                        luma.indices.map { abs(luma[it] - prior[it]) }.average().toFloat()
+                    } ?: 0f
+                    motion.add(time to difference)
+                    if (difference > 0.22f && time - lastCut >= 0.75f) {
+                        boundaries.add(time)
+                        lastCut = time
+                    }
+                    previous = luma
+                }
+                time += step
+            }
+        } finally {
+            runCatching { retriever.release() }
+        }
+        boundaries.add(sourceDuration)
+        val result = ArrayList<SourceShot>()
+        boundaries.distinct().sorted().zipWithNext().forEach { (sceneStart, sceneEnd) ->
+            if (sceneEnd - sceneStart < 0.35f) return@forEach
+            val sceneEnergy = motion.filter { it.first >= sceneStart && it.first < sceneEnd }
+                .map { it.second }.average().takeIf { it.isFinite() }?.toFloat() ?: 0f
+            var segmentStart = sceneStart
+            while (segmentStart < sceneEnd - 0.25f) {
+                val segmentDuration = min(targetLength, sceneEnd - segmentStart)
+                if (segmentDuration >= 0.35f) {
+                    result.add(SourceShot(0, segmentStart, segmentDuration, sceneEnergy))
+                }
+                segmentStart += targetLength
+            }
+        }
+        return result.ifEmpty { listOf(SourceShot(0, 0f, sourceDuration.coerceAtLeast(0.35f), 0f)) }
     }
 
     private fun animateShot(layer: Long, index: Int, duration: Float) {
