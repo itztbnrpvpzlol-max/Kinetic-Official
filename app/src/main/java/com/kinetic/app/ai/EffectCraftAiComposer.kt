@@ -211,28 +211,19 @@ internal object EffectCraftAiComposer {
 
     private fun addOptionalNativeAdjustment(comp: Long, targetLayer: Long?) {
         if (targetLayer == null) return
+        // effect.list is a query, so its result is an array rather than an object.
+        val catalog = JSONObject(EffectCraftAiBridge.execute("effect.list", "{}").getOrThrow())
+        check(catalog.optBoolean("ok")) { "EffectCraft could not inspect its native effects." }
+        val effects = catalog.optJSONArray("result") ?: return
+        val glow = (0 until effects.length()).mapNotNull { effects.optJSONObject(it) }
+            .firstOrNull { it.optString("name").contains("glow", true) } ?: return
         val adjustment = command(
             "layer.newAdjustment",
-            JSONObject().put("comp", comp).put("name", "AI • Native Adjustment Layer")
+            JSONObject().put("comp", comp).put("name", "AI • Native Glow Adjustment")
         ).optLong("layer", -1L)
         if (adjustment <= 0L) return
-        // Discover the actual EffectCraft registry and apply a real built-in effect only
-        // when the pinned native build exposes a compatible glow entry.
-        val catalog = command("effect.list", JSONObject())
-        val effects = catalog.optJSONArray("result") ?: catalog.optJSONArray("effects")
-        val glow = effects?.let { array ->
-            (0 until array.length()).mapNotNull { array.optJSONObject(it) }
-                .firstOrNull { it.optString("name").contains("glow", true) }
-        }
-        if (glow != null) {
-            command("layer.select", JSONObject().put("layers", JSONArray().put(adjustment)))
-            command("effect.apply", JSONObject().put("effect", glow.optString("id")))
-        } else {
-            // No effect was available; do not leave an empty adjustment layer behind.
-            runCatching {
-                command("project.delete", JSONObject().put("items", JSONArray().put(adjustment)))
-            }
-        }
+        command("layer.select", JSONObject().put("layers", JSONArray().put(adjustment)))
+        command("effect.apply", JSONObject().put("effect", glow.optString("id")))
     }
 
     private fun key(layer: Long, path: String, time: Double, value: Any) {
