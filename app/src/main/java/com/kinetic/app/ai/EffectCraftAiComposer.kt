@@ -111,9 +111,20 @@ internal object EffectCraftAiComposer {
             val itemId = items.optLong(chosen.sourceIndex, -1L)
             check(itemId > 0L) { "EffectCraft returned an invalid source footage ID." }
             val clipDuration = min(chosen.duration, duration - cursor).coerceAtLeast(0.2f)
-            val overlap = if (shotIndex > 0) 0.12f else 0f
+            val transition = transitionFor(shotIndex, chosen.energy, style)
+            val overlap = if (shotIndex > 0) transition.second else 0f
             val start = (cursor - overlap).coerceAtLeast(0f)
-            val out = min(duration, cursor + clipDuration)
+            val out = min(duration, cursor + clipDuration + if (shotIndex == 0) 0f else overlap)
+            if (shotIndex > 0 && videoLayers.isNotEmpty()) {
+                // Keep the previous footage underneath the incoming native transition until
+                // its reveal has completed; the source can continue naturally through this tail.
+                command(
+                    "layer.timing",
+                    JSONObject()
+                        .put("layers", JSONArray().put(videoLayers.last()))
+                        .put("out", min(duration, cursor + overlap).toDouble())
+                )
+            }
             val layerId = command(
                 "layer.addItem",
                 JSONObject()
@@ -135,6 +146,7 @@ internal object EffectCraftAiComposer {
             }
             videoLayers.add(layerId)
             animateShot(layerId, shotIndex, clipDuration)
+            if (shotIndex > 0) applyNativeTransition(layerId, start, transition.first)
             previousSource = chosen.sourceIndex
             previousStart = chosen.sourceStart
             cursor += clipDuration
@@ -216,6 +228,38 @@ internal object EffectCraftAiComposer {
             }
         }
         return result.ifEmpty { listOf(SourceShot(0, 0f, sourceDuration.coerceAtLeast(0.35f), 0f)) }
+    }
+
+    private fun transitionFor(index: Int, energy: Float, style: String): Pair<String, Float> {
+        // IDs and durations come from EffectCraft's pinned built-in transitions.json.
+        // Hard cuts are intentional for the first shot and selected high-energy accents.
+        if (index == 0 || (style.equals("Velocity", true) && energy > 0.32f && index % 4 == 0)) {
+            return "fadeIn" to 0.5f
+        }
+        val options = listOf(
+            "wipeInFromLeft" to 1.0f,
+            "diagonalSweepIn" to 1.2f,
+            "clockReveal" to 1.2f,
+            "blindsOpen" to 0.9f,
+            "mosaicFadeIn" to 1.2f,
+            "lineSweepIn" to 1.0f,
+            "wipeInFromRight" to 1.0f
+        )
+        val offset = ((index - 1) + (energy * 10f).toInt().coerceIn(0, 6)) % options.size
+        return options[offset]
+    }
+
+    private fun applyNativeTransition(layer: Long, startTime: Float, preset: String) {
+        command("layer.select", JSONObject().put("layers", JSONArray().put(layer)))
+        command("time.set", JSONObject().put("time", startTime.toDouble()))
+        val result = command(
+            "anim.applyBuiltinPreset",
+            JSONObject().put("preset", preset).put("layers", JSONArray().put(layer))
+        )
+        val skipped = result.optJSONArray("skipped")
+        check(skipped == null || skipped.length() == 0) {
+            "EffectCraft couldn't apply transition $preset: ${skipped?.toString()}"
+        }
     }
 
     private fun animateShot(layer: Long, index: Int, duration: Float) {
@@ -310,6 +354,14 @@ internal object EffectCraftAiComposer {
         )
         key(nullId, "transform/position", 0.0, JSONArray().put(width / 2 - 70).put(height * 0.66).put(0))
         key(nullId, "transform/position", 0.38, JSONArray().put(width / 2).put(height * 0.66).put(0))
+        command(
+            "layer.applyTextPreset",
+            JSONObject().put("layer", textId).put("preset", when (style.lowercase(Locale.ROOT)) {
+                "velocity" -> "bounceInWords"
+                "cinematic" -> "fadeUpCharacters"
+                else -> "trackingIn"
+            })
+        )
         key(textId, "transform/opacity", 0.0, 0.0)
         key(textId, "transform/opacity", 0.22, 100.0)
         key(textId, "transform/opacity", minOf(2.8f, duration - 0.3f).coerceAtLeast(0.5f).toDouble(), 100.0)
