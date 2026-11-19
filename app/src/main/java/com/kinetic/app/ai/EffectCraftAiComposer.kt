@@ -139,7 +139,7 @@ object EffectCraftAiComposer {
                     it.energy * 0.55f + styleModel.similarity(it.duration, it.brightness, it.cutStrength, it.energy, it.saturation) * 0.45f
                 } ?: pool.first()
                 "cinematic" -> pool.maxByOrNull {
-                    it.duration * 0.2f + styleModel.similarity(it.duration, it.energy, it.energy, it.energy, it.saturation)
+                    it.duration * 0.2f + styleModel.similarity(it.duration, it.brightness, it.cutStrength, it.energy, it.saturation)
                 } ?: pool.first()
                 else -> pool.maxByOrNull {
                     it.energy * 0.4f + it.saturation * 0.1f +
@@ -189,7 +189,7 @@ object EffectCraftAiComposer {
             }
             videoLayers.add(layerId)
             animateShot(layerId, shotIndex, clipDuration)
-            if (shotIndex > 0 && overlap > 0f) applyNativeTransition(layerId, start, transition.first)
+            if (shotIndex > 0 && overlap > 0f) applyNativeTransition(layerId, transition.first)
             previousSource = chosen.sourceIndex
             previousStart = chosen.sourceStart
             cursor += clipDuration
@@ -521,7 +521,7 @@ object EffectCraftAiComposer {
         return options[offset]
     }
 
-    private fun applyNativeTransition(layer: Long, startTime: Float, preset: String) {
+    private fun applyNativeTransition(layer: Long, preset: String) {
         when (preset) {
             "fade" -> { key(layer, "transform/opacity", 0.0, 0.0); key(layer, "transform/opacity", 0.32, 100.0) }
             "push" -> { key(layer, "transform/position", 0.0, JSONArray().put(1320).put(360).put(0)); key(layer, "transform/position", 0.42, JSONArray().put(640).put(360).put(0)) }
