@@ -184,6 +184,7 @@ internal object EffectCraftAiComposer {
     ): List<SourceShot> {
         val retriever = MediaMetadataRetriever()
         val motion = ArrayList<Pair<Float, Float>>()
+        val saturationSamples = ArrayList<Pair<Float, Float>>()
         val boundaries = arrayListOf(0f)
         var previous: FloatArray? = null
         var lastCut = 0f
@@ -210,7 +211,16 @@ internal object EffectCraftAiComposer {
                     val difference = previous?.let { prior ->
                         luma.indices.map { abs(luma[it] - prior[it]) }.average().toFloat()
                     } ?: 0f
+                    val saturation = pixels.map { color ->
+                        val red = (color shr 16) and 255
+                        val green = (color shr 8) and 255
+                        val blue = color and 255
+                        val hi = max(red, max(green, blue))
+                        val lo = min(red, min(green, blue))
+                        if (hi == 0) 0f else (hi - lo).toFloat() / hi
+                    }.average().toFloat()
                     motion.add(time to difference)
+                    saturationSamples.add(time to saturation)
                     if (difference > 0.22f && time - lastCut >= 0.75f) {
                         boundaries.add(time)
                         lastCut = time
@@ -227,7 +237,9 @@ internal object EffectCraftAiComposer {
         boundaries.distinct().sorted().zipWithNext().forEach { (sceneStart, sceneEnd) ->
             if (sceneEnd - sceneStart < 0.35f) return@forEach
             val sceneEnergy = motion.filter { it.first >= sceneStart && it.first < sceneEnd }
-                .map { it.second }.average().takeIf { it.isFinite() }?.toFloat() ?: 0f
+                .map { it.second }.average().takeIf { it.isFinite() }?.toFloat()?.coerceIn(0f, 1f) ?: 0f
+            val sceneSaturation = saturationSamples.filter { it.first >= sceneStart && it.first < sceneEnd }
+                .map { it.second }.average().takeIf { it.isFinite() }?.toFloat()?.coerceIn(0f, 1f) ?: 0.5f
             var segmentStart = sceneStart
             while (segmentStart < sceneEnd - 0.25f) {
                 val segmentDuration = min(targetLength, sceneEnd - segmentStart)
