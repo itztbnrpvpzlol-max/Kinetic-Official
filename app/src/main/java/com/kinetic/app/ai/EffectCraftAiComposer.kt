@@ -215,7 +215,7 @@ object EffectCraftAiComposer {
         addNativeMotionGraphics(comp, width, height, duration, style, prompt, priorities, frameRate)
         addOptionalNativeAdjustment(comp, videoLayers.firstOrNull())
         onProgress("Reviewing rendered EffectCraft frames for missing or empty shots…")
-        reviewComposition(comp, duration, frameRate, onProgress)
+        reviewComposition(comp, duration, frameRate, videoLayers, onProgress)
         onProgress("Saving the native EffectCraft project and its media references…")
         val projectFile = File(projectDirectory, "Kinetic AI Project.ecproj")
         command("file.saveAs", JSONObject().put("path", projectFile.absolutePath))
@@ -646,27 +646,50 @@ object EffectCraftAiComposer {
         command("effect.apply", JSONObject().put("effect", glow.optString("id")).put("layers", JSONArray().put(adjustment)))
     }
 
-    private fun reviewComposition(comp: Long, duration: Float, fps: Int, onProgress: (String) -> Unit) {
+    private fun reviewComposition(
+        comp: Long,
+        duration: Float,
+        fps: Int,
+        footageLayers: List<Long>,
+        onProgress: (String) -> Unit
+    ) {
         val sampleCount = minOf(18, maxOf(6, (duration / 2f).toInt()))
-        var emptyFrames = 0
-        var validFrames = 0
-        for (index in 0 until sampleCount) {
-            val time = ((index + 0.5f) * duration / sampleCount).coerceIn(0f, duration - 1f / fps)
-            val bytes = EffectCraftAiBridge.renderFrame(comp, time, 160).getOrThrow()
-            check(bytes.size >= 8) { "EffectCraft review returned an incomplete frame." }
-            val buffer = java.nio.ByteBuffer.wrap(bytes).order(java.nio.ByteOrder.LITTLE_ENDIAN)
-            val width = buffer.int
-            val height = buffer.int
-            check(width > 0 && height > 0 && bytes.size == 8 + width * height * 4) { "EffectCraft review returned invalid frame dimensions." }
-            var alpha = 0L
-            var offset = 11
-            var pixels = 0
-            while (offset < bytes.size) { alpha += bytes[offset].toInt() and 255; pixels++; offset += 4 }
-            if (alpha / pixels.coerceAtLeast(1) < 8L) emptyFrames++
-            validFrames++
+        fun inspect(): Int {
+            var emptyFrames = 0
+            for (index in 0 until sampleCount) {
+                val time = ((index + 0.5f) * duration / sampleCount).coerceIn(0f, duration - 1f / fps)
+                val bytes = EffectCraftAiBridge.renderFrame(comp, time, 160).getOrThrow()
+                check(bytes.size >= 8) { "EffectCraft review returned an incomplete frame." }
+                val buffer = java.nio.ByteBuffer.wrap(bytes).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+                val width = buffer.int
+                val height = buffer.int
+                check(width > 0 && height > 0 && bytes.size == 8 + width * height * 4) {
+                    "EffectCraft review returned invalid frame dimensions."
+                }
+                var alpha = 0L
+                var offset = 11
+                var pixels = 0
+                while (offset < bytes.size) {
+                    alpha += bytes[offset].toInt() and 255
+                    pixels++
+                    offset += 4
+                }
+                if (alpha / pixels.coerceAtLeast(1) < 8L) emptyFrames++
+            }
+            return emptyFrames
         }
-        check(emptyFrames < sampleCount / 2) { "AI review found too many empty frames; export stopped to avoid a broken video." }
-        onProgress("AI review passed: $validFrames rendered samples checked; $emptyFrames empty frames.")
+        var emptyFrames = inspect()
+        if (emptyFrames >= sampleCount / 2) {
+            onProgress("AI review found empty frames; repairing footage opacity animation and checking again…")
+            footageLayers.forEach { layer ->
+                command("prop.reset", JSONObject().put("layer", layer).put("path", "transform/opacity"))
+            }
+            emptyFrames = inspect()
+        }
+        check(emptyFrames < sampleCount / 2) {
+            "AI review still found too many empty frames after automatic repair. Export stopped to avoid a broken video."
+        }
+        onProgress("AI review passed: $sampleCount rendered samples checked; $emptyFrames empty frames.")
     }
 
     private fun key(layer: Long, path: String, time: Double, value: Any) {
