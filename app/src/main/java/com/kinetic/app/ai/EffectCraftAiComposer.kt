@@ -212,7 +212,7 @@ object EffectCraftAiComposer {
             )
         }
         val finalDuration = duration
-        addNativeMotionGraphics(comp, width, height, duration, style, prompt, frameRate)
+        addNativeMotionGraphics(comp, width, height, duration, style, prompt, priorities, frameRate)
         addOptionalNativeAdjustment(comp, videoLayers.firstOrNull())
         onProgress("Reviewing rendered EffectCraft frames for missing or empty shots…")
         reviewComposition(comp, duration, frameRate, onProgress)
@@ -561,9 +561,10 @@ object EffectCraftAiComposer {
         duration: Float,
         style: String,
         prompt: String,
+        priorities: Set<String>,
         fps: Int
     ) {
-        val wantsMograph = style.equals("Mograph", true) ||
+        val wantsMograph = style.equals("Mograph", true) || "Typography" in priorities ||
             listOf("typography", "motion graphics", "mograph", "title", "text").any { prompt.contains(it, true) }
         if (!wantsMograph) return
 
@@ -623,6 +624,11 @@ object EffectCraftAiComposer {
         )
         key(nullId, "transform/position", 0.0, JSONArray().put(width / 2 - 70).put(height * 0.66).put(0))
         key(nullId, "transform/position", 0.38, JSONArray().put(width / 2).put(height * 0.66).put(0))
+        command("layer.applyTextPreset", JSONObject().put("layer", textId).put("preset", when (style.lowercase(Locale.ROOT)) {
+            "velocity" -> "bounceInWords"
+            "cinematic" -> "fadeUpCharacters"
+            else -> "trackingIn"
+        }))
         key(textId, "transform/opacity", 0.0, 0.0)
         key(textId, "transform/opacity", 0.22, 100.0)
         key(textId, "transform/opacity", minOf(2.8f, duration - 0.3f).coerceAtLeast(0.5f).toDouble(), 100.0)
