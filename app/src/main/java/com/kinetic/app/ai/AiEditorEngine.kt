@@ -612,23 +612,44 @@ object AiEditorEngine {
                 scene.characterMatchScore * 0.28f +
                 if ("Impact shakes" in request.priorities) scene.cutStrength * 0.08f else 0f
         }
+        if (sorted.isEmpty()) return emptyList()
+
+        // Consume every analysed scene before recycling the pool. The previous
+        // modulo-based selector replayed the same ranked scene sequence whenever
+        // the requested edit was longer than the source material.
         val selected = ArrayList<Scene>()
+        var remaining = sorted.toMutableList()
+        var previous: Scene? = null
         var cursor = 0f
-        var index = 0
         while (cursor < target && selected.size < 160) {
-            val candidate = sorted.getOrNull(index % sorted.size) ?: break
+            if (remaining.isEmpty()) remaining = sorted.toMutableList()
+
+            val previousScene = previous
+            val candidateIndex = if (previousScene == null) 0 else {
+                // Prefer a different source clip; if only one clip was supplied,
+                // prefer a different analysed time range within that clip.
+                remaining.indexOfFirst { candidate ->
+                    candidate.uri != previousScene.uri ||
+                        abs(candidate.start - previousScene.start) > 0.25f ||
+                        abs(candidate.end - previousScene.end) > 0.25f
+                }.takeIf { it >= 0 } ?: 0
+            }
+            val candidate = remaining.removeAt(candidateIndex)
             val beatBoundary = if ("Beat sync" in request.priorities) {
                 beats.firstOrNull { it > cursor + 0.45f && it <= cursor + targetShot * 1.5f }
             } else null
             val beatLength = beatBoundary?.minus(cursor)
             val wanted = min(beatLength ?: targetShot, target - cursor).coerceAtLeast(0.35f)
-            val sourceStart = candidate.start + (candidate.duration - min(candidate.duration, wanted)).coerceAtLeast(0f) * 0.5f
+            val sourceStart = candidate.start +
+                (candidate.duration - min(candidate.duration, wanted)).coerceAtLeast(0f) * 0.5f
             val sourceEnd = min(candidate.end, sourceStart + wanted)
-            val snapped = beats.minByOrNull { abs(it - cursor) }?.takeIf { abs(it - cursor) < 0.16f } ?: cursor
+            val snapped = beats.minByOrNull { abs(it - cursor) }
+                ?.takeIf { abs(it - cursor) < 0.16f } ?: cursor
             if (selected.isNotEmpty() && snapped > cursor) cursor = snapped
-            selected.add(candidate.copy(start = sourceStart, end = sourceEnd))
+            val chosen = candidate.copy(start = sourceStart, end = sourceEnd)
+            selected.add(chosen)
+            previous = chosen
             cursor += (sourceEnd - sourceStart).coerceAtLeast(0.35f)
-            index++
         }
         return selected
     }
