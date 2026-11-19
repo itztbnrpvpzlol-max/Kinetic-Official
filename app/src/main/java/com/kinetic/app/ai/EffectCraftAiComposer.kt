@@ -214,6 +214,8 @@ object EffectCraftAiComposer {
         val finalDuration = duration
         addNativeMotionGraphics(comp, width, height, duration, style, prompt, frameRate)
         addOptionalNativeAdjustment(comp, videoLayers.firstOrNull())
+        onProgress("Reviewing rendered EffectCraft frames for missing or empty shots…")
+        reviewComposition(comp, duration, frameRate, onProgress)
         onProgress("Saving the native EffectCraft project and its media references…")
         val projectFile = File(projectDirectory, "Kinetic AI Project.ecproj")
         command("file.saveAs", JSONObject().put("path", projectFile.absolutePath))
@@ -507,31 +509,20 @@ object EffectCraftAiComposer {
         // IDs and durations come from EffectCraft's pinned built-in transitions.json.
         // Hard cuts are intentional for the first shot and selected high-energy accents.
         if (index == 0 || (style.equals("Velocity", true) && energy > 0.32f && index % 4 == 0)) {
-            return "fadeIn" to 0.5f
+            return "hardCut" to 0.0f
         }
-        val options = listOf(
-            "wipeInFromLeft" to 1.0f,
-            "diagonalSweepIn" to 1.2f,
-            "clockReveal" to 1.2f,
-            "blindsOpen" to 0.9f,
-            "mosaicFadeIn" to 1.2f,
-            "lineSweepIn" to 1.0f,
-            "wipeInFromRight" to 1.0f
-        )
+        val options = listOf("fade" to 0.32f, "push" to 0.42f, "zoom" to 0.36f, "wipe" to 0.40f, "hardCut" to 0.0f)
         val offset = ((index - 1) + (energy * 10f).toInt().coerceIn(0, 6)) % options.size
         return options[offset]
     }
 
     private fun applyNativeTransition(layer: Long, startTime: Float, preset: String) {
-        command("layer.select", JSONObject().put("layers", JSONArray().put(layer)))
-        command("time.set", JSONObject().put("time", startTime.toDouble()))
-        val result = command(
-            "anim.applyBuiltinPreset",
-            JSONObject().put("preset", preset).put("layers", JSONArray().put(layer))
-        )
-        val skipped = result.optJSONArray("skipped")
-        check(skipped == null || skipped.length() == 0) {
-            "EffectCraft couldn't apply transition $preset: ${skipped?.toString()}"
+        when (preset) {
+            "fade" -> { key(layer, "transform/opacity", 0.0, 0.0); key(layer, "transform/opacity", 0.32, 100.0) }
+            "push" -> { key(layer, "transform/position", 0.0, JSONArray().put(1320).put(360).put(0)); key(layer, "transform/position", 0.42, JSONArray().put(640).put(360).put(0)) }
+            "zoom" -> { key(layer, "transform/scale", 0.0, JSONArray().put(128).put(128).put(100)); key(layer, "transform/scale", 0.36, JSONArray().put(100).put(100).put(100)) }
+            "wipe" -> { key(layer, "transform/position", 0.0, JSONArray().put(570).put(360).put(0)); key(layer, "transform/position", 0.40, JSONArray().put(640).put(360).put(0)); key(layer, "transform/opacity", 0.0, 15.0); key(layer, "transform/opacity", 0.40, 100.0) }
+            else -> Unit
         }
     }
 
@@ -627,14 +618,6 @@ object EffectCraftAiComposer {
         )
         key(nullId, "transform/position", 0.0, JSONArray().put(width / 2 - 70).put(height * 0.66).put(0))
         key(nullId, "transform/position", 0.38, JSONArray().put(width / 2).put(height * 0.66).put(0))
-        command(
-            "layer.applyTextPreset",
-            JSONObject().put("layer", textId).put("preset", when (style.lowercase(Locale.ROOT)) {
-                "velocity" -> "bounceInWords"
-                "cinematic" -> "fadeUpCharacters"
-                else -> "trackingIn"
-            })
-        )
         key(textId, "transform/opacity", 0.0, 0.0)
         key(textId, "transform/opacity", 0.22, 100.0)
         key(textId, "transform/opacity", minOf(2.8f, duration - 0.3f).coerceAtLeast(0.5f).toDouble(), 100.0)
@@ -643,19 +626,36 @@ object EffectCraftAiComposer {
 
     private fun addOptionalNativeAdjustment(comp: Long, targetLayer: Long?) {
         if (targetLayer == null) return
-        // effect.list is a query, so its result is an array rather than an object.
-        val catalog = JSONObject(EffectCraftAiBridge.execute("effect.list", "{}").getOrThrow())
-        check(catalog.optBoolean("ok")) { "EffectCraft could not inspect its native effects." }
-        val effects = catalog.optJSONArray("result") ?: return
-        val glow = (0 until effects.length()).mapNotNull { effects.optJSONObject(it) }
-            .firstOrNull { it.optString("id") == "ec.stylize.glow" } ?: return
-        val adjustment = command(
-            "layer.newAdjustment",
-            JSONObject().put("comp", comp).put("name", "AI • Native Glow Adjustment")
-        ).optLong("layer", -1L)
+        val response = JSONObject(EffectCraftAiBridge.execute("effect.list", "{}").getOrThrow())
+        check(response.optBoolean("ok")) { "EffectCraft could not inspect its native effects." }
+        val effects = response.optJSONArray("result") ?: return
+        val glow = (0 until effects.length()).mapNotNull { effects.optJSONObject(it) }.firstOrNull { it.optString("id") == "ec.stylize.glow" } ?: return
+        val adjustment = command("layer.newAdjustment", JSONObject().put("comp", comp).put("name", "AI • Native Glow Adjustment")).optLong("layer", -1L)
         if (adjustment <= 0L) return
-        command("layer.select", JSONObject().put("layers", JSONArray().put(adjustment)))
-        command("effect.apply", JSONObject().put("effect", glow.optString("id")))
+        command("effect.apply", JSONObject().put("effect", glow.optString("id")).put("layers", JSONArray().put(adjustment)))
+    }
+
+    private fun reviewComposition(comp: Long, duration: Float, fps: Int, onProgress: (String) -> Unit) {
+        val sampleCount = minOf(18, maxOf(6, (duration / 2f).toInt()))
+        var emptyFrames = 0
+        var validFrames = 0
+        for (index in 0 until sampleCount) {
+            val time = ((index + 0.5f) * duration / sampleCount).coerceIn(0f, duration - 1f / fps)
+            val bytes = EffectCraftAiBridge.renderFrame(comp, time, 160).getOrThrow()
+            check(bytes.size >= 8) { "EffectCraft review returned an incomplete frame." }
+            val buffer = java.nio.ByteBuffer.wrap(bytes).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+            val width = buffer.int
+            val height = buffer.int
+            check(width > 0 && height > 0 && bytes.size == 8 + width * height * 4) { "EffectCraft review returned invalid frame dimensions." }
+            var alpha = 0L
+            var offset = 11
+            var pixels = 0
+            while (offset < bytes.size) { alpha += bytes[offset].toInt() and 255; pixels++; offset += 4 }
+            if (alpha / pixels.coerceAtLeast(1) < 8L) emptyFrames++
+            validFrames++
+        }
+        check(emptyFrames < sampleCount / 2) { "AI review found too many empty frames; export stopped to avoid a broken video." }
+        onProgress("AI review passed: $validFrames rendered samples checked; $emptyFrames empty frames.")
     }
 
     private fun key(layer: Long, path: String, time: Double, value: Any) {
