@@ -79,6 +79,58 @@ class ProjectStore(context: Context) {
             json.optInt("resolution", 1), json.optDouble("time", 0.0).toFloat(), layers)
     } catch (_: Exception) { null }
 
+    /**
+     * Imports a versioned .kinetic JSON project without trusting its supplied filename or ID.
+     * Media URIs remain references to their original sources; this does not bundle media files.
+     */
+    fun importProject(input: java.io.InputStream): ProjectInfo {
+        val bytes = input.use { stream ->
+            val output = java.io.ByteArrayOutputStream()
+            val buffer = ByteArray(8192)
+            var total = 0
+            while (true) {
+                val read = stream.read(buffer)
+                if (read < 0) break
+                total += read
+                require(total <= 32 * 1024 * 1024) { "Project file is larger than the 32 MB import limit." }
+                output.write(buffer, 0, read)
+            }
+            output.toByteArray()
+        }
+        val json = JSONObject(bytes.toString(Charsets.UTF_8))
+        val version = json.optInt("version", 1)
+        require(version in 1..2) { "This Kinetic project version is not supported." }
+        val layers = json.optJSONArray("layers")
+            ?: throw IllegalArgumentException("The selected file is not a valid Kinetic project.")
+        require(layers.length() <= 10_000) { "This project contains too many layers to import safely." }
+        for (index in 0 until layers.length()) {
+            require(layers.optJSONObject(index) != null) { "Project layer $index is invalid." }
+        }
+
+        val id = UUID.randomUUID().toString()
+        val name = json.optString("name", "Imported Project")
+            .replace(Regex("[\\\\/:*?\"<>|\\\\p{Cntrl}]"), " ")
+            .trim().take(64).ifBlank { "Imported Project" }
+        json.put("version", 2)
+            .put("id", id)
+            .put("name", name)
+            .put("updatedAt", System.currentTimeMillis())
+        val target = File(root, "$id.kinetic")
+        val temp = File(root, "$id.tmp")
+        try {
+            temp.writeText(json.toString())
+            if (!temp.renameTo(target)) {
+                target.writeText(json.toString())
+                temp.delete()
+            }
+        } catch (error: Exception) {
+            temp.delete()
+            target.delete()
+            throw error
+        }
+        return ProjectInfo(id, name, target.lastModified(), layers.length())
+    }
+
     fun delete(id: String) { File(root, "$id.kinetic").delete() }
 
     private fun layerToJson(l: Layer): JSONObject {
