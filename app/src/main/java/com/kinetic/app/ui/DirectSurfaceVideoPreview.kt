@@ -161,7 +161,8 @@ internal fun DirectSurfaceVideoPreview(
         )
     }
     DisposableEffect(fallbackFrame) {
-        onDispose { fallbackFrame?.let { if (!it.isRecycled) it.recycle() } }
+        val owned = fallbackFrame
+        onDispose { owned?.let { if (!it.isRecycled) it.recycle() } }
     }
     val sourcePositionMs = (
         (layer.sourceElapsedAt(editor.time) + layer.srcOffset).coerceAtLeast(0f) * 1000f
@@ -172,9 +173,10 @@ internal fun DirectSurfaceVideoPreview(
         contentAlignment = Alignment.Center
     ) {
         val fitScale = minOf(maxWidth.value / COMP_W, maxHeight.value / COMP_H)
-        if (!hasSurfaceFrame && fallbackFrame != null && !fallbackFrame!!.isRecycled) {
+        val shownFrame = fallbackFrame
+        if (!hasSurfaceFrame && shownFrame != null && !shownFrame.isRecycled) {
             Image(
-                bitmap = fallbackFrame!!.asImageBitmap(),
+                bitmap = shownFrame.asImageBitmap(),
                 contentDescription = null,
                 contentScale = ContentScale.FillBounds,
                 modifier = androidx.compose.ui.Modifier.fillMaxSize()
