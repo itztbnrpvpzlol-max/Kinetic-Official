@@ -189,6 +189,8 @@ object EffectCraftAiComposer {
             }
             videoLayers.add(layerId)
             animateShot(layerId, shotIndex, clipDuration)
+            if ("Impact shakes" in priorities) addImpactShake(layerId, clipDuration, chosen.energy)
+            if ("Time remapping" in priorities) addSpeedRamp(layerId, chosen.sourceStart, clipDuration)
             if (shotIndex > 0 && overlap > 0f) applyNativeTransition(layerId, transition.first)
             previousSource = chosen.sourceIndex
             previousStart = chosen.sourceStart
@@ -213,7 +215,7 @@ object EffectCraftAiComposer {
         }
         val finalDuration = duration
         addNativeMotionGraphics(comp, width, height, duration, style, prompt, priorities, frameRate)
-        addOptionalNativeAdjustment(comp, videoLayers.firstOrNull())
+        addOptionalNativeAdjustment(comp, videoLayers.firstOrNull(), priorities)
         onProgress("Reviewing rendered EffectCraft frames for missing or empty shots…")
         reviewComposition(comp, duration, frameRate, videoLayers, onProgress)
         onProgress("Saving the native EffectCraft project and its media references…")
@@ -554,6 +556,30 @@ object EffectCraftAiComposer {
         }
     }
 
+    private fun addImpactShake(layer: Long, duration: Float, energy: Float) {
+        val amplitude = (5f + energy.coerceIn(0f, 1f) * 18f).toInt()
+        val points = listOf(
+            0.00f to 0,
+            0.05f to amplitude,
+            0.10f to -amplitude,
+            0.15f to amplitude / 2,
+            0.20f to -amplitude / 2,
+            0.25f to 0
+        )
+        points.filter { it.first < duration }.forEach { (time, x) ->
+            key(layer, "transform/position", time.toDouble(), JSONArray().put(640 + x).put(360).put(0))
+        }
+    }
+
+    private fun addSpeedRamp(layer: Long, sourceStart: Float, duration: Float) {
+        if (duration < 0.55f) return
+        command("layer.enableTimeRemap", JSONObject().put("layers", JSONArray().put(layer)).put("value", true))
+        key(layer, "timeRemap", 0.0, sourceStart.toDouble())
+        key(layer, "timeRemap", (duration * 0.35f).toDouble(), (sourceStart + duration * 0.72f).toDouble())
+        key(layer, "timeRemap", (duration * 0.68f).toDouble(), (sourceStart + duration * 0.84f).toDouble())
+        key(layer, "timeRemap", duration.toDouble(), (sourceStart + duration).toDouble())
+    }
+
     private fun addNativeMotionGraphics(
         comp: Long,
         width: Int,
@@ -635,15 +661,30 @@ object EffectCraftAiComposer {
         key(textId, "transform/opacity", minOf(3.1f, duration).toDouble(), 0.0)
     }
 
-    private fun addOptionalNativeAdjustment(comp: Long, targetLayer: Long?) {
-        if (targetLayer == null) return
+    private fun addOptionalNativeAdjustment(comp: Long, targetLayer: Long?, priorities: Set<String>) {
+        if (targetLayer == null || "Color grading" !in priorities) return
         val response = JSONObject(EffectCraftAiBridge.execute("effect.list", "{}").getOrThrow())
         check(response.optBoolean("ok")) { "EffectCraft could not inspect its native effects." }
         val effects = response.optJSONArray("result") ?: return
-        val glow = (0 until effects.length()).mapNotNull { effects.optJSONObject(it) }.firstOrNull { it.optString("id") == "ec.stylize.glow" } ?: return
-        val adjustment = command("layer.newAdjustment", JSONObject().put("comp", comp).put("name", "AI • Native Glow Adjustment")).optLong("layer", -1L)
+        val vibrance = (0 until effects.length()).mapNotNull { effects.optJSONObject(it) }
+            .firstOrNull { it.optString("id") == "ec.color.vibrance" } ?: return
+        val adjustment = command(
+            "layer.newAdjustment",
+            JSONObject().put("comp", comp).put("name", "AI • Native Color Grade")
+        ).optLong("layer", -1L)
         if (adjustment <= 0L) return
-        command("effect.apply", JSONObject().put("effect", glow.optString("id")).put("layers", JSONArray().put(adjustment)))
+        command(
+            "effect.apply",
+            JSONObject().put("effect", vibrance.optString("id")).put("layers", JSONArray().put(adjustment))
+        )
+        command(
+            "prop.set",
+            JSONObject().put("layer", adjustment).put("path", "effects/#1/vibrance").put("value", 18.0)
+        )
+        command(
+            "prop.set",
+            JSONObject().put("layer", adjustment).put("path", "effects/#1/saturation").put("value", 8.0)
+        )
     }
 
     private fun reviewComposition(
