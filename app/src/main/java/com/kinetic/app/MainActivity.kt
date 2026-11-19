@@ -60,12 +60,27 @@ class MainActivity : ComponentActivity() {
                 var settingsFrom by remember { mutableStateOf(Screen.HOME) }
                 var editor by remember { mutableStateOf<EditorState?>(null) }
                 var projects by remember { mutableStateOf(store.list()) }
+                val projectImporter = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+                    if (uri != null) {
+                        val result = runCatching {
+                            val input = contentResolver.openInputStream(uri)
+                                ?: throw IllegalArgumentException("Kinetic couldn't open the selected project file.")
+                            store.importProject(input)
+                        }
+                        result.onSuccess { imported ->
+                            projects = store.list()
+                            Toast.makeText(this@MainActivity, "Imported ${imported.name}", Toast.LENGTH_LONG).show()
+                        }.onFailure { error ->
+                            Toast.makeText(this@MainActivity, error.message ?: "Project import failed.", Toast.LENGTH_LONG).show()
+                        }
+                    }
+                }
 
                 when (screen) {
                     Screen.HOME -> HomeScreen(
                         onNewComposition = { editor = EditorState(settings); screen = Screen.EDITOR },
                         onOpenAiEditor = { screen = Screen.AI_EDITOR },
-                        onImportProject = { }, onImportPlugin = { pluginPicker.launch(arrayOf("*/*")) },
+                        onImportProject = { projectImporter.launch(arrayOf("application/json", "application/octet-stream", "*/*")) }, onImportPlugin = { pluginPicker.launch(arrayOf("*/*")) },
                         onOpenSettings = { settingsFrom = Screen.HOME; screen = Screen.SETTINGS },
                         projects = projects,
                         onOpenProject = { info ->
