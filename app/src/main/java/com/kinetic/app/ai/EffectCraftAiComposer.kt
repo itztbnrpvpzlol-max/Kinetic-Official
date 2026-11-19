@@ -28,7 +28,7 @@ import kotlin.math.sqrt
  * Kinetic timeline. Source files are staged as ordinary files because EffectCraft's
  * importer consumes paths, then native commands author the complete composition.
  */
-internal object EffectCraftAiComposer {
+object EffectCraftAiComposer {
     private data class SourceShot(val sourceIndex: Int, val sourceStart: Float, val duration: Float, val energy: Float, val saturation: Float)
 
     data class Composition(
