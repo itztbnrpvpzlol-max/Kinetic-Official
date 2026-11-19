@@ -36,6 +36,7 @@ internal object EffectCraftAiComposer {
         val durationSeconds: Float,
         val audioUri: Uri?,
         val sourceFiles: List<File>,
+        val projectFile: File,
         val beatCount: Int,
         val learnedSamples: Int
     )
@@ -74,7 +75,10 @@ internal object EffectCraftAiComposer {
         ).optLong("comp", -1L)
         check(comp > 0L) { "EffectCraft did not return a composition ID." }
 
-        val staged = footage.mapIndexed { index, uri -> stage(context, uri, index) }
+        val projectDirectory = File(context.filesDir, "kinetic-ai-projects/${System.currentTimeMillis()}").apply {
+            check(mkdirs() || isDirectory) { "Kinetic couldn't create a folder for the native EffectCraft project." }
+        }
+        val staged = footage.mapIndexed { index, uri -> stage(context, uri, index, projectDirectory) }
         onProgress("Importing source footage into EffectCraft…")
         val paths = JSONArray().apply { staged.forEach { put(it.absolutePath) } }
         val imported = command("file.import", JSONObject().put("paths", paths))
@@ -193,8 +197,14 @@ internal object EffectCraftAiComposer {
         val finalDuration = duration
         addNativeMotionGraphics(comp, width, height, duration, style, prompt, frameRate)
         addOptionalNativeAdjustment(comp, videoLayers.firstOrNull())
-        onProgress("EffectCraft composition authored.")
-        return Composition(comp, finalDuration, audio.firstOrNull(), staged, audioBeats.size, styleModel.trainingSamples)
+        onProgress("Saving the native EffectCraft project and its media references…")
+        val projectFile = File(projectDirectory, "Kinetic AI Project.ecproj")
+        command("file.saveAs", JSONObject().put("path", projectFile.absolutePath))
+        check(projectFile.isFile && projectFile.length() > 0L) {
+            "EffectCraft couldn't persist the native project file."
+        }
+        onProgress("EffectCraft project authored and saved.")
+        return Composition(comp, finalDuration, audio.firstOrNull(), staged, projectFile, audioBeats.size, styleModel.trainingSamples)
     }
 
     private fun usableCount(items: JSONArray, staged: List<File>): Int = min(items.length(), staged.size)
@@ -650,14 +660,17 @@ internal object EffectCraftAiComposer {
         return response.optJSONObject("result") ?: JSONObject()
     }
 
-    private fun stage(context: Context, uri: Uri, index: Int): File {
+    private fun stage(context: Context, uri: Uri, index: Int, projectDirectory: File): File {
         val name = context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
             ?.use { cursor ->
                 if (cursor.moveToFirst()) cursor.getString(0) else null
             } ?: uri.lastPathSegment?.substringAfterLast('/') ?: "clip_${index + 1}.mp4"
         val extension = name.substringAfterLast('.', "mp4").lowercase(Locale.ROOT)
             .filter { it.isLetterOrDigit() }.take(8).ifBlank { "mp4" }
-        val destination = File(context.cacheDir, "effectcraft-ai-${index + 1}.$extension")
+        val mediaDirectory = File(projectDirectory, "media").apply {
+            check(mkdirs() || isDirectory) { "Kinetic couldn't create the project's media folder." }
+        }
+        val destination = File(mediaDirectory, "source-${index + 1}.$extension")
         context.contentResolver.openInputStream(uri)?.use { input ->
             destination.outputStream().use { output -> input.copyTo(output, 256 * 1024) }
         } ?: throw IllegalStateException("Couldn't read selected footage: $name")
