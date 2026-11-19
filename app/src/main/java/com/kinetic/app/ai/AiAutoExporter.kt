@@ -21,6 +21,7 @@ import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import com.kinetic.app.engine.EffectCraftBridge
+import com.kinetic.app.engine.EffectCraftAiBridge
 import com.kinetic.app.model.COMP_H
 import com.kinetic.app.model.COMP_W
 import com.kinetic.app.model.EffectInstance
@@ -32,6 +33,7 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import java.io.File
 import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import kotlin.math.ceil
 import kotlin.math.max
 import kotlin.math.min
@@ -50,6 +52,184 @@ object AiAutoExporter {
         val width: Int,
         val height: Int
     )
+
+    /**
+     * Encodes frames rendered from the complete native EffectCraft composition.
+     * No Kinetic Layer, property, Canvas compositor or timeline state is consulted.
+     */
+    suspend fun exportEffectCraft(
+        context: Context,
+        composition: EffectCraftAiComposer.Composition,
+        fps: Int,
+        onProgress: (Float, String) -> Unit = { _, _ -> }
+    ): Result {
+        val duration = composition.durationSeconds.coerceIn(0.1f, 120f)
+        val frameRate = fps.coerceIn(12, 60)
+        val width = 1280
+        val height = 720
+        val tempVideo = File(context.cacheDir, "kinetic-effectcraft-ai-${System.currentTimeMillis()}.mp4")
+        var published: Uri? = null
+        try {
+            onProgress(0f, "Rendering the native EffectCraft composition…")
+            renderEffectCraftTrack(tempVideo, composition.compId, duration, frameRate, width, height, onProgress)
+            currentCoroutineContext().ensureActive()
+            val displayName = "Kinetic-AI-${System.currentTimeMillis()}.mp4"
+            val values = ContentValues().apply {
+                put(MediaStore.Video.Media.DISPLAY_NAME, displayName)
+                put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+                if (Build.VERSION.SDK_INT >= 29) {
+                    put(MediaStore.Video.Media.RELATIVE_PATH, Environment.DIRECTORY_MOVIES + "/Kinetic")
+                    put(MediaStore.Video.Media.IS_PENDING, 1)
+                }
+            }
+            val resolver = context.contentResolver
+            val uri = resolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values)
+                ?: throw IllegalStateException("Android couldn't create the export in Movies/Kinetic.")
+            published = uri
+            val audioIncluded = composition.audioUri?.let {
+                runCatching { muxVideoAndAudio(context, tempVideo, it, uri, duration) }.getOrDefault(false)
+            } ?: false
+            if (!audioIncluded) {
+                resolver.openOutputStream(uri, "w")?.use { output ->
+                    tempVideo.inputStream().use { input -> input.copyTo(output, 256 * 1024) }
+                } ?: throw IllegalStateException("Android couldn't write the exported MP4.")
+            }
+            if (Build.VERSION.SDK_INT >= 29) {
+                resolver.update(uri, ContentValues().apply { put(MediaStore.Video.Media.IS_PENDING, 0) }, null, null)
+            }
+            onProgress(1f, if (audioIncluded) "Native EffectCraft export saved with soundtrack." else "Native EffectCraft export saved.")
+            return Result(uri, displayName, duration, audioIncluded, width, height)
+        } catch (error: Throwable) {
+            published?.let { runCatching { context.contentResolver.delete(it, null, null) } }
+            throw error
+        } finally {
+            runCatching { tempVideo.delete() }
+            composition.sourceFiles.forEach { runCatching { it.delete() } }
+        }
+    }
+
+    private suspend fun renderEffectCraftTrack(
+        output: File,
+        compId: Long,
+        duration: Float,
+        fps: Int,
+        width: Int,
+        height: Int,
+        onProgress: (Float, String) -> Unit
+    ) {
+        val codecInfo = MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos.firstOrNull { info ->
+            info.isEncoder && info.supportedTypes.any { it.equals("video/avc", true) } &&
+                runCatching {
+                    info.getCapabilitiesForType("video/avc").colorFormats.any {
+                        it == MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420SemiPlanar ||
+                            it == MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Planar
+                    }
+                }.getOrDefault(false)
+        } ?: throw IllegalStateException("This device doesn't expose a compatible H.264 encoder.")
+        val formats = codecInfo.getCapabilitiesForType("video/avc").colorFormats
+        val semiPlanar = formats.contains(MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420SemiPlanar)
+        val colorFormat = if (semiPlanar) MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420SemiPlanar
+            else MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Planar
+        val format = MediaFormat.createVideoFormat("video/avc", width, height).apply {
+            setInteger(MediaFormat.KEY_COLOR_FORMAT, colorFormat)
+            setInteger(MediaFormat.KEY_BIT_RATE, (width * height * fps * 0.12f).toInt().coerceIn(1_500_000, 8_000_000))
+            setInteger(MediaFormat.KEY_FRAME_RATE, fps)
+            setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 2)
+        }
+        val codec = MediaCodec.createByCodecName(codecInfo.name)
+        val muxer = MediaMuxer(output.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+        val pixels = IntArray(width * height)
+        val yuv = ByteArray(width * height * 3 / 2)
+        val frameCount = ceil(duration * fps).toInt().coerceAtLeast(1)
+        val info = MediaCodec.BufferInfo()
+        var muxerStarted = false
+        var videoTrack = -1
+        try {
+            codec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+            codec.start()
+            fun drain(endOfStream: Boolean) {
+                var idle = 0
+                while (true) {
+                    val index = codec.dequeueOutputBuffer(info, if (endOfStream) 10_000L else 0L)
+                    when {
+                        index == MediaCodec.INFO_TRY_AGAIN_LATER -> {
+                            if (!endOfStream || idle++ > 100) return
+                        }
+                        index == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
+                            check(!muxerStarted) { "H.264 encoder changed output format more than once." }
+                            videoTrack = muxer.addTrack(codec.outputFormat)
+                            muxer.start()
+                            muxerStarted = true
+                        }
+                        index >= 0 -> {
+                            val buffer = codec.getOutputBuffer(index)
+                            if (buffer != null && info.size > 0 && muxerStarted) {
+                                buffer.position(info.offset)
+                                buffer.limit(info.offset + info.size)
+                                muxer.writeSampleData(videoTrack, buffer, info)
+                            }
+                            val eos = (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0
+                            codec.releaseOutputBuffer(index, false)
+                            if (eos) return
+                        }
+                        else -> return
+                    }
+                }
+            }
+            for (frameIndex in 0 until frameCount) {
+                currentCoroutineContext().ensureActive()
+                val time = frameIndex.toFloat() / fps
+                val encoded = EffectCraftAiBridge.renderFrame(compId, time, width).getOrThrow()
+                check(encoded.size >= 8) { "EffectCraft returned an incomplete composition frame." }
+                val header = ByteBuffer.wrap(encoded).order(ByteOrder.LITTLE_ENDIAN)
+                val frameWidth = header.int
+                val frameHeight = header.int
+                check(frameWidth == width && frameHeight == height &&
+                    encoded.size.toLong() == 8L + width.toLong() * height.toLong() * 4L
+                ) { "EffectCraft returned an unexpected frame size: ${frameWidth}x${frameHeight}." }
+                var offset = 8
+                for (pixel in pixels.indices) {
+                    val red = encoded[offset++].toInt() and 0xFF
+                    val green = encoded[offset++].toInt() and 0xFF
+                    val blue = encoded[offset++].toInt() and 0xFF
+                    val alpha = encoded[offset++].toInt() and 0xFF
+                    pixels[pixel] = (alpha shl 24) or (red shl 16) or (green shl 8) or blue
+                }
+                rgbToYuv420(pixels, width, height, yuv, semiPlanar)
+                var inputIndex = codec.dequeueInputBuffer(10_000L)
+                while (inputIndex < 0) {
+                    drain(false)
+                    currentCoroutineContext().ensureActive()
+                    inputIndex = codec.dequeueInputBuffer(10_000L)
+                }
+                val input = codec.getInputBuffer(inputIndex)
+                    ?: throw IllegalStateException("H.264 encoder returned an empty input buffer.")
+                input.clear()
+                check(input.remaining() >= yuv.size) { "H.264 encoder input buffer is too small." }
+                input.put(yuv)
+                codec.queueInputBuffer(inputIndex, 0, yuv.size, frameIndex * 1_000_000L / fps, 0)
+                drain(false)
+                if (frameIndex % max(1, fps / 2) == 0 || frameIndex == frameCount - 1) {
+                    onProgress((frameIndex + 1f) / frameCount * 0.9f,
+                        "Rendering EffectCraft composition… ${frameIndex + 1}/$frameCount frames")
+                }
+            }
+            var eosInput = codec.dequeueInputBuffer(10_000L)
+            while (eosInput < 0) {
+                drain(false)
+                eosInput = codec.dequeueInputBuffer(10_000L)
+            }
+            codec.queueInputBuffer(eosInput, 0, 0, frameCount * 1_000_000L / fps,
+                MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+            drain(true)
+            check(muxerStarted && videoTrack >= 0) { "H.264 encoder produced no video track." }
+        } finally {
+            runCatching { codec.stop() }
+            runCatching { codec.release() }
+            if (muxerStarted) runCatching { muxer.stop() }
+            runCatching { muxer.release() }
+        }
+    }
 
     suspend fun export(
         context: Context,
