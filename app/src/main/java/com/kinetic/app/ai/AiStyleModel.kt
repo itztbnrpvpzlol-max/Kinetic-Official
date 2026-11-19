@@ -162,7 +162,7 @@ internal class AiStyleModel private constructor(
                 val corpus = if (trainingData.isNotEmpty()) trainingData else storedCentroids
                 val migrated = train(
                     corpus,
-                    max(json.optInt("samples"), corpus.size),
+                    maxOf(json.optInt("samples"), corpus.size),
                     json.optLong("lastTrainedAt", 0L)
                 )
                 if (json.optInt("schemaVersion") != 3 && migrated.trainingData.isNotEmpty()) {
