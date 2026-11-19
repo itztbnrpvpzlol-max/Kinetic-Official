@@ -124,6 +124,7 @@ object EffectCraftAiComposer {
         val remainingShots = uniqueShots.toMutableList()
         var previousSource = -1
         var previousStart = -1f
+        var previousTransition = "hardCut"
         var cursor = 0f
         var shotIndex = 0
         val videoLayers = ArrayList<Long>()
@@ -154,7 +155,7 @@ object EffectCraftAiComposer {
                 val beat = audioBeats.firstOrNull { it > cursor + 0.35f && it <= cursor + clipDuration + 0.45f }
                 if (beat != null) clipDuration = (beat - cursor).coerceAtLeast(0.2f)
             }
-            val transition = transitionFor(shotIndex, chosen.energy, style)
+            val transition = transitionFor(shotIndex, chosen.energy, style, previousTransition)
             val overlap = if (shotIndex > 0) transition.second else 0f
             val start = cursor
             val out = min(duration, cursor + clipDuration)
@@ -183,7 +184,10 @@ object EffectCraftAiComposer {
             animateShot(layerId, shotIndex, clipDuration, chosen.sourceStart)
             if ("Impact shakes" in priorities) addImpactShake(layerId, clipDuration, chosen.energy, chosen.sourceStart)
             if ("Time remapping" in priorities) addSpeedRamp(layerId, chosen.sourceStart, clipDuration)
-            if (shotIndex > 0 && overlap > 0f) applyNativeTransition(layerId, transition.first, chosen.sourceStart)
+            if (shotIndex > 0 && overlap > 0f) {
+                applyNativeTransition(layerId, transition.first, chosen.sourceStart, transition.second)
+            }
+            previousTransition = transition.first
             previousSource = chosen.sourceIndex
             previousStart = chosen.sourceStart
             cursor += clipDuration
@@ -504,33 +508,88 @@ object EffectCraftAiComposer {
         }
     }
 
-    private fun transitionFor(index: Int, energy: Float, style: String): Pair<String, Float> {
-        // IDs and durations come from EffectCraft's pinned built-in transitions.json.
-        // Hard cuts are intentional for the first shot and selected high-energy accents.
-        if (index == 0 || (style.equals("Velocity", true) && energy > 0.32f && index % 4 == 0)) {
-            return "hardCut" to 0.0f
+    private fun transitionFor(index: Int, energy: Float, style: String, previous: String): Pair<String, Float> {
+        if (index == 0 || (style.equals("Velocity", true) && energy > 0.72f && index % 5 == 0)) {
+            return "hardCut" to 0f
         }
-        val options = listOf("fade" to 0.32f, "push" to 0.42f, "zoom" to 0.36f, "wipe" to 0.40f, "hardCut" to 0.0f)
-        val offset = ((index - 1) + (energy * 10f).toInt().coerceIn(0, 6)) % options.size
-        return options[offset]
+        val options = when {
+            style.equals("Cinematic", true) -> listOf(
+                "fade" to 0.48f, "radialWipe" to 0.62f, "wipeLeft" to 0.46f,
+                "push" to 0.42f, "zoom" to 0.38f, "wipeRight" to 0.46f
+            )
+            style.equals("Velocity", true) || energy > 0.58f -> listOf(
+                "zoom" to 0.28f, "pixelDissolve" to 0.34f, "wipeRight" to 0.36f,
+                "cardFlip" to 0.48f, "push" to 0.32f, "radialWipe" to 0.38f
+            )
+            else -> listOf(
+                "wipeLeft" to 0.42f, "venetian" to 0.44f, "fade" to 0.36f,
+                "radialWipe" to 0.48f, "push" to 0.40f, "pixelDissolve" to 0.42f
+            )
+        }
+        val indexOffset = ((index - 1) + (energy * 7f).toInt().coerceIn(0, 5)) % options.size
+        var selected = options[indexOffset]
+        if (selected.first == previous) selected = options[(indexOffset + 1) % options.size]
+        return selected
     }
 
-    private fun applyNativeTransition(layer: Long, preset: String, localStart: Float) {
+    private fun applyNativeTransition(layer: Long, preset: String, localStart: Float, duration: Float) {
         when (preset) {
-            "fade" -> { key(layer, "transform/opacity", localStart.toDouble(), 0.0); key(layer, "transform/opacity", (localStart + 0.32f).toDouble(), 100.0) }
-            "push" -> { key(layer, "transform/position", localStart.toDouble(), JSONArray().put(1320).put(360).put(0)); key(layer, "transform/position", (localStart + 0.42f).toDouble(), JSONArray().put(640).put(360).put(0)) }
-            "zoom" -> { key(layer, "transform/scale", localStart.toDouble(), JSONArray().put(128).put(128).put(100)); key(layer, "transform/scale", (localStart + 0.36f).toDouble(), JSONArray().put(100).put(100).put(100)) }
-            "wipe" -> { key(layer, "transform/position", localStart.toDouble(), JSONArray().put(570).put(360).put(0)); key(layer, "transform/position", (localStart + 0.40f).toDouble(), JSONArray().put(640).put(360).put(0)); key(layer, "transform/opacity", localStart.toDouble(), 15.0); key(layer, "transform/opacity", (localStart + 0.40f).toDouble(), 100.0) }
+            "fade" -> {
+                key(layer, "transform/opacity", localStart.toDouble(), 0.0)
+                key(layer, "transform/opacity", (localStart + duration).toDouble(), 100.0)
+            }
+            "push" -> {
+                key(layer, "transform/position", localStart.toDouble(), JSONArray().put(1320).put(360).put(0))
+                key(layer, "transform/position", (localStart + duration).toDouble(), JSONArray().put(640).put(360).put(0))
+            }
+            "zoom" -> {
+                key(layer, "transform/scale", localStart.toDouble(), JSONArray().put(132).put(132).put(100))
+                key(layer, "transform/scale", (localStart + duration).toDouble(), JSONArray().put(100).put(100).put(100))
+            }
+            "wipeLeft" -> applyNativeTransitionEffect(layer, "ec.transition.linearwipe", JSONObject()
+                .put("angle", 270).put("feather", 40), localStart, duration)
+            "wipeRight" -> applyNativeTransitionEffect(layer, "ec.transition.linearwipe", JSONObject()
+                .put("angle", 90).put("feather", 40), localStart, duration)
+            "radialWipe" -> applyNativeTransitionEffect(layer, "ec.transition.radialwipe", JSONObject()
+                .put("wipe", 1).put("feather", 6), localStart, duration)
+            "venetian" -> applyNativeTransitionEffect(layer, "ec.transition.venetian", JSONObject()
+                .put("direction", 0).put("width", 60).put("feather", 4), localStart, duration)
+            "pixelDissolve" -> applyNativeTransitionEffect(layer, "ec.transition.blockdissolve", JSONObject()
+                .put("blockWidth", 6).put("blockHeight", 6).put("softEdges", false), localStart, duration)
+            "cardFlip" -> applyNativeTransitionEffect(layer, "ec.transition.cardwipe", JSONObject()
+                .put("rows", 4).put("columns", 8).put("flipAxis", 1)
+                .put("flipOrder", 1).put("transitionWidth", 70), localStart, duration)
             else -> Unit
         }
     }
 
+    private fun applyNativeTransitionEffect(
+        layer: Long,
+        effectId: String,
+        values: JSONObject,
+        localStart: Float,
+        duration: Float
+    ) {
+        command("effect.apply", JSONObject().put("effect", effectId).put("layers", JSONArray().put(layer)))
+        val keys = values.keys()
+        while (keys.hasNext()) {
+            val parameter = keys.next()
+            command(
+                "prop.set",
+                JSONObject().put("layer", layer).put("path", "effects/#1/$parameter")
+                    .put("value", values.get(parameter))
+            )
+        }
+        key(layer, "effects/#1/completion", localStart.toDouble(), 100.0)
+        key(layer, "effects/#1/completion", (localStart + duration).toDouble(), 0.0)
+    }
+
     private fun animateShot(layer: Long, index: Int, duration: Float, localStart: Float) {
         when (index % 4) {
-            0 -> Unit // deliberate hard cut
+            0 -> Unit // hard cut: let the source action carry the opening
             1 -> {
-                key(layer, "transform/opacity", localStart.toDouble(), 0.0)
-                key(layer, "transform/opacity", (localStart + 0.14f).toDouble(), 100.0)
+                key(layer, "transform/scale", localStart.toDouble(), JSONArray().put(108).put(108).put(100))
+                key(layer, "transform/scale", (localStart + 0.38f).toDouble(), JSONArray().put(100).put(100).put(100))
             }
             2 -> {
                 key(layer, "transform/scale", localStart.toDouble(), JSONArray().put(100).put(100).put(100))
@@ -586,25 +645,22 @@ object EffectCraftAiComposer {
             listOf("typography", "motion graphics", "mograph", "title", "text").any { prompt.contains(it, true) }
         if (!wantsMograph) return
 
-        val title = prompt.trim()
-            .replace(Regex("\\s+"), " ")
-            .take(34)
-            .ifBlank { "KINETIC / AMV" }
-            .uppercase(Locale.ROOT)
+        val title = prompt.lineSequence()
+            .firstOrNull { it.isNotBlank() && !it.trimStart().startsWith("Style notes:", true) &&
+                !it.trimStart().startsWith("Priorities:", true) }
+            .orEmpty().trim().replace(Regex("\\s+"), " ")
+            .take(34).ifBlank { "KINETIC / AMV" }.uppercase(Locale.ROOT)
+
         val nullId = command(
             "layer.newNull",
-            JSONObject().put("comp", comp).put("name", "AI • Title Motion Controller")
+            JSONObject().put("comp", comp).put("name", "AI • Mograph Motion Controller")
         ).optLong("layer", -1L)
         check(nullId > 0L) { "EffectCraft couldn't create the Mograph null controller." }
 
         val accentId = command(
             "layer.newSolid",
-            JSONObject()
-                .put("comp", comp)
-                .put("name", "AI • Animated Accent Solid")
-                .put("color", "#9C72FF")
-                .put("width", 520)
-                .put("height", 10)
+            JSONObject().put("comp", comp).put("name", "AI • Animated Accent Solid")
+                .put("color", "#9C72FF").put("width", 520).put("height", 10)
         ).optLong("layer", -1L)
         if (accentId > 0L) {
             key(accentId, "transform/position", 0.0, JSONArray().put(width / 2).put(height * 0.73).put(0))
@@ -616,32 +672,58 @@ object EffectCraftAiComposer {
             key(accentId, "transform/opacity", duration.toDouble(), 0.0)
         }
 
+        val orbId = command(
+            "layer.newShape",
+            JSONObject().put("comp", comp).put("name", "AI • Orbit Graphic")
+                .put("kind", "ellipse").put("size", JSONArray().put(88).put(88))
+                .put("fill", "#66D9EF").put("position", JSONArray().put(width * 0.84).put(height * 0.27))
+        ).optLong("layer", -1L)
+        if (orbId > 0L) {
+            key(orbId, "transform/position", 0.0, JSONArray().put(width * 0.88).put(height * 0.27).put(0))
+            key(orbId, "transform/position", 0.8, JSONArray().put(width * 0.80).put(height * 0.27).put(0))
+            key(orbId, "transform/rotation", 0.0, -18.0)
+            key(orbId, "transform/rotation", 1.2, 18.0)
+            key(orbId, "transform/opacity", 0.0, 0.0)
+            key(orbId, "transform/opacity", 0.5, 82.0)
+            key(orbId, "transform/opacity", maxOf(0.0, duration - 0.5).toDouble(), 82.0)
+            key(orbId, "transform/opacity", duration.toDouble(), 0.0)
+        }
+
+        val railId = command(
+            "layer.newShape",
+            JSONObject().put("comp", comp).put("name", "AI • Motion Rail")
+                .put("kind", "rounded").put("size", JSONArray().put(180).put(12))
+                .put("fill", "#F2B86B").put("position", JSONArray().put(width * 0.16).put(height * 0.32))
+        ).optLong("layer", -1L)
+        if (railId > 0L) {
+            key(railId, "transform/position", 0.0, JSONArray().put(width * 0.12).put(height * 0.32).put(0))
+            key(railId, "transform/position", 0.65, JSONArray().put(width * 0.20).put(height * 0.32).put(0))
+            key(railId, "transform/opacity", 0.0, 0.0)
+            key(railId, "transform/opacity", 0.4, 78.0)
+            key(railId, "transform/opacity", maxOf(0.0, duration - 0.4).toDouble(), 78.0)
+            key(railId, "transform/opacity", duration.toDouble(), 0.0)
+        }
+
         val textId = command(
             "layer.newText",
-            JSONObject()
-                .put("comp", comp)
-                .put("name", "AI • Kinetic Typography")
-                .put("text", title)
-                .put("position", JSONArray().put(width / 2).put(height * 0.66))
-                .put("size", 66)
-                .put("fill", "#FFFFFF")
-                .put("stroke", "#171321")
-                .put("applyFill", true)
-                .put("applyStroke", true)
-                .put("strokeWidth", 2)
-                .put("fauxBold", true)
-                .put("justify", "center")
+            JSONObject().put("comp", comp).put("name", "AI • Kinetic Typography")
+                .put("text", title).put("position", JSONArray().put(width / 2).put(height * 0.66))
+                .put("size", 66).put("fill", "#FFFFFF").put("stroke", "#171321")
+                .put("applyFill", true).put("applyStroke", true).put("strokeWidth", 2)
+                .put("fauxBold", true).put("justify", "center")
         ).optLong("layer", -1L)
         check(textId > 0L) { "EffectCraft couldn't create the native typography layer." }
+
+        val children = JSONArray().put(textId)
+        listOf(accentId, orbId, railId).filter { it > 0L }.forEach(children::put)
         command(
             "layer.setParent",
-            JSONObject()
-                .put("layers", JSONArray().put(textId))
-                .put("parent", nullId)
-                .put("compensate", true)
+            JSONObject().put("layers", children).put("parent", nullId).put("compensate", true)
         )
         key(nullId, "transform/position", 0.0, JSONArray().put(width / 2 - 70).put(height * 0.66).put(0))
         key(nullId, "transform/position", 0.38, JSONArray().put(width / 2).put(height * 0.66).put(0))
+        key(nullId, "transform/rotation", 0.0, -1.5)
+        key(nullId, "transform/rotation", 0.45, 0.0)
         command("layer.applyTextPreset", JSONObject().put("layer", textId).put("preset", when (style.lowercase(Locale.ROOT)) {
             "velocity" -> "bounceInWords"
             "cinematic" -> "fadeUpCharacters"
