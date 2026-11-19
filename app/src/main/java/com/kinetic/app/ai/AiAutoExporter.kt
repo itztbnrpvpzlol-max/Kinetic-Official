@@ -57,7 +57,7 @@ object AiAutoExporter {
      * Encodes frames rendered from the complete native EffectCraft composition.
      * No Kinetic Layer, property, Canvas compositor or timeline state is consulted.
      */
-    suspend fun exportEffectCraft(
+    internal suspend fun exportEffectCraft(
         context: Context,
         composition: EffectCraftAiComposer.Composition,
         fps: Int,
