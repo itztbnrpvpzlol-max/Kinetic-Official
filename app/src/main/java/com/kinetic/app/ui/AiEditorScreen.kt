@@ -174,7 +174,7 @@ fun AiEditorScreen(settings: AppSettings, onBack: () -> Unit, onOpenEditor: (Edi
                     minLines = 2,
                     shape = RoundedCornerShape(14.dp)
                 )
-                Text("Reference videos train a lightweight on-device style model for shot pacing and visual energy. It is not a neural network or anime-character recognition model.", color = KColors.Muted, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp))
+                Text("Reference uploads are collected for a future style-analysis pass; this native EffectCraft build currently uses your footage, prompt, style and editing priorities.", color = KColors.Muted, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp))
             }
             item {
                 AiSection("04", "Creative direction", "Tell the editor what you want")
@@ -256,65 +256,50 @@ fun AiEditorScreen(settings: AppSettings, onBack: () -> Unit, onOpenEditor: (Edi
                         else -> 37.5f
                     }
                     scope.launch {
-                        val generatedResult = runCatching {
-                            val modelStatus = withContext(Dispatchers.IO) {
-                                AiNeuralModels.prepare(context)
+                        val exportResult = runCatching {
+                            generationStatus = "Authoring a native EffectCraft project…"
+                            val creativeBrief = buildString {
+                                append(prompt.trim())
+                                if (styleNotes.isNotBlank()) append("\nStyle notes: ").append(styleNotes.trim())
+                                if (selectedFocus.isNotEmpty()) append("\nPriorities: ").append(selectedFocus.joinToString(", "))
                             }
-                            generationStatus = modelStatus.message
-                            withContext(Dispatchers.IO) {
-                                AiEditorEngine.generate(
-                                    context,
-                                    AiEditorEngine.Request(
-                                        footage = footage.map { it.uri },
-                                        audio = soundtrack.map { it.uri },
-                                        references = styleReferences.map { it.uri },
-                                        prompt = prompt,
-                                        style = selectedStyle,
-                                        durationSeconds = seconds,
-                                        priorities = selectedFocus.toSet(),
-                                        styleNotes = styleNotes
-                                    ),
-                                    settings.fps,
-                                    settings.resolution
-                                )
-                            }
-                        }
-                        generatedResult.onSuccess { generated ->
-                            val project = EditorState(settings, projectName = generated.name)
-                            project.restoreProject(generated.duration, settings.resolution, generated.layers, 0f)
-                            generationStatus = "Applying EffectCraft effects and rendering your finished video…"
-                            val exportResult = runCatching {
-                                withContext(Dispatchers.IO) {
-                                    AiAutoExporter.export(
-                                        context,
-                                        generated.layers,
-                                        generated.duration,
-                                        settings.fps,
-                                        settings.resolution
-                                    ) { progress, message ->
-                                        generationStatus = message
-                                    }
+                            val composition = withContext(Dispatchers.IO) {
+                                EffectCraftAiComposer.build(
+                                    context = context,
+                                    footage = footage.map { it.uri },
+                                    audio = soundtrack.map { it.uri },
+                                    prompt = creativeBrief,
+                                    style = selectedStyle,
+                                    durationSeconds = seconds,
+                                    fps = settings.fps
+                                ) { message ->
+                                    generationStatus = message
                                 }
                             }
-                            generating = false
-                            exportResult.onSuccess { exported ->
-                                val audioMessage = if (exported.audioIncluded) "Soundtrack included." else if (soundtrack.isEmpty()) {
-                                    "No soundtrack was selected."
-                                } else "Video saved; this soundtrack format could not be muxed into MP4."
-                                android.widget.Toast.makeText(
-                                    context,
-                                    "AI edit exported to Movies/Kinetic. $audioMessage",
-                                    android.widget.Toast.LENGTH_LONG
-                                ).show()
-                                onOpenEditor(project)
-                            }.onFailure { error ->
-                                generationStatus = "The edit was created, but export failed: ${error.message ?: "unknown error"}"
-                                android.widget.Toast.makeText(context, generationStatus, android.widget.Toast.LENGTH_LONG).show()
-                                onOpenEditor(project)
+                            withContext(Dispatchers.IO) {
+                                AiAutoExporter.exportEffectCraft(
+                                    context = context,
+                                    composition = composition,
+                                    fps = settings.fps
+                                ) { progress, message ->
+                                    generationStatus = message
+                                }
                             }
+                        }
+                        generating = false
+                        exportResult.onSuccess { exported ->
+                            val audioMessage = if (exported.audioIncluded) "Soundtrack included."
+                                else if (soundtrack.isEmpty()) "No soundtrack was selected."
+                                else "The video was saved, but this soundtrack format could not be muxed into MP4."
+                            generationStatus = "Finished: saved to Movies/Kinetic."
+                            android.widget.Toast.makeText(
+                                context,
+                                "Native EffectCraft edit exported. $audioMessage",
+                                android.widget.Toast.LENGTH_LONG
+                            ).show()
                         }.onFailure { error ->
-                            generating = false
-                            generationStatus = error.message ?: "Couldn't generate this edit. Check the selected media and try again."
+                            generationStatus = "EffectCraft generation/export failed: ${error.message ?: "unknown error"}"
+                            android.widget.Toast.makeText(context, generationStatus, android.widget.Toast.LENGTH_LONG).show()
                         }
                     }
                 },
