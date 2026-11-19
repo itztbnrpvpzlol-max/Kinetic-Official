@@ -292,10 +292,11 @@ fun AiEditorScreen(settings: AppSettings, onBack: () -> Unit, onOpenEditor: (Edi
                             val audioMessage = if (exported.audioIncluded) "Soundtrack included."
                                 else if (soundtrack.isEmpty()) "No soundtrack was selected."
                                 else "The video was saved, but this soundtrack format could not be muxed into MP4."
-                            generationStatus = "Finished: saved to Movies/Kinetic."
+                            generationStatus = "Finished: video and native EffectCraft project saved."
+                            val projectName = exported.projectFilePath?.substringAfterLast('/') ?: "native project"
                             android.widget.Toast.makeText(
                                 context,
-                                "Native EffectCraft edit exported. $audioMessage",
+                                "Native EffectCraft edit exported. Project: $projectName. $audioMessage",
                                 android.widget.Toast.LENGTH_LONG
                             ).show()
                         }.onFailure { error ->
