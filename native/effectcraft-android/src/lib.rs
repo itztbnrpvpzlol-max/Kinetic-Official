@@ -611,7 +611,7 @@ pub extern "system" fn Java_com_kinetic_app_engine_EffectCraftAiNative_nativeExe
             Ok(value) => value.to_string_lossy().into_owned(),
             Err(_) => return error_response("Could not read AI command parameters from Kotlin"),
         };
-        let params: Value = match serde_json::from_str(&params_text) {
+        let params: Value = match serde_json::from_str::<Value>(&params_text) {
             Ok(value) if value.is_object() => value,
             Ok(_) => return error_response("AI command parameters must be a JSON object"),
             Err(error) => return error_response(format!("Invalid AI command JSON: {error}")),
