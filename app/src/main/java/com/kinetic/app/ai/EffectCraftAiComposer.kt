@@ -252,6 +252,88 @@ internal object EffectCraftAiComposer {
         return result.ifEmpty { listOf(SourceShot(0, 0f, sourceDuration.coerceAtLeast(0.35f), 0f, 0.5f)) }
     }
 
+
+    private fun analyzeStyleReference(context: Context, uri: Uri): List<FloatArray> {
+        val retriever = MediaMetadataRetriever()
+        val duration = runCatching {
+            retriever.setDataSource(context, uri)
+            (retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L) / 1000f
+        }.getOrDefault(0f)
+        if (duration > 0f) {
+            return try {
+                val brightness = ArrayList<Float>()
+                val saturation = ArrayList<Float>()
+                val changes = ArrayList<Float>()
+                var previous: FloatArray? = null
+                for (index in 0 until 8) {
+                    val time = duration * index / 8
+                    val frame = runCatching {
+                        retriever.getFrameAtTime((time * 1_000_000L).toLong(), MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                    }.getOrNull() ?: continue
+                    val tiny = Bitmap.createScaledBitmap(frame, 16, 9, true)
+                    val pixels = IntArray(16 * 9)
+                    tiny.getPixels(pixels, 0, 16, 0, 0, 16, 9)
+                    if (tiny !== frame) tiny.recycle()
+                    frame.recycle()
+                    val luma = FloatArray(pixels.size)
+                    var sat = 0.0
+                    for (p in pixels.indices) {
+                        val c = pixels[p]
+                        val red = (c shr 16) and 255
+                        val green = (c shr 8) and 255
+                        val blue = c and 255
+                        val hi = max(red, max(green, blue))
+                        val lo = min(red, min(green, blue))
+                        luma[p] = (red * 0.2126f + green * 0.7152f + blue * 0.0722f) / 255f
+                        sat += if (hi == 0) 0.0 else (hi - lo).toDouble() / hi
+                    }
+                    brightness.add(luma.average().toFloat())
+                    saturation.add((sat / pixels.size).toFloat())
+                    previous?.let { prior ->
+                        changes.add(luma.indices.map { abs(luma[it] - prior[it]) }.average().toFloat())
+                    }
+                    previous = luma
+                }
+                val avgBrightness = brightness.average().takeIf { it.isFinite() }?.toFloat() ?: 0.5f
+                val avgSaturation = saturation.average().takeIf { it.isFinite() }?.toFloat() ?: 0.5f
+                val avgMotion = changes.average().takeIf { it.isFinite() }?.toFloat() ?: 0f
+                val cutStrength = changes.count { it > 0.22f }.toFloat() / changes.size.coerceAtLeast(1)
+                val avgShot = (duration / (cutStrength * 8f + 1f)).coerceIn(0.35f, 12f)
+                listOf(floatArrayOf(kotlin.math.ln(avgShot), avgBrightness, cutStrength, avgMotion, avgSaturation))
+            } finally {
+                runCatching { retriever.release() }
+            }
+        }
+        runCatching { retriever.release() }
+        val bitmap = context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) } ?: return emptyList()
+        return try {
+            val tiny = Bitmap.createScaledBitmap(bitmap, 16, 9, true)
+            val pixels = IntArray(16 * 9)
+            tiny.getPixels(pixels, 0, 16, 0, 0, 16, 9)
+            if (tiny !== bitmap) tiny.recycle()
+            var brightness = 0.0
+            var saturation = 0.0
+            pixels.forEach { color ->
+                val red = (color shr 16) and 255
+                val green = (color shr 8) and 255
+                val blue = color and 255
+                brightness += (red * 0.2126 + green * 0.7152 + blue * 0.0722) / 255.0
+                val hi = max(red, max(green, blue))
+                val lo = min(red, min(green, blue))
+                saturation += if (hi == 0) 0.0 else (hi - lo).toDouble() / hi
+            }
+            listOf(floatArrayOf(
+                kotlin.math.ln(2f),
+                (brightness / pixels.size).toFloat(),
+                0.1f,
+                0f,
+                (saturation / pixels.size).toFloat()
+            ))
+        } finally {
+            bitmap.recycle()
+        }
+    }
+
     private fun transitionFor(index: Int, energy: Float, style: String): Pair<String, Float> {
         // IDs and durations come from EffectCraft's pinned built-in transitions.json.
         // Hard cuts are intentional for the first shot and selected high-energy accents.
