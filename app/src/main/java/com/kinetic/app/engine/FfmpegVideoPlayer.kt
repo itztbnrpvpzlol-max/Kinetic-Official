@@ -52,10 +52,31 @@ class FfmpegVideoPlayer(
     fun attachSurface(next: Surface) {
         if (released) return
         postToDecoder {
-            if (attachedSurface === next && (nativeHandle != 0L || fallback != null)) return@postToDecoder
+            val surfaceUnchanged = attachedSurface === next
+            val decoderAlive = nativeHandle != 0L || fallback != null
+            if (surfaceUnchanged && decoderAlive) {
+                // Surface and decoder are both still valid — only sync state,
+                // never tear down and recreate the native decoder. This is the
+                // normal play/pause path and must not trigger a cold start.
+                val handle = nativeHandle
+                if (handle != 0L) {
+                    NativeFfmpegDecoder.nativeSetSpeed(handle, speed)
+                    if (lastPlaying) NativeFfmpegDecoder.nativePlay(handle)
+                    else NativeFfmpegDecoder.nativePause(handle)
+                    pendingClockSync.getAndSet(null)?.let(::applyClockSync)
+                }
+                val fb = fallback
+                if (fb != null) {
+                    if (lastPlaying) fb.play() else fb.pause()
+                }
+                return@postToDecoder
+            }
+            // Surface changed or decoder died — full (re)init required.
             stopNativeDecoder()
             attachedSurface = next
-            receivedSurfaceFrame = false
+            // Preserve the frame-received flag across surface re-attach so the
+            // fallback bitmap placeholder is not shown again after the first play.
+            if (!surfaceUnchanged) receivedSurfaceFrame = false
 
             val existingFallback = fallback
             if (existingFallback != null) {
@@ -77,29 +98,31 @@ class FfmpegVideoPlayer(
                 nativeHandle = handle
                 state = 0
                 NativeFfmpegDecoder.nativeSetSpeed(handle, speed)
-                if (pendingSeekMs > 0L) NativeFfmpegDecoder.nativeSeek(handle, pendingSeekMs * 1_000L)
+                // Always seek to the pending position on a fresh native session so
+                // the decoder pre-warms from the right keyframe before play() arrives.
+                NativeFfmpegDecoder.nativeSeek(handle, pendingSeekMs * 1_000L)
                 if (lastPlaying) NativeFfmpegDecoder.nativePlay(handle)
                 else NativeFfmpegDecoder.nativePause(handle)
                 pendingClockSync.getAndSet(null)?.let(::applyClockSync)
-            scheduleHealthCheck(next)
-            decoderExecutor.schedule({
-                if (!released && attachedSurface === next && !receivedSurfaceFrame && fallback == null) {
-                    val handleAtTimeout = nativeHandle
-                    val reason = if (handleAtTimeout != 0L) {
-                        runCatching { NativeFfmpegDecoder.nativeError(handleAtTimeout) }
-                            .getOrDefault("FFmpeg did not present a frame")
-                    } else {
-                        "FFmpeg did not present a frame"
+                scheduleHealthCheck(next)
+                decoderExecutor.schedule({
+                    if (!released && attachedSurface === next && !receivedSurfaceFrame && fallback == null) {
+                        val handleAtTimeout = nativeHandle
+                        val reason = if (handleAtTimeout != 0L) {
+                            runCatching { NativeFfmpegDecoder.nativeError(handleAtTimeout) }
+                                .getOrDefault("FFmpeg did not present a frame")
+                        } else {
+                            "FFmpeg did not present a frame"
+                        }
+                        if (!receivedSurfaceFrame && fallback == null && attachedSurface === next) {
+                            Log.w(TAG, "$reason; switching to Android MediaCodec compatibility fallback")
+                            activateFallback(next)
+                        }
                     }
-                    if (!receivedSurfaceFrame && fallback == null && attachedSurface === next) {
-                        Log.w(TAG, "$reason; switching to Android MediaCodec compatibility fallback")
-                        activateFallback(next)
-                    }
-                }
-            }, FIRST_FRAME_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-                Log.i(TAG, "Direct FFmpeg decoder attached to SurfaceTexture: $sourceUri")
+                }, FIRST_FRAME_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                Log.i(TAG, "FFmpeg decoder (re)attached to SurfaceTexture: $sourceUri")
             } catch (error: Throwable) {
-                Log.e(TAG, "Direct FFmpeg decoder could not start; using Android compatibility fallback", error)
+                Log.e(TAG, "FFmpeg decoder could not start; using Android compatibility fallback", error)
                 activateFallback(next)
             }
         }
@@ -167,8 +190,19 @@ class FfmpegVideoPlayer(
         lastPlaying = true
         postToDecoder {
             val backup = fallback
-            if (backup != null) backup.play()
-            else if (nativeHandle != 0L) NativeFfmpegDecoder.nativePlay(nativeHandle)
+            if (backup != null) {
+                backup.play()
+                return@postToDecoder
+            }
+            val handle = nativeHandle
+            if (handle != 0L) {
+                NativeFfmpegDecoder.nativePlay(handle)
+            } else {
+                // Decoder not yet alive but surface is ready — warm it now so
+                // the first play does not wait for an external attachSurface call.
+                val surface = attachedSurface
+                if (surface != null && !released) attachSurface(surface)
+            }
         }
     }
 

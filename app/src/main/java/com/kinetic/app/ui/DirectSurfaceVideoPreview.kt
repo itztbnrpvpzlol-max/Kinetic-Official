@@ -222,13 +222,17 @@ internal fun DirectSurfaceVideoPreview(
     LaunchedEffect(player, editor.time, editor.playing, layer.id) {
         player.updatePositionHint(sourcePositionMs)
         if (editor.playing) {
-            // Exact seeks are reserved for reverse jumps; the master clock
-            // drives ordinary playback without seeking on every UI frame.
-            if (editor.time + 0.05f < previousTimelineTime.floatValue) {
-                player.seekTo(sourcePositionMs)
-            }
+            // During playback the master clock drives the decoder's presentation
+            // timestamps via syncMasterClock. Issuing a seek on every UI frame
+            // forces the decoder back to the nearest keyframe each tick, which
+            // is exactly what causes the black flash at clip boundaries.
+            // Only seek on a backwards jump (scrub or loop restart).
+            val jumpedBack = editor.time + 0.08f < previousTimelineTime.floatValue
+            if (jumpedBack) player.seekTo(sourcePositionMs)
         } else {
-            delay(24L)
+            // Paused: wait one frame so rapid scrub ticks coalesce before
+            // issuing the seek — avoids spamming the decoder on fast drags.
+            delay(16L)
             player.seekTo(sourcePositionMs)
         }
         previousTimelineTime.floatValue = editor.time

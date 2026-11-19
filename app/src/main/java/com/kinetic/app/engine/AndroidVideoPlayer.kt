@@ -52,10 +52,18 @@ class AndroidVideoPlayer(
     private var localAnchorNs = 0L
 
     fun attachSurface(next: Surface) {
+        synchronized(lock) {
+            if (released) return
+            // If the surface is identical and the worker is alive and healthy,
+            // only sync play state — never tear down the running decode thread.
+            if (surface === next && worker?.isAlive == true) {
+                if (playing) lock.notifyAll()
+                return
+            }
+        }
         stopWorker()
         synchronized(lock) {
             if (released) return
-            if (surface === next && worker?.isAlive == true) return
             surface = next
             stopping = false
             pendingSeekUs = positionMs * 1_000L
