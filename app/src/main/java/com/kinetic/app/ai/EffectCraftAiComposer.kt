@@ -156,8 +156,8 @@ object EffectCraftAiComposer {
             }
             val transition = transitionFor(shotIndex, chosen.energy, style)
             val overlap = if (shotIndex > 0) transition.second else 0f
-            val start = (cursor - overlap).coerceAtLeast(0f)
-            val out = min(duration, cursor + clipDuration + if (shotIndex == 0) 0f else overlap)
+            val start = cursor
+            val out = min(duration, cursor + clipDuration)
             if (shotIndex > 0 && videoLayers.isNotEmpty()) {
                 // Keep the previous footage underneath the incoming native transition until
                 // its reveal has completed; the source can continue naturally through this tail.
@@ -189,7 +189,7 @@ object EffectCraftAiComposer {
             }
             videoLayers.add(layerId)
             animateShot(layerId, shotIndex, clipDuration)
-            if (shotIndex > 0) applyNativeTransition(layerId, start, transition.first)
+            if (shotIndex > 0 && overlap > 0f) applyNativeTransition(layerId, start, transition.first)
             previousSource = chosen.sourceIndex
             previousStart = chosen.sourceStart
             cursor += clipDuration
