@@ -96,11 +96,15 @@ internal object EffectCraftAiComposer {
             runCatching { analyzeAudioBeats(context, it, duration) }.getOrDefault(emptyList())
         }.orEmpty()
         val usable = min(items.length(), staged.size)
-        val targetShotLength = when (style.lowercase(Locale.ROOT)) {
+        val learnedShotLength = referenceSamples.map { kotlin.math.exp(it[0].toDouble()).toFloat() }
+            .average().takeIf { it.isFinite() }?.toFloat()?.coerceIn(0.45f, 8f)
+        val styleDefaultShot = when (style.lowercase(Locale.ROOT)) {
             "velocity" -> 1.55f
             "mograph" -> 2.1f
             else -> 2.8f
         }
+        val targetShotLength = learnedShotLength?.let { styleDefaultShot * 0.35f + it * 0.65f }
+            ?.coerceIn(0.45f, 8f) ?: styleDefaultShot
         onProgress("Detecting scene changes and selecting distinct source moments…")
         val uniqueShots = (0 until usable).flatMap { sourceIndex ->
             detectShots(context, footage[sourceIndex], sourceDurations[sourceIndex], targetShotLength)
@@ -617,7 +621,7 @@ internal object EffectCraftAiComposer {
         check(catalog.optBoolean("ok")) { "EffectCraft could not inspect its native effects." }
         val effects = catalog.optJSONArray("result") ?: return
         val glow = (0 until effects.length()).mapNotNull { effects.optJSONObject(it) }
-            .firstOrNull { it.optString("name").contains("glow", true) } ?: return
+            .firstOrNull { it.optString("id") == "ec.stylize.glow" } ?: return
         val adjustment = command(
             "layer.newAdjustment",
             JSONObject().put("comp", comp).put("name", "AI • Native Glow Adjustment")
