@@ -172,7 +172,7 @@ fun AiEditorScreen(settings: AppSettings, onBack: () -> Unit, onOpenEditor: (Edi
                     minLines = 2,
                     shape = RoundedCornerShape(14.dp)
                 )
-                Text("Reference uploads are collected for a future style-analysis pass; this native EffectCraft build currently uses your footage, prompt, style and editing priorities.", color = KColors.Muted, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp))
+                Text("Reference videos and images are analysed locally for shot pacing, visual energy, brightness and saturation. Their derived features train a persistent on-device style model.", color = KColors.Muted, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp))
             }
             item {
                 AiSection("04", "Creative direction", "Tell the editor what you want")
@@ -237,7 +237,7 @@ fun AiEditorScreen(settings: AppSettings, onBack: () -> Unit, onOpenEditor: (Edi
                     Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
                         Text("ON-DEVICE AI", color = Color(0xFFB99AFF), fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         Text("Private by design", color = KColors.Text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                        Text("Anime reference embeddings and RAFT optical flow run on this device when their models are installed. First use downloads model files; your footage and reference images stay local.", color = KColors.Muted, fontSize = 12.sp)
+                        Text("Reference pacing and visual descriptors are learned locally and saved between sessions. Music is decoded to detect transient peaks for beat-aware cuts. Your selected media stays on-device.", color = KColors.Muted, fontSize = 12.sp)
                     }
                 }
             }
@@ -268,12 +268,15 @@ fun AiEditorScreen(settings: AppSettings, onBack: () -> Unit, onOpenEditor: (Edi
                                     audio = soundtrack.map { it.uri },
                                     prompt = creativeBrief,
                                     style = selectedStyle,
+                                    styleReferences = styleReferences.map { it.uri },
+                                    priorities = selectedFocus.toSet(),
                                     durationSeconds = seconds,
                                     fps = settings.fps
                                 ) { message ->
                                     generationStatus = message
                                 }
                             }
+                            generationStatus = "Learned from ${composition.learnedSamples} style samples; detected ${composition.beatCount} soundtrack accents."
                             withContext(Dispatchers.IO) {
                                 AiAutoExporter.exportEffectCraft(
                                     context = context,
