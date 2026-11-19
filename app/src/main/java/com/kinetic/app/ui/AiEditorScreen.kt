@@ -49,6 +49,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kinetic.app.ai.AiAutoExporter
+import com.kinetic.app.ai.EffectCraftAiComposer
 import com.kinetic.app.data.AppSettings
 import com.kinetic.app.model.EditorState
 import kotlinx.coroutines.Dispatchers
