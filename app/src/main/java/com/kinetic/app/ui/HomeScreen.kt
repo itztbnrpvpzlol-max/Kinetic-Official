@@ -12,6 +12,11 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import com.kinetic.app.model.CompSettings
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -28,7 +33,8 @@ import java.util.Date
 
 @Composable
 fun HomeScreen(
-    onNewComposition: () -> Unit,
+    newCompDefaults: CompSettings,
+    onNewComposition: (CompSettings) -> Unit,
     onImportProject: () -> Unit,
     onImportPlugin: () -> Unit,
     onOpenSettings: () -> Unit,
@@ -36,11 +42,17 @@ fun HomeScreen(
     onOpenProject: (ProjectStore.ProjectInfo) -> Unit,
     onDeleteProject: (ProjectStore.ProjectInfo) -> Unit
 ) {
+    var showNewComp by remember { mutableStateOf(false) }
+    if (showNewComp) CompSettingsDialog(
+        "New Composition", "Create", newCompDefaults.copy(name = "Comp ${projects.size + 1}"),
+        onConfirm = { showNewComp = false; onNewComposition(it) },
+        onDismiss = { showNewComp = false }
+    )
     Column(Modifier.fillMaxSize().background(KColors.Bg).statusBarsPadding().navigationBarsPadding()) {
         Header(onOpenSettings)
         Column(Modifier.widthIn(max = 900.dp).fillMaxSize().align(Alignment.CenterHorizontally).padding(horizontal = 18.dp)) {
             Spacer(Modifier.height(16.dp))
-            NewCompositionCard(onNewComposition)
+            NewCompositionCard { showNewComp = true }
             Spacer(Modifier.height(12.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 ActionButton("Import Project", onImportProject, Modifier.weight(1f))
@@ -90,8 +102,8 @@ private fun NewCompositionCard(onClick: () -> Unit) {
     Column(Modifier.fillMaxWidth().heightIn(min = 178.dp).clip(shape).background(KColors.Surface).border(1.dp, KColors.Line, shape).clickable(onClick = onClick).padding(22.dp), verticalArrangement = Arrangement.SpaceBetween) {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             TrackBar(0.46f, 0f, KColors.Clip)
-            TrackBar(0.78f, 0.12f, Color(0xFF26264A))
-            TrackBar(0.92f, 0f, Color(0xFF1B1B2E))
+            TrackBar(0.78f, 0.12f, Color(0xFF2B4A5E))
+            TrackBar(0.92f, 0f, Color(0xFF2A2A2A))
         }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Box(Modifier.size(30.dp).clip(RoundedCornerShape(10.dp)).background(KColors.Clip), contentAlignment = Alignment.Center) {
@@ -106,7 +118,7 @@ private fun NewCompositionCard(onClick: () -> Unit) {
 private fun ProjectCard(project: ProjectStore.ProjectInfo, onClick: () -> Unit, onDelete: () -> Unit) {
     val shape = RoundedCornerShape(16.dp)
     Row(Modifier.fillMaxWidth().clip(shape).background(KColors.Surface).border(1.dp, KColors.Line, shape).clickable(onClick = onClick).padding(start = 14.dp, top = 13.dp, bottom = 13.dp, end = 5.dp), verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(46.dp).clip(RoundedCornerShape(11.dp)).background(Color(0xFF25233A)), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(46.dp).clip(RoundedCornerShape(11.dp)).background(Color(0xFF2D3A46)), contentAlignment = Alignment.Center) {
             Text("K", color = KColors.ClipText, fontSize = 20.sp, fontWeight = FontWeight.Bold)
         }
         Spacer(Modifier.width(12.dp))

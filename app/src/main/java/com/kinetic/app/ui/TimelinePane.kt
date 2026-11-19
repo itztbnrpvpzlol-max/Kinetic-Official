@@ -92,13 +92,13 @@ import kotlin.random.Random
 private val ROW_H = 40.dp
 
 fun clipColor(t: LayerType): Color = when (t) {
-    LayerType.TEXT -> Color(0xFF3A3590)
-    LayerType.IMAGE -> Color(0xFF2A2650)
-    LayerType.VIDEO -> Color(0xFF312C6B)
-    LayerType.AUDIO -> Color(0xFF241F52)
-    LayerType.SHAPE -> Color(0xFF33307A)
-    LayerType.ADJUSTMENT -> Color(0xFF2A2A3A)
-    LayerType.NULL -> Color(0xFF22222E)
+    LayerType.TEXT -> Color(0xFF9C4A4A)
+    LayerType.IMAGE -> Color(0xFF5A6FA8)
+    LayerType.VIDEO -> Color(0xFF3A8A8F)
+    LayerType.AUDIO -> Color(0xFF4E8B57)
+    LayerType.SHAPE -> Color(0xFFB07A3A)
+    LayerType.ADJUSTMENT -> Color(0xFF7D6CA8)
+    LayerType.NULL -> Color(0xFF8C3E3E)
 }
 
 fun typeIcon(t: LayerType): IconKind = when (t) {
@@ -311,7 +311,7 @@ private fun Ruler(editor: EditorState, pps: Float, contentW: Dp, leadingPad: Dp)
         textPaint.textSize = 11.sp.toPx()
         val step = if (pps >= 40f) 1 else if (pps >= 20f) 2 else 5
         val secs = (size.width / dens / pps).toInt() + 1
-        val tick = Color(0xFF34344A)
+        val tick = Color(0xFF3A3A3A)
         val originX = leadingPad.value * dens
         val endX = originX + editor.duration * pps * dens
         if (endX < size.width) drawRect(Color(0x55000000), Offset(endX, 0f), Size(size.width - endX, size.height))
@@ -867,7 +867,7 @@ private fun Waveform(seed: String, uri: String?, playing: Boolean) {
             val x = (index + 0.5f) * step
             val hh = size.height * peaks[index]
             drawLine(
-                Color(0xFF6D4DFF),
+                Color(0xFF3F95F7),
                 Offset(x, (size.height - hh) / 2f),
                 Offset(x, (size.height + hh) / 2f),
                 strokeWidth = stroke

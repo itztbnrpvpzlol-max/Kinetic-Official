@@ -99,6 +99,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
     val density = LocalDensity.current.density
     val scope = rememberCoroutineScope()
     var showImport by remember { mutableStateOf(false) }
+    var showCompSettings by remember { mutableStateOf(false) }
     var showLayers by remember { mutableStateOf(false) }
     var showLeave by remember { mutableStateOf(false) }
     var panelTab by remember { mutableIntStateOf(0) }
@@ -185,7 +186,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
 
     // Preview frames are prepared once during media import and read from disk.
 
-    LaunchedEffect(editor.layers, editor.duration, editor.resolution, editor.projectName) {
+    LaunchedEffect(editor.layers, editor.duration, editor.compSettings, editor.projectName) {
         delay(400)
         withContext(Dispatchers.IO) { runCatching { projectStore.save(editor) } }
     }
@@ -280,7 +281,14 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
             .statusBarsPadding().navigationBarsPadding()) {
         TopBar(editor, onMenuHome = { leave() }, onOpenSettings = {
             editor.playing = false; onOpenSettings()
+        }, onCompSettings = {
+            editor.playing = false; showCompSettings = true
         }, onExport = { Toast.makeText(ctx, "Export isn't built yet", Toast.LENGTH_SHORT).show() })
+        if (showCompSettings) CompSettingsDialog(
+            "Composition Settings", "OK", editor.compSettings,
+            onConfirm = { editor.applyComp(it); editor.settings.rememberComp(it); showCompSettings = false },
+            onDismiss = { showCompSettings = false }
+        )
 
         if (previewExpanded) {
             Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -494,29 +502,22 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
 }
 
 @Composable
-private fun TopBar(editor: EditorState, onMenuHome: () -> Unit, onOpenSettings: () -> Unit, onExport: () -> Unit) {
-    var resMenu by remember { mutableStateOf(false) }
+private fun TopBar(editor: EditorState, onMenuHome: () -> Unit, onOpenSettings: () -> Unit, onCompSettings: () -> Unit, onExport: () -> Unit) {
+    val comp = editor.compSettings
     Row(Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
         IconButton(onClick = onMenuHome) { KIcon(IconKind.HOME, KColors.Text) }
         Text(
-            "Untitled", color = KColors.Text, fontSize = 20.sp, fontWeight = FontWeight.SemiBold,
+            editor.projectName, color = KColors.Text, fontSize = 20.sp, fontWeight = FontWeight.SemiBold,
             modifier = Modifier.weight(1f).padding(start = 6.dp), maxLines = 1, overflow = TextOverflow.Ellipsis
         )
-        Box {
-            val shape = RoundedCornerShape(10.dp)
-            Row(
-                Modifier.clip(shape).background(KColors.Surface).border(1.dp, KColors.Line, shape)
-                    .clickable { resMenu = true }.padding(start = 14.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(AppSettings.RESOLUTIONS[editor.resolution], color = KColors.Text, fontSize = 14.sp)
-                KIcon(IconKind.CHEVRON_DOWN, KColors.Muted, Modifier.size(18.dp))
-            }
-            DropdownMenu(expanded = resMenu, onDismissRequest = { resMenu = false }, containerColor = KColors.Surface2) {
-                AppSettings.RESOLUTIONS.forEachIndexed { i, r ->
-                    DropdownMenuItem(text = { Text(r, color = KColors.Text) }, onClick = { resMenu = false; editor.resolution = i })
-                }
-            }
+        val shape = RoundedCornerShape(10.dp)
+        Row(
+            Modifier.clip(shape).background(KColors.Surface).border(1.dp, KColors.Line, shape)
+                .clickable(onClick = onCompSettings).padding(start = 14.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("${comp.width}\u00D7${comp.height} \u00B7 ${comp.fps}", color = KColors.Text, fontSize = 13.sp)
+            KIcon(IconKind.CHEVRON_DOWN, KColors.Muted, Modifier.size(18.dp))
         }
         IconButton(onClick = onExport) { KIcon(IconKind.PLAY, KColors.Text, Modifier.size(24.dp)) }
         IconButton(onClick = onOpenSettings) { KIcon(IconKind.SETTINGS, KColors.Text) }

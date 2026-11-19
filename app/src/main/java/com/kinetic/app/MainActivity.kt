@@ -63,7 +63,12 @@ class MainActivity : ComponentActivity() {
 
                 when (screen) {
                     Screen.HOME -> HomeScreen(
-                        onNewComposition = { editor = EditorState(settings); screen = Screen.EDITOR },
+                        newCompDefaults = settings.lastComp,
+                        onNewComposition = { cs ->
+                            settings.rememberComp(cs)
+                            editor = EditorState(settings, projectName = cs.name).also { it.applyComp(cs) }
+                            screen = Screen.EDITOR
+                        },
                         onImportProject = { }, onImportPlugin = { pluginPicker.launch(arrayOf("*/*")) },
                         onOpenSettings = { settingsFrom = Screen.HOME; screen = Screen.SETTINGS },
                         projects = projects,
@@ -71,7 +76,10 @@ class MainActivity : ComponentActivity() {
                             val saved = store.load(info.id)
                             if (saved != null) {
                                 val e = EditorState(settings, saved.id, saved.name)
-                                e.restoreProject(saved.duration, saved.resolution, saved.layers, saved.time)
+                                e.restoreProject(
+                                    saved.duration, saved.resolution, saved.layers, saved.time,
+                                    saved.comp ?: com.kinetic.app.model.CompSettings(name = saved.name, duration = saved.duration, fps = settings.lastComp.fps)
+                                )
                                 editor = e
                                 screen = Screen.EDITOR
                             } else projects = store.list()

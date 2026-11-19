@@ -5,36 +5,42 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import com.kinetic.app.model.CompSettings
 import com.kinetic.app.model.fmt
 import kotlin.math.roundToInt
 
 class AppSettings(context: Context) {
     private val prefs = context.getSharedPreferences("kinetic_prefs", Context.MODE_PRIVATE)
     companion object {
-        val RESOLUTIONS = listOf("720P", "1080P", "1440P", "4K")
-        val FPS = listOf(24, 30, 60)
-        val COMP_LENGTHS = listOf(5, 10, 30, 60)
         val TIME_FORMATS = listOf("00:00", "Frames", "Timecode")
         val PREVIEW_QUALITIES = listOf("Auto", "Full", "Half", "Quarter")
     }
-    var resolution by mutableIntStateOf(prefs.getInt("resolution", 1)); private set
-    var frameRate by mutableIntStateOf(prefs.getInt("frameRate", 1)); private set
-    var compLength by mutableIntStateOf(prefs.getInt("compLength", 0)); private set
+    var lastComp by mutableStateOf(loadComp()); private set
     var timeFormat by mutableIntStateOf(prefs.getInt("timeFormat", 0)); private set
     var snap by mutableStateOf(prefs.getBoolean("snap", true)); private set
     var loop by mutableStateOf(prefs.getBoolean("loop", false)); private set
     var previewQualityIndex by mutableIntStateOf(prefs.getInt("previewQualityIndex", 0).coerceIn(0, 3)); private set
     var showPreviewDiagnostics by mutableStateOf(prefs.getBoolean("showPreviewDiagnostics", false)); private set
-    fun updateResolution(i: Int) { resolution = i; prefs.edit().putInt("resolution", i).apply() }
-    fun updateFrameRate(i: Int) { frameRate = i; prefs.edit().putInt("frameRate", i).apply() }
-    fun updateCompLength(i: Int) { compLength = i; prefs.edit().putInt("compLength", i).apply() }
+    private fun loadComp(): CompSettings {
+        val oldFps = listOf(24, 30, 60).getOrElse(prefs.getInt("frameRate", 1)) { 30 }
+        val oldLength = listOf(5, 10, 30, 60).getOrElse(prefs.getInt("compLength", 0)) { 5 }
+        return CompSettings(
+            width = prefs.getInt("compW", 1920), height = prefs.getInt("compH", 1080),
+            fps = prefs.getInt("compFps", oldFps), duration = prefs.getFloat("compDur", oldLength.toFloat()),
+            background = prefs.getLong("compBg", 0xFF000000L)
+        ).sanitized()
+    }
+    fun rememberComp(c: CompSettings) {
+        lastComp = c.sanitized()
+        prefs.edit().putInt("compW", lastComp.width).putInt("compH", lastComp.height).putInt("compFps", lastComp.fps)
+            .putFloat("compDur", lastComp.duration).putLong("compBg", lastComp.background).apply()
+    }
     fun updateTimeFormat(i: Int) { timeFormat = i; prefs.edit().putInt("timeFormat", i).apply() }
     fun updateSnap(v: Boolean) { snap = v; prefs.edit().putBoolean("snap", v).apply() }
     fun updateLoop(v: Boolean) { loop = v; prefs.edit().putBoolean("loop", v).apply() }
     fun updatePreviewQuality(i: Int) { previewQualityIndex = i.coerceIn(0, 3); prefs.edit().putInt("previewQualityIndex", previewQualityIndex).apply() }
     fun updateShowPreviewDiagnostics(v: Boolean) { showPreviewDiagnostics = v; prefs.edit().putBoolean("showPreviewDiagnostics", v).apply() }
-    val fps: Int get() = FPS[frameRate]
-    val compSeconds: Int get() = COMP_LENGTHS[compLength]
+    val fps: Int get() = lastComp.fps
     fun formatTime(t: Float): String {
         val total = t.coerceAtLeast(0f)
         return when (timeFormat) {

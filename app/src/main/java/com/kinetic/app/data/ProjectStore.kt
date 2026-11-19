@@ -1,6 +1,7 @@
 package com.kinetic.app.data
 
 import android.content.Context
+import com.kinetic.app.model.CompSettings
 import com.kinetic.app.model.EditorState
 import com.kinetic.app.model.EffectInstance
 import com.kinetic.app.model.createEffect
@@ -23,7 +24,7 @@ class ProjectStore(context: Context) {
     private val root = File(context.filesDir, "projects").apply { mkdirs() }
 
     data class ProjectInfo(val id: String, val name: String, val updatedAt: Long, val layerCount: Int)
-    data class LoadedProject(val id: String, val name: String, val duration: Float, val resolution: Int, val time: Float, val layers: List<Layer>)
+    data class LoadedProject(val id: String, val name: String, val duration: Float, val resolution: Int, val time: Float, val layers: List<Layer>, val comp: CompSettings? = null)
 
     fun list(): List<ProjectInfo> = root.listFiles { f -> f.isFile && f.extension == "kinetic" }
         ?.mapNotNull { file ->
@@ -44,6 +45,8 @@ class ProjectStore(context: Context) {
             .put("updatedAt", System.currentTimeMillis())
             .put("duration", editor.duration.toDouble())
             .put("resolution", editor.resolution)
+            .put("comp", JSONObject().put("w", editor.compSettings.width).put("h", editor.compSettings.height)
+                .put("fps", editor.compSettings.fps).put("bg", editor.compSettings.background))
             .put("time", editor.time.toDouble())
             .put("layers", layers)
         val target = File(root, "${editor.projectId}.kinetic")
@@ -74,9 +77,14 @@ class ProjectStore(context: Context) {
                 layerFromJson(layerJson)
             } catch (_: Exception) { null }
         }
-        LoadedProject(json.optString("id", id), json.optString("name", "Untitled"),
-            json.optDouble("duration", 5.0).toFloat().coerceAtLeast(0.1f),
-            json.optInt("resolution", 1), json.optDouble("time", 0.0).toFloat(), layers)
+        val savedName = json.optString("name", "Untitled")
+        val savedDuration = json.optDouble("duration", 5.0).toFloat().coerceAtLeast(0.1f)
+        val comp = json.optJSONObject("comp")?.let {
+            CompSettings(savedName, it.optInt("w", 1920), it.optInt("h", 1080), it.optInt("fps", 30),
+                savedDuration, it.optLong("bg", 0xFF000000L)).sanitized()
+        }
+        LoadedProject(json.optString("id", id), savedName, savedDuration,
+            json.optInt("resolution", 1), json.optDouble("time", 0.0).toFloat(), layers, comp)
     } catch (_: Exception) { null }
 
     fun delete(id: String) { File(root, "$id.kinetic").delete() }

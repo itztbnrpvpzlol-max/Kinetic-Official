@@ -8,8 +8,16 @@ import com.kinetic.app.engine.NativeEffectsEngine
 import kotlin.math.abs
 import kotlin.math.pow
 
-const val COMP_W = 1920f
-const val COMP_H = 1080f
+private val compWState = androidx.compose.runtime.mutableFloatStateOf(1920f)
+private val compHState = androidx.compose.runtime.mutableFloatStateOf(1080f)
+
+var COMP_W: Float
+    get() = compWState.floatValue
+    set(value) { compWState.floatValue = value }
+
+var COMP_H: Float
+    get() = compHState.floatValue
+    set(value) { compHState.floatValue = value }
 
 fun fmt(f: String, vararg a: Any): String = String.format(Locale.US, f, *a)
 

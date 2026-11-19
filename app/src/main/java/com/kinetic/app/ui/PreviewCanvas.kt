@@ -274,11 +274,11 @@ fun CpuPreviewCanvas(
         }
     }
     val outline = remember {
-        Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; color = 0xFF8466FF.toInt() }
+        Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; color = 0xFF3F95F7.toInt() }
     }
 
     Canvas(
-        if (directVideoLayerId == null) modifier.background(Color(0xFF0A0A0F)) else modifier
+        if (directVideoLayerId == null) modifier.background(Color(editor.compSettings.background)) else modifier
     ) {
         val drawStartedNs = System.nanoTime()
         val s = minOf(size.width / COMP_W, size.height / COMP_H)
@@ -295,7 +295,7 @@ fun CpuPreviewCanvas(
             nc.translate(ox, oy)
             nc.scale(s, s)
             nc.clipRect(0f, 0f, COMP_W, COMP_H)
-            if (directVideoLayerId == null) nc.drawColor(android.graphics.Color.BLACK)
+            if (directVideoLayerId == null) nc.drawColor(editor.compSettings.background.toInt())
 
             for (l in layers.asReversed()) {
                 if (!l.visible || !l.activeAt(time) || l.type == LayerType.AUDIO || l.id == directVideoLayerId) continue

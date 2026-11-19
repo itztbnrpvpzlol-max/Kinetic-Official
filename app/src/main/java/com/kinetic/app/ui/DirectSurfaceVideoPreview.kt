@@ -20,6 +20,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.collectLatest
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
@@ -164,12 +166,12 @@ internal fun DirectSurfaceVideoPreview(
         val owned = fallbackFrame
         onDispose { owned?.let { if (!it.isRecycled) it.recycle() } }
     }
-    val sourcePositionMs = (
-        (layer.sourceElapsedAt(editor.time) + layer.srcOffset).coerceAtLeast(0f) * 1000f
-    ).toLong()
+    val sourcePositionAt = { t: Float ->
+        ((layer.sourceElapsedAt(t) + layer.srcOffset).coerceAtLeast(0f) * 1000f).toLong()
+    }
 
     BoxWithConstraints(
-        modifier.fillMaxSize().background(Color.Black),
+        modifier.fillMaxSize().background(Color(editor.compSettings.background)),
         contentAlignment = Alignment.Center
     ) {
         val fitScale = minOf(maxWidth.value / COMP_W, maxHeight.value / COMP_H)
@@ -219,25 +221,25 @@ internal fun DirectSurfaceVideoPreview(
     }
 
     val previousTimelineTime = remember(layer.id) {
-        androidx.compose.runtime.mutableFloatStateOf(editor.time)
+        androidx.compose.runtime.mutableFloatStateOf(-1f)
     }
-    LaunchedEffect(player, editor.time, editor.playing, layer.id) {
-        player.updatePositionHint(sourcePositionMs)
-        if (editor.playing) {
-            // During playback the master clock drives the decoder's presentation
-            // timestamps via syncMasterClock. Issuing a seek on every UI frame
-            // forces the decoder back to the nearest keyframe each tick, which
-            // is exactly what causes the black flash at clip boundaries.
-            // Only seek on a backwards jump (scrub or loop restart).
-            val jumpedBack = editor.time + 0.08f < previousTimelineTime.floatValue
-            if (jumpedBack) player.seekTo(sourcePositionMs)
-        } else {
-            // Paused: wait one frame so rapid scrub ticks coalesce before
-            // issuing the seek — avoids spamming the decoder on fast drags.
-            delay(16L)
-            player.seekTo(sourcePositionMs)
+    LaunchedEffect(player, editor.playing, layer) {
+        // Time is observed as a flow so ticking the playhead never recomposes
+        // this composable. While playing, the master clock drives presentation;
+        // only a backwards jump (scrub or loop restart) forces a seek. While
+        // paused, collectLatest coalesces rapid scrub ticks into one seek.
+        snapshotFlow { editor.time }.collectLatest { t ->
+            val sourcePositionMs = sourcePositionAt(t)
+            player.updatePositionHint(sourcePositionMs)
+            if (editor.playing) {
+                val previous = previousTimelineTime.floatValue
+                if (previous >= 0f && t + 0.08f < previous) player.seekTo(sourcePositionMs)
+            } else {
+                delay(16L)
+                player.seekTo(sourcePositionMs)
+            }
+            previousTimelineTime.floatValue = t
         }
-        previousTimelineTime.floatValue = editor.time
     }
 
     LaunchedEffect(player, playback, layer.start, layer.srcOffset, layer.p(PropId.SPEED).base) {
@@ -245,13 +247,26 @@ internal fun DirectSurfaceVideoPreview(
             val clipStartUs = (layer.start * 1_000_000.0).toLong()
             val sourceOffsetUs = (layer.srcOffset * 1_000_000.0).toLong()
             val clipSpeed = layer.speedAt(editor.time)
+            var lastGeneration = Long.MIN_VALUE
+            var lastPlaying = false
+            var lastSentNs = 0L
             while (true) {
                 val clock = playback.clockSnapshot()
-                player.syncMasterClock(
-                    clock.positionUs, clock.monotonicNs, clock.speed, clock.playing,
-                    clipStartUs, sourceOffsetUs, clipSpeed, clock.generation
-                )
-                delay(33L)
+                val nowNs = System.nanoTime()
+                // Push to the decoder only when the clock changed (seek, play,
+                // pause, speed) plus a 100 ms heartbeat for drift correction.
+                if (clock.generation != lastGeneration || clock.playing != lastPlaying ||
+                    nowNs - lastSentNs > 100_000_000L
+                ) {
+                    player.syncMasterClock(
+                        clock.positionUs, clock.monotonicNs, clock.speed, clock.playing,
+                        clipStartUs, sourceOffsetUs, clipSpeed, clock.generation
+                    )
+                    lastGeneration = clock.generation
+                    lastPlaying = clock.playing
+                    lastSentNs = nowNs
+                }
+                delay(50L)
             }
         }
     }

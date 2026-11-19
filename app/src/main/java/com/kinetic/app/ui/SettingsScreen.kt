@@ -55,19 +55,19 @@ fun SettingsScreen(settings: AppSettings, pluginManager: EffectPluginManager, on
         }
         Box(Modifier.fillMaxWidth().height(1.dp).background(KColors.Line))
         Column(Modifier.widthIn(max = 900.dp).fillMaxSize().align(Alignment.CenterHorizontally).verticalScroll(rememberScrollState()).padding(18.dp)) {
-            Section("New compositions")
-            ChoiceRow("Resolution", AppSettings.RESOLUTIONS, settings.resolution) { settings.updateResolution(it) }
-            ChoiceRow("Frame rate", AppSettings.FPS.map { "$it fps" }, settings.frameRate) { settings.updateFrameRate(it) }
-            ChoiceRow("Length", AppSettings.COMP_LENGTHS.map { "${it}s" }, settings.compLength) { settings.updateCompLength(it) }
-
-            Section("Timeline")
+            Section("General")
             ChoiceRow("Time display", AppSettings.TIME_FORMATS, settings.timeFormat) { settings.updateTimeFormat(it) }
             SwitchRow("Snap playhead to keyframes", settings.snap) { settings.updateSnap(it) }
             SwitchRow("Loop playback", settings.loop) { settings.updateLoop(it) }
+            Text(
+                "Preferences apply to the whole app. Size, frame rate, duration and background belong to each composition: set them in New Composition or by tapping the size chip in the editor.",
+                color = KColors.Dim, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp)
+            )
 
-            Section("Preview & performance")
+            Section("Previews")
             ChoiceRow("Preview quality", AppSettings.PREVIEW_QUALITIES, settings.previewQualityIndex) { settings.updatePreviewQuality(it) }
             SwitchRow("Show preview stats / debug overlay", settings.showPreviewDiagnostics) { settings.updateShowPreviewDiagnostics(it) }
+            Section("Media & disk cache")
             Row(
                 Modifier.fillMaxWidth().clickable { showClearCacheDialog = true }.padding(vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically

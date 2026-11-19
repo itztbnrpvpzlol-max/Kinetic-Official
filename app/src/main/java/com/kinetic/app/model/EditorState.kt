@@ -14,8 +14,14 @@ import kotlin.math.roundToInt
 
 /** One open composition. A new instance is always empty. */
 class EditorState(val settings: AppSettings, val projectId: String = UUID.randomUUID().toString(), var projectName: String = "Untitled") {
-    var resolution by mutableIntStateOf(settings.resolution)
-    private var baseDuration by mutableFloatStateOf(settings.compSeconds.toFloat())
+    var compSettings by mutableStateOf(settings.lastComp)
+        private set
+    var resolution by mutableIntStateOf(1)
+    private var baseDuration by mutableFloatStateOf(settings.lastComp.duration)
+    init {
+        COMP_W = compSettings.width.toFloat()
+        COMP_H = compSettings.height.toFloat()
+    }
     val duration: Float get() = maxOf(baseDuration, layers.maxOfOrNull { it.end } ?: 0f, 0.1f)
     var layers by mutableStateOf<List<Layer>>(emptyList())
         private set
@@ -38,10 +44,26 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
     private val undoStack = ArrayDeque<List<Layer>>()
     private val redoStack = ArrayDeque<List<Layer>>()
 
-    val fps: Int get() = settings.fps
-    val frame: Float get() = 1f / settings.fps
+    val fps: Int get() = compSettings.fps
+    val frame: Float get() = 1f / compSettings.fps
     val selected: Layer? get() = layers.firstOrNull { it.id == selectedId }
-    fun restoreProject(savedDuration: Float, savedResolution: Int, savedLayers: List<Layer>, savedTime: Float = 0f) {
+    fun applyComp(cs: CompSettings) {
+        val c = cs.sanitized()
+        compSettings = c
+        projectName = c.name
+        baseDuration = c.duration
+        COMP_W = c.width.toFloat()
+        COMP_H = c.height.toFloat()
+        time = time.coerceIn(0f, duration)
+    }
+
+    fun restoreProject(savedDuration: Float, savedResolution: Int, savedLayers: List<Layer>, savedTime: Float = 0f, savedComp: CompSettings? = null) {
+        if (savedComp != null) {
+            val c = savedComp.sanitized()
+            compSettings = c
+            COMP_W = c.width.toFloat()
+            COMP_H = c.height.toFloat()
+        }
         baseDuration = maxOf(savedDuration, savedLayers.maxOfOrNull { it.end } ?: 0f, 0.1f)
         resolution = savedResolution.coerceIn(0, 3)
         time = savedTime.coerceIn(0f, duration)

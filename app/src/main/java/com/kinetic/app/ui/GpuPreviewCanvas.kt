@@ -27,6 +27,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.structuralEqualityPolicy
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -157,11 +159,19 @@ fun PreviewCanvas(
     // Bitmap/YUV conversion through TextureView. Any animated transform,
     // effect, or multi-layer video composition uses the synchronized GLES
     // compositor and SurfaceTexture external-OES texture path.
-    val activeVisualLayers = editor.layers.filter {
-        it.visible && it.activeAt(editor.time) &&
-            it.type != LayerType.AUDIO && it.type != LayerType.NULL &&
-            it.type != LayerType.ADJUSTMENT
+    // Only the set of active layers matters here. Deriving the ids keeps this
+    // composable from recomposing on every playhead tick; it recomposes only
+    // when a clip starts or ends, or when the layers themselves change.
+    val activeIds by remember(editor) {
+        derivedStateOf(structuralEqualityPolicy()) {
+            editor.layers.filter {
+                it.visible && it.activeAt(editor.time) &&
+                    it.type != LayerType.AUDIO && it.type != LayerType.NULL &&
+                    it.type != LayerType.ADJUSTMENT
+            }.map { it.id }
+        }
     }
+    val activeVisualLayers = remember(activeIds, editor.layers) { editor.layers.filter { it.id in activeIds } }
     val videoLayers = activeVisualLayers.filter { it.type == LayerType.VIDEO && it.uri != null }
     // TextureView is a bottom-layer surface. Keep it only when the one active
     // video is the lowest visual layer; Canvas then draws stills/text/shapes
@@ -690,7 +700,7 @@ private fun GpuCompositionPreviewCanvas(
             false, false, "Normal"
         )
     }
-    val scene = GpuScene(renderLayers, selectedLayer, cacheAllowed = !editor.playing, time = editor.time)
+    val scene = GpuScene(renderLayers, selectedLayer, background = editor.compSettings.background.toInt(), cacheAllowed = !editor.playing, time = editor.time)
     // FFmpeg's MediaCodec decoder renders into a SurfaceTexture buffer. Give
     // the producer and decoder the same explicit preview-sized output geometry.
     val videoOutputWidth = (COMP_W * qualityScale).roundToInt().coerceAtLeast(16)
@@ -704,7 +714,7 @@ private fun GpuCompositionPreviewCanvas(
             val compositionHeight = (COMP_H * fitScale).dp
             Box(
                 Modifier.size(compositionWidth, compositionHeight)
-                    .background(androidx.compose.ui.graphics.Color.Black)
+                    .background(androidx.compose.ui.graphics.Color(editor.compSettings.background))
             ) {
                 AndroidView(
                     factory = { view },
