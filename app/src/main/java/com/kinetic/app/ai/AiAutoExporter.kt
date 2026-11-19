@@ -50,7 +50,8 @@ object AiAutoExporter {
         val durationSeconds: Float,
         val audioIncluded: Boolean,
         val width: Int,
-        val height: Int
+        val height: Int,
+        val projectFilePath: String? = null
     )
 
     /**
@@ -98,13 +99,12 @@ object AiAutoExporter {
                 resolver.update(uri, ContentValues().apply { put(MediaStore.Video.Media.IS_PENDING, 0) }, null, null)
             }
             onProgress(1f, if (audioIncluded) "Native EffectCraft export saved with soundtrack." else "Native EffectCraft export saved.")
-            return Result(uri, displayName, duration, audioIncluded, width, height)
+            return Result(uri, displayName, duration, audioIncluded, width, height, composition.projectFile.absolutePath)
         } catch (error: Throwable) {
             published?.let { runCatching { context.contentResolver.delete(it, null, null) } }
             throw error
         } finally {
             runCatching { tempVideo.delete() }
-            composition.sourceFiles.forEach { runCatching { it.delete() } }
         }
     }
 
