@@ -109,7 +109,7 @@ class ProjectStore(context: Context) {
 
         val id = UUID.randomUUID().toString()
         val name = json.optString("name", "Imported Project")
-            .replace(Regex("[\\\\/:*?\"<>|\\\\p{Cntrl}]"), " ")
+            .filterNot { it == '/' || it == '\\\\' || it == ':' || it == '*' || it == '?' || it == '"' || it == '<' || it == '>' || it == '|' || it.isISOControl() }
             .trim().take(64).ifBlank { "Imported Project" }
         json.put("version", 2)
             .put("id", id)
