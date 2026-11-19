@@ -29,7 +29,7 @@ import kotlin.math.sqrt
  * importer consumes paths, then native commands author the complete composition.
  */
 object EffectCraftAiComposer {
-    private data class SourceShot(val sourceIndex: Int, val sourceStart: Float, val duration: Float, val energy: Float, val saturation: Float)
+    private data class SourceShot(val sourceIndex: Int, val sourceStart: Float, val duration: Float, val energy: Float, val saturation: Float, val brightness: Float, val cutStrength: Float)
 
     data class Composition(
         val compId: Long,
@@ -118,7 +118,7 @@ object EffectCraftAiComposer {
         }
         check(uniqueShots.isNotEmpty()) { "No usable scene segments were found in the selected footage." }
         val sourceTraining = uniqueShots.map { shot ->
-            floatArrayOf(kotlin.math.ln(shot.duration.coerceAtLeast(0.1f)), shot.energy, shot.energy, shot.energy, shot.saturation)
+            floatArrayOf(kotlin.math.ln(shot.duration.coerceAtLeast(0.1f)), shot.brightness, shot.cutStrength, shot.energy, shot.saturation)
         }
         val styleModel = AiStyleModel.trainOrLoad(context, referenceSamples + sourceTraining)
         val remainingShots = uniqueShots.toMutableList()
@@ -136,7 +136,7 @@ object EffectCraftAiComposer {
             val pool = eligible.ifEmpty { remainingShots }
             val chosen = when (style.lowercase(Locale.ROOT)) {
                 "velocity" -> pool.maxByOrNull {
-                    it.energy * 0.55f + styleModel.similarity(it.duration, it.energy, it.energy, it.energy, it.saturation) * 0.45f
+                    it.energy * 0.55f + styleModel.similarity(it.duration, it.brightness, it.cutStrength, it.energy, it.saturation) * 0.45f
                 } ?: pool.first()
                 "cinematic" -> pool.maxByOrNull {
                     it.duration * 0.2f + styleModel.similarity(it.duration, it.energy, it.energy, it.energy, it.saturation)
@@ -241,6 +241,7 @@ object EffectCraftAiComposer {
         val retriever = MediaMetadataRetriever()
         val motion = ArrayList<Pair<Float, Float>>()
         val saturationSamples = ArrayList<Pair<Float, Float>>()
+        val brightnessSamples = ArrayList<Pair<Float, Float>>()
         val boundaries = arrayListOf(0f)
         var previous: FloatArray? = null
         var lastCut = 0f
@@ -276,6 +277,7 @@ object EffectCraftAiComposer {
                         if (hi == 0) 0f else (hi - lo).toFloat() / hi
                     }.average().toFloat()
                     motion.add(time to difference)
+                    brightnessSamples.add(time to luma.average().toFloat())
                     saturationSamples.add(time to saturation)
                     if (difference > 0.22f && time - lastCut >= 0.75f) {
                         boundaries.add(time)
@@ -294,18 +296,21 @@ object EffectCraftAiComposer {
             if (sceneEnd - sceneStart < 0.35f) return@forEach
             val sceneEnergy = motion.filter { it.first >= sceneStart && it.first < sceneEnd }
                 .map { it.second }.average().takeIf { it.isFinite() }?.toFloat()?.coerceIn(0f, 1f) ?: 0f
+            val sceneBrightness = brightnessSamples.filter { it.first >= sceneStart && it.first < sceneEnd }
+                .map { it.second }.average().takeIf { it.isFinite() }?.toFloat()?.coerceIn(0f, 1f) ?: 0.5f
             val sceneSaturation = saturationSamples.filter { it.first >= sceneStart && it.first < sceneEnd }
                 .map { it.second }.average().takeIf { it.isFinite() }?.toFloat()?.coerceIn(0f, 1f) ?: 0.5f
+            val sceneCutStrength = (boundaries.count { it > sceneStart && it < sceneEnd }.toFloat() / (sceneEnd - sceneStart).coerceAtLeast(0.35f)).coerceIn(0f, 1f)
             var segmentStart = sceneStart
             while (segmentStart < sceneEnd - 0.25f) {
                 val segmentDuration = min(targetLength, sceneEnd - segmentStart)
                 if (segmentDuration >= 0.35f) {
-                    result.add(SourceShot(0, segmentStart, segmentDuration, sceneEnergy, sceneSaturation))
+                    result.add(SourceShot(0, segmentStart, segmentDuration, sceneEnergy, sceneSaturation, sceneBrightness, sceneCutStrength))
                 }
                 segmentStart += targetLength
             }
         }
-        return result.ifEmpty { listOf(SourceShot(0, 0f, sourceDuration.coerceAtLeast(0.35f), 0f, 0.5f)) }
+        return result.ifEmpty { listOf(SourceShot(0, 0f, sourceDuration.coerceAtLeast(0.35f), 0f, 0.5f, 0.5f, 0f)) }
     }
 
 
