@@ -161,18 +161,20 @@ internal object EffectCraftAiComposer {
         check(nullId > 0L) { "EffectCraft couldn't create the Mograph null controller." }
 
         val accentId = command(
-            "layer.newShape",
+            "layer.newSolid",
             JSONObject()
                 .put("comp", comp)
-                .put("kind", "rect")
-                .put("name", "AI • Animated Accent")
-                .put("size", JSONArray().put(520).put(10))
-                .put("fill", "#9C72FF")
-                .put("position", JSONArray().put(width / 2).put(height * 0.73))
+                .put("name", "AI • Animated Accent Solid")
+                .put("color", "#9C72FF")
+                .put("width", 520)
+                .put("height", 10)
         ).optLong("layer", -1L)
         if (accentId > 0L) {
+            key(accentId, "transform/position", 0.0, JSONArray().put(width / 2).put(height * 0.73).put(0))
             key(accentId, "transform/scale", 0.0, JSONArray().put(0).put(100).put(100))
             key(accentId, "transform/scale", 0.42, JSONArray().put(100).put(100).put(100))
+            key(accentId, "transform/opacity", 0.0, 0.0)
+            key(accentId, "transform/opacity", 0.28, 100.0)
             key(accentId, "transform/opacity", maxOf(0.0, duration - 0.3).toDouble(), 100.0)
             key(accentId, "transform/opacity", duration.toDouble(), 0.0)
         }
