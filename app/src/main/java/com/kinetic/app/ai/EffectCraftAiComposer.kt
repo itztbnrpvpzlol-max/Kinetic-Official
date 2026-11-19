@@ -9,6 +9,7 @@ import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaMetadataRetriever
 import android.net.Uri
+import android.os.Build
 import android.provider.OpenableColumns
 import com.kinetic.app.engine.EffectCraftAiBridge
 import org.json.JSONArray
@@ -87,6 +88,13 @@ internal object EffectCraftAiComposer {
         check(items.length() > 0) { "EffectCraft could not import any selected video files." }
 
         val sourceDurations = footage.take(usableCount(items, staged)).map { probeDuration(context, it) }
+        onProgress("Learning visual pacing from your reference media and analysing the soundtrack…")
+        val referenceSamples = styleReferences.take(12).flatMap { uri ->
+            runCatching { analyzeStyleReference(context, uri) }.getOrDefault(emptyList())
+        }
+        val audioBeats = audio.firstOrNull()?.let {
+            runCatching { analyzeAudioBeats(context, it, duration) }.getOrDefault(emptyList())
+        }.orEmpty()
         val usable = min(items.length(), staged.size)
         val targetShotLength = when (style.lowercase(Locale.ROOT)) {
             "velocity" -> 1.55f
@@ -99,6 +107,10 @@ internal object EffectCraftAiComposer {
                 .map { it.copy(sourceIndex = sourceIndex) }
         }
         check(uniqueShots.isNotEmpty()) { "No usable scene segments were found in the selected footage." }
+        val sourceTraining = uniqueShots.map { shot ->
+            floatArrayOf(kotlin.math.ln(shot.duration.coerceAtLeast(0.1f)), shot.energy, shot.energy, shot.energy, shot.saturation)
+        }
+        val styleModel = AiStyleModel.trainOrLoad(context, referenceSamples + sourceTraining)
         val remainingShots = uniqueShots.toMutableList()
         var previousSource = -1
         var previousStart = -1f
@@ -113,14 +125,25 @@ internal object EffectCraftAiComposer {
             }
             val pool = eligible.ifEmpty { remainingShots }
             val chosen = when (style.lowercase(Locale.ROOT)) {
-                "velocity" -> pool.maxByOrNull { it.energy } ?: pool.first()
-                "cinematic" -> pool.maxByOrNull { it.duration } ?: pool.first()
-                else -> pool.maxByOrNull { it.energy * 0.7f + (1f / it.duration.coerceAtLeast(0.4f)) * 0.3f } ?: pool.first()
+                "velocity" -> pool.maxByOrNull {
+                    it.energy * 0.55f + styleModel.similarity(it.duration, it.energy, it.energy, it.energy, it.saturation) * 0.45f
+                } ?: pool.first()
+                "cinematic" -> pool.maxByOrNull {
+                    it.duration * 0.2f + styleModel.similarity(it.duration, it.energy, it.energy, it.energy, it.saturation)
+                } ?: pool.first()
+                else -> pool.maxByOrNull {
+                    it.energy * 0.4f + it.saturation * 0.1f +
+                        styleModel.similarity(it.duration, it.energy, it.energy, it.energy, it.saturation) * 0.5f
+                } ?: pool.first()
             }
             remainingShots.remove(chosen)
             val itemId = items.optLong(chosen.sourceIndex, -1L)
             check(itemId > 0L) { "EffectCraft returned an invalid source footage ID." }
-            val clipDuration = min(chosen.duration, duration - cursor).coerceAtLeast(0.2f)
+            var clipDuration = min(chosen.duration, duration - cursor).coerceAtLeast(0.2f)
+            if ("Beat sync" in priorities && audioBeats.isNotEmpty()) {
+                val beat = audioBeats.firstOrNull { it > cursor + 0.35f && it <= cursor + clipDuration + 0.45f }
+                if (beat != null) clipDuration = (beat - cursor).coerceAtLeast(0.2f)
+            }
             val transition = transitionFor(shotIndex, chosen.energy, style)
             val overlap = if (shotIndex > 0) transition.second else 0f
             val start = (cursor - overlap).coerceAtLeast(0f)
@@ -167,7 +190,7 @@ internal object EffectCraftAiComposer {
         addNativeMotionGraphics(comp, width, height, duration, style, prompt, frameRate)
         addOptionalNativeAdjustment(comp, videoLayers.firstOrNull())
         onProgress("EffectCraft composition authored.")
-        return Composition(comp, finalDuration, audio.firstOrNull(), staged)
+        return Composition(comp, finalDuration, audio.firstOrNull(), staged, audioBeats.size, styleModel.trainingSamples)
     }
 
     private fun usableCount(items: JSONArray, staged: List<File>): Int = min(items.length(), staged.size)
