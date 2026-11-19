@@ -173,20 +173,12 @@ object EffectCraftAiComposer {
                 JSONObject()
                     .put("comp", comp)
                     .put("item", itemId)
-                    .put("time", start.toDouble())
+                    .put("time", (start - chosen.sourceStart).toDouble())
                     .put("in", start.toDouble())
                     .put("out", out.toDouble())
                     .put("index", 1)
             ).optLong("layer", -1L)
             check(layerId > 0L) { "EffectCraft couldn't place source shot ${shotIndex + 1}." }
-            if (chosen.sourceStart > 0.02f) {
-                command(
-                    "layer.slip",
-                    JSONObject()
-                        .put("layers", JSONArray().put(layerId))
-                        .put("delta", chosen.sourceStart.toDouble())
-                )
-            }
             videoLayers.add(layerId)
             animateShot(layerId, shotIndex, clipDuration)
             if ("Impact shakes" in priorities) addImpactShake(layerId, clipDuration, chosen.energy)
