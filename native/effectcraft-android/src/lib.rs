@@ -480,3 +480,272 @@ pub extern "system" fn Java_com_kinetic_app_engine_EffectCraftNative_nativeClear
 ) {
     let _ = catch_unwind(|| media_pool().clear_frames());
 }
+
+
+// -----------------------------------------------------------------------------
+// Dedicated AI authoring session.
+// This is intentionally separate from the editor's interactive EffectCraft
+// session above. The AI can use the same complete engine command registry,
+// effect registry, presets and renderer without touching Kinetic's editor state.
+// -----------------------------------------------------------------------------
+
+static AI_SESSION: OnceLock<Mutex<Session>> = OnceLock::new();
+
+struct NativeAiImporter;
+
+impl effectcraft_engine::Importer for NativeAiImporter {
+    fn probe(&self, path: &str) -> Result<Footage, String> {
+        effectcraft_media::probe(path).map_err(|error| error.to_string())
+    }
+}
+
+fn new_ai_session() -> Session {
+    let mut engine = Session::default();
+    engine.footage = Arc::new(media_pool().clone());
+    engine.importer = Some(Arc::new(NativeAiImporter));
+    engine
+}
+
+fn ai_session() -> &'static Mutex<Session> {
+    AI_SESSION.get_or_init(|| Mutex::new(new_ai_session()))
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_kinetic_app_engine_EffectCraftAiNative_nativeInitialize(
+    _env: JNIEnv<'_>,
+    _class: JClass<'_>,
+) -> jboolean {
+    match catch_unwind(|| {
+        let _ = ai_session();
+    }) {
+        Ok(()) => 1,
+        Err(_) => 0,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_kinetic_app_engine_EffectCraftAiNative_nativeReset(
+    _env: JNIEnv<'_>,
+    _class: JClass<'_>,
+) -> jboolean {
+    match catch_unwind(AssertUnwindSafe(|| {
+        let mut engine = ai_session().lock().map_err(|_| "AI EffectCraft session lock is unavailable")?;
+        *engine = new_ai_session();
+        Ok::<(), String>(())
+    })) {
+        Ok(Ok(())) => 1,
+        _ => 0,
+    }
+}
+
+/// Discover the complete engine command registry, effects, and built-in animation
+/// presets from the pinned EffectCraft build. No Kinetic layer model is involved.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_kinetic_app_engine_EffectCraftAiNative_nativeDiscover(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+) -> jstring {
+    let outcome = catch_unwind(AssertUnwindSafe(|| {
+        let mut engine = match ai_session().lock() {
+            Ok(engine) => engine,
+            Err(_) => return error_response("AI EffectCraft session lock is unavailable"),
+        };
+
+        let commands = effectcraft_engine::command_specs().iter().map(|spec| {
+            let enabled = (spec.enabled)(&engine);
+            json!({
+                "id": spec.id,
+                "label": spec.label,
+                "menu": spec.menu,
+                "shortcut": spec.shortcut,
+                "params": spec.params,
+                "enabled": enabled.is_ok(),
+                "disabledReason": enabled.err()
+            })
+        }).collect::<Vec<_>>();
+
+        let effects = engine.execute_checked("effect.list", json!({}))
+            .unwrap_or_else(|error| json!({"error": error.to_string()}));
+        let animation_presets = effectcraft_engine::animation_presets()
+            .into_iter().map(|(id, name, category)| json!({
+                "id": id, "name": name, "category": category
+            })).collect::<Vec<_>>();
+        let text_presets = effectcraft_engine::text_presets()
+            .into_iter().map(|(id, name)| json!({
+                "id": id, "name": name
+            })).collect::<Vec<_>>();
+
+        json!({
+            "protocolVersion": 1,
+            "ok": true,
+            "engine": "EffectCraft",
+            "revision": engine.revision,
+            "commandCount": commands.len(),
+            "effectCount": effects.as_array().map_or(0, Vec::len),
+            "commands": commands,
+            "effects": effects,
+            "animationPresets": animation_presets,
+            "textPresets": text_presets
+        })
+    }));
+
+    match outcome {
+        Ok(value) => response_string(&mut env, value),
+        Err(_) => response_string(&mut env, error_response("EffectCraft AI capability discovery panicked")),
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_kinetic_app_engine_EffectCraftAiNative_nativeExecute(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    command_id: JString<'_>,
+    params_json: JString<'_>,
+) -> jstring {
+    let outcome = catch_unwind(AssertUnwindSafe(|| {
+        let command_id = match env.get_string(&command_id) {
+            Ok(value) => value.to_string_lossy().into_owned(),
+            Err(_) => return error_response("Could not read AI command ID from Kotlin"),
+        };
+        let params_text = match env.get_string(&params_json) {
+            Ok(value) => value.to_string_lossy().into_owned(),
+            Err(_) => return error_response("Could not read AI command parameters from Kotlin"),
+        };
+        let params: Value = match serde_json::from_str(&params_text) {
+            Ok(value) if value.is_object() => value,
+            Ok(_) => return error_response("AI command parameters must be a JSON object"),
+            Err(error) => return error_response(format!("Invalid AI command JSON: {error}")),
+        };
+
+        let mut engine = match ai_session().lock() {
+            Ok(engine) => engine,
+            Err(_) => return error_response("AI EffectCraft session lock is unavailable"),
+        };
+        let result = engine.execute_checked(&command_id, params);
+        let events = engine.drain_events();
+        match result {
+            Ok(value) => json!({
+                "protocolVersion": 1,
+                "ok": true,
+                "result": value,
+                "revision": engine.revision,
+                "events": events
+            }),
+            Err(error) => json!({
+                "protocolVersion": 1,
+                "ok": false,
+                "error": error.to_string(),
+                "revision": engine.revision,
+                "events": events
+            }),
+        }
+    }));
+
+    match outcome {
+        Ok(value) => response_string(&mut env, value),
+        Err(_) => response_string(&mut env, error_response("EffectCraft AI command execution panicked")),
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_kinetic_app_engine_EffectCraftAiNative_nativeExecuteBatch(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    commands_json: JString<'_>,
+) -> jstring {
+    let outcome = catch_unwind(AssertUnwindSafe(|| {
+        let commands_text = match env.get_string(&commands_json) {
+            Ok(value) => value.to_string_lossy().into_owned(),
+            Err(_) => return error_response("Could not read AI command batch from Kotlin"),
+        };
+        let commands: Vec<Value> = match serde_json::from_str(&commands_text) {
+            Ok(value) => value,
+            Err(error) => return error_response(format!("Invalid AI command batch JSON: {error}")),
+        };
+        let mut engine = match ai_session().lock() {
+            Ok(engine) => engine,
+            Err(_) => return error_response("AI EffectCraft session lock is unavailable"),
+        };
+        let mut results = Vec::with_capacity(commands.len());
+        let mut events = Vec::new();
+        let mut ok = true;
+        for (index, entry) in commands.iter().enumerate() {
+            let Some(command_id) = entry.get("command").and_then(Value::as_str) else {
+                results.push(json!({"ok": false, "error": format!("AI batch entry {index} is missing command")}));
+                ok = false;
+                break;
+            };
+            let params = entry.get("params").cloned().unwrap_or_else(|| json!({}));
+            if !params.is_object() {
+                results.push(json!({"command": command_id, "ok": false, "error": "AI batch params must be an object"}));
+                ok = false;
+                break;
+            }
+            match engine.execute_checked(command_id, params) {
+                Ok(value) => results.push(json!({"command": command_id, "ok": true, "result": value})),
+                Err(error) => {
+                    results.push(json!({"command": command_id, "ok": false, "error": error.to_string()}));
+                    ok = false;
+                }
+            }
+            events.extend(engine.drain_events());
+            if !ok {
+                break;
+            }
+        }
+        json!({
+            "protocolVersion": 1,
+            "ok": ok,
+            "results": results,
+            "revision": engine.revision,
+            "events": events
+        })
+    }));
+
+    match outcome {
+        Ok(value) => response_string(&mut env, value),
+        Err(_) => response_string(&mut env, error_response("EffectCraft AI command batch panicked")),
+    }
+}
+
+/// Render a complete AI-authored EffectCraft composition through the native
+/// compositor. The comp id is returned by comp.new / project inspection commands.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_kinetic_app_engine_EffectCraftAiNative_nativeRenderFrame(
+    mut env: JNIEnv<'_>,
+    _class: JClass<'_>,
+    comp_id: jni::sys::jlong,
+    time_seconds: jni::sys::jfloat,
+    max_side: jni::sys::jint,
+) -> jni::sys::jbyteArray {
+    let result = catch_unwind(AssertUnwindSafe(|| -> Result<Vec<u8>, String> {
+        if comp_id < 0 || !time_seconds.is_finite() || max_side <= 0 {
+            return Err("Invalid EffectCraft AI render request".into());
+        }
+        let mut engine = ai_session().lock().map_err(|_| "AI EffectCraft session lock is unavailable")?;
+        let (width, height, pixels) = engine.render_rgba8_alpha(
+            ItemId(comp_id as u64),
+            Tick::from_seconds_f64(f64::from(time_seconds)),
+            max_side as u32,
+            true,
+        ).map_err(|error| error.to_string())?;
+        let mut output = Vec::with_capacity(8 + pixels.len());
+        output.extend_from_slice(&width.to_le_bytes());
+        output.extend_from_slice(&height.to_le_bytes());
+        output.extend_from_slice(&pixels);
+        Ok(output)
+    }));
+
+    match result {
+        Ok(Ok(bytes)) => env.byte_array_from_slice(&bytes)
+            .map(|array| array.into_raw()).unwrap_or(std::ptr::null_mut()),
+        Ok(Err(error)) => {
+            let _ = env.throw_new("java/lang/IllegalStateException", error);
+            std::ptr::null_mut()
+        }
+        Err(_) => {
+            let _ = env.throw_new("java/lang/IllegalStateException", "EffectCraft AI renderer panicked");
+            std::ptr::null_mut()
+        }
+    }
+}
