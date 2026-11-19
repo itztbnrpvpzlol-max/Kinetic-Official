@@ -2,6 +2,11 @@ package com.kinetic.app.ai
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.media.AudioFormat
+import android.media.MediaCodec
+import android.media.MediaExtractor
+import android.media.MediaFormat
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.provider.OpenableColumns
@@ -13,6 +18,7 @@ import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.sqrt
 
 /**
  * Authors the AI edit directly in an isolated EffectCraft Session.
@@ -22,13 +28,15 @@ import kotlin.math.min
  * importer consumes paths, then native commands author the complete composition.
  */
 internal object EffectCraftAiComposer {
-    private data class SourceShot(val sourceIndex: Int, val sourceStart: Float, val duration: Float, val energy: Float)
+    private data class SourceShot(val sourceIndex: Int, val sourceStart: Float, val duration: Float, val energy: Float, val saturation: Float)
 
     data class Composition(
         val compId: Long,
         val durationSeconds: Float,
         val audioUri: Uri?,
-        val sourceFiles: List<File>
+        val sourceFiles: List<File>,
+        val beatCount: Int,
+        val learnedSamples: Int
     )
 
     fun build(
@@ -37,6 +45,8 @@ internal object EffectCraftAiComposer {
         audio: List<Uri>,
         prompt: String,
         style: String,
+        styleReferences: List<Uri>,
+        priorities: Set<String>,
         durationSeconds: Float,
         fps: Int,
         onProgress: (String) -> Unit = {}
@@ -222,12 +232,12 @@ internal object EffectCraftAiComposer {
             while (segmentStart < sceneEnd - 0.25f) {
                 val segmentDuration = min(targetLength, sceneEnd - segmentStart)
                 if (segmentDuration >= 0.35f) {
-                    result.add(SourceShot(0, segmentStart, segmentDuration, sceneEnergy))
+                    result.add(SourceShot(0, segmentStart, segmentDuration, sceneEnergy, sceneSaturation))
                 }
                 segmentStart += targetLength
             }
         }
-        return result.ifEmpty { listOf(SourceShot(0, 0f, sourceDuration.coerceAtLeast(0.35f), 0f)) }
+        return result.ifEmpty { listOf(SourceShot(0, 0f, sourceDuration.coerceAtLeast(0.35f), 0f, 0.5f)) }
     }
 
     private fun transitionFor(index: Int, energy: Float, style: String): Pair<String, Float> {
