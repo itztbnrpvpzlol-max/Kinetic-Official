@@ -15,15 +15,6 @@ foreach(required_file
     endif()
 endforeach()
 
-add_library(kinetic_effects SHARED kinetic_effects.cpp)
-find_library(jnigraphics-lib jnigraphics)
-find_library(effects-log-lib log)
-find_library(effects-m-lib m)
-target_compile_features(kinetic_effects PRIVATE cxx_std_17)
-target_compile_options(kinetic_effects PRIVATE -O3 -fexceptions -fno-rtti)
-target_link_options(kinetic_effects PRIVATE "-Wl,-z,max-page-size=16384")
-target_link_libraries(kinetic_effects ${jnigraphics-lib} ${effects-log-lib} ${effects-m-lib})
-
 add_library(kinetic_engine SHARED
     kinetic_engine.cpp
     ffmpeg_decoder.cpp

@@ -63,7 +63,7 @@ import com.kinetic.app.model.LayerType
 import com.kinetic.app.model.PropId
 import com.kinetic.app.model.layerMatrix
 import com.kinetic.app.model.EffectInstance
-import com.kinetic.app.engine.NativeEffectsEngine
+import com.kinetic.app.engine.EffectStackRunner
 import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
 import android.net.Uri
@@ -126,11 +126,11 @@ fun PreviewCanvas(
                 val source = clip.uri ?: continue
                 val sourceUri = Uri.parse(source)
                 val sampleFps = if (
-                    MediaWorkers.isConstrainedDevice && clip.effectStack.any { it.enabled }
+                    MediaWorkers.isConstrainedDevice && EffectStackRunner.hasPictureEffects(clip.effectStack)
                 ) 12 else MediaLoader.CPU_PREVIEW_SAMPLE_FPS
                 // Playback paths use 320px frames. A 448px paused/direct preview
                 // sample is also retained on larger devices, without extra RAM use.
-                val edgeVariants = if (MediaWorkers.isConstrainedDevice || clip.effectStack.any { it.enabled }) {
+                val edgeVariants = if (MediaWorkers.isConstrainedDevice || EffectStackRunner.hasPictureEffects(clip.effectStack)) {
                     listOf(320)
                 } else {
                     listOf(320, 448)
@@ -178,7 +178,17 @@ fun PreviewCanvas(
     // TextureView is a bottom-layer surface. Keep it only when the one active
     // video is the lowest visual layer; Canvas then draws stills/text/shapes
     // above it without ever copying the decoded video frame into a Bitmap.
-    val hasEffects = activeVisualLayers.any { layer -> layer.effectStack.any { it.enabled } }
+    // Effects on an adjustment layer act on the flattened composition, which the Canvas
+    // compositor builds; the GLES and direct-surface paths do not.
+    val hasAdjustmentFx by remember(editor) {
+        derivedStateOf {
+            editor.layers.any {
+                it.type == LayerType.ADJUSTMENT && it.visible && it.activeAt(editor.time) &&
+                    EffectStackRunner.hasPictureEffects(it.effectStack)
+            }
+        }
+    }
+    val hasEffects = activeVisualLayers.any { layer -> EffectStackRunner.hasPictureEffects(layer.effectStack) }
     val hasComplexMasks = activeVisualLayers.any { it.maskEnabled && it.maskPath != null }
     val directVideo = videoLayers.singleOrNull()
         ?.takeIf {
@@ -186,7 +196,9 @@ fun PreviewCanvas(
                 !hasEffects && canUseDirectSurfaceVideo(it)
         }
 
-    if (directVideo != null) {
+    if (hasAdjustmentFx) {
+        CpuPreviewCanvas(editor, modifier)
+    } else if (directVideo != null) {
         Box(modifier.fillMaxSize()) {
             DirectSurfaceVideoPreview(editor, directVideo, Modifier.fillMaxSize(), playback)
             CpuPreviewCanvas(editor, Modifier.fillMaxSize(), directVideoLayerId = directVideo.id)
@@ -293,8 +305,8 @@ private fun GpuCompositionPreviewCanvas(
     // CPU effects are prepared off the GL thread. The renderer only uploads ready bitmaps.
     val effectedFrames = remember { mutableStateMapOf<String, Bitmap>() }
     val effectFrameKeys = remember { mutableMapOf<String, Long>() }
-    val motionTileFrames = remember { mutableStateMapOf<String, Bitmap>() }
-    val motionTileKeys = remember { mutableMapOf<String, Long>() }
+    // Room (layer units: left, top, right, bottom) that a layer's effects painted outside its bounds.
+    val effectMargins = remember { mutableMapOf<String, FloatArray>() }
     // Preserve a recent decoded sample across adjacent split segments that share a source URI.
     val recentVideoFrames = remember { mutableStateMapOf<String, RecentVideoPreviewFrame>() }
     val textTextures = remember { mutableMapOf<String, Pair<Int, Bitmap>>() }
@@ -310,7 +322,7 @@ private fun GpuCompositionPreviewCanvas(
     // Effect-bearing clips are intentionally excluded and decoded to bounded
     // bitmaps so the independent native CPU engine can process their pixels.
     val videoLayers = activeVideoLayers
-        .filter { failedVideoSources[it.id] != it.uri && it.effectStack.none { effect -> effect.enabled } }
+        .filter { failedVideoSources[it.id] != it.uri && !EffectStackRunner.hasPictureEffects(it.effectStack) }
         .take(decoderLimit)
     val textureVideoIds = videoLayers.mapTo(HashSet<String>()) { it.id }
 
@@ -323,9 +335,7 @@ private fun GpuCompositionPreviewCanvas(
             val old = effectedFrames.remove(id)
             if (old != null && !old.isRecycled) old.recycle()
             effectFrameKeys.remove(id)
-            val tile = motionTileFrames.remove(id)
-            if (tile != null && !tile.isRecycled) tile.recycle()
-            motionTileKeys.remove(id)
+            effectMargins.remove(id)
         }
         val stale = textTextures.keys.filter { it !in currentIds }
         stale.forEach { textTextures.remove(it) }
@@ -335,7 +345,7 @@ private fun GpuCompositionPreviewCanvas(
 
     // Untouched video uses SurfaceTexture as a GPU source texture. Effect-bearing
     // video uses the bitmap path above so effects never depend on a GPU shader.
-    val hasEffectVideo = activeVideoLayers.any { layer -> layer.effectStack.any { it.enabled } }
+    val hasEffectVideo = activeVideoLayers.any { layer -> EffectStackRunner.hasPictureEffects(layer.effectStack) }
     // Keep native CPU effects below the decoder's maximum sample rate on
     // constrained devices; the GL thread remains free to composite each frame.
     val compositionFps = if (hasEffectVideo) {
@@ -530,67 +540,50 @@ private fun GpuCompositionPreviewCanvas(
             val now = latestTimelineTime.value
             val playing = latestPlaying.value
             for (layer in editor.layers) {
-                if (!layer.visible || !layer.activeAt(now)) {
-                    motionTileFrames.remove(layer.id)?.let { if (!it.isRecycled) it.recycle() }
-                    motionTileKeys.remove(layer.id)
+                if (!layer.visible || !layer.activeAt(now) || layer.type == LayerType.AUDIO) {
+                    effectMargins.remove(layer.id)
                     continue
                 }
-                val source = frames[layer.id] ?: continue
-                val activeEffects = layer.effectStack.filter { it.enabled }.take(8)
+                // Clips and images use their decoded frame; text and shapes their raster.
+                val source = frames[layer.id]
+                    ?: textTextures[layer.id]?.second?.takeIf { !it.isRecycled && (layer.type == LayerType.TEXT || layer.type == LayerType.SHAPE) }
+                    ?: continue
+                val activeEffects = EffectStackRunner.pictureEffects(layer.effectStack).take(12)
                 if (activeEffects.isEmpty()) {
                     val old = effectedFrames.remove(layer.id)
                     if (old != null && old !== source && !old.isRecycled) old.recycle()
                     effectFrameKeys.remove(layer.id)
-                    val oldTile = motionTileFrames.remove(layer.id)
-                    if (oldTile != null && !oldTile.isRecycled) oldTile.recycle()
-                    motionTileKeys.remove(layer.id)
+                    effectMargins.remove(layer.id)
                     continue
                 }
-                if (!layer.visible || !layer.activeAt(now)) continue
-                val timeDependent = activeEffects.any { effect ->
-                    effect.name == "Wave Warp" || effect.name == "Warp Shake" ||
-                        effect.name == "Oscillate" || effect.parameterKeys.values.any { it.isNotEmpty() }
-                }
-                val timeBucket = if (timeDependent) {
-                    (now * effectSampleFps).toInt()
-                } else 0
+                val timeDependent = EffectStackRunner.isTimeDependent(activeEffects)
+                val timeBucket = if (timeDependent) (now * effectSampleFps).toInt() else 0
                 var keyValue = System.identityHashCode(source).toLong()
                 keyValue = keyValue * 31L + activeEffects.hashCode().toLong()
                 keyValue = keyValue * 31L + timeBucket.toLong()
                 if (effectFrameKeys[layer.id] == keyValue) continue
 
-                val motionTile = activeEffects.lastOrNull { it.name == "Motion Tile" }
-                val rendered = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
-                    NativeEffectsEngine.processBitmap(source, activeEffects.filterNot { it.name == "Motion Tile" }, now)
+                val maxPixels = if (MediaWorkers.isConstrainedDevice) 1_500_000 else 4_000_000
+                val result = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                    EffectStackRunner.processBitmapGrown(
+                        source, activeEffects, now, now - layer.start, compositionFps.toFloat(),
+                        layer.width, layer.height, maxPixels
+                    )
                 }
-                val tileSource = rendered ?: source
-                val tileRendered = if (motionTile != null) {
-                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
-                        NativeEffectsEngine.createMotionTileBackground(tileSource, motionTile, now)
-                    }
-                } else null
-                val stillCurrent = frames[layer.id] === source &&
-                    (!timeDependent ||
-                        (latestTimelineTime.value * effectSampleFps).toInt() == timeBucket)
+                val stillCurrent = (frames[layer.id] === source || textTextures[layer.id]?.second === source) &&
+                    (!timeDependent || (latestTimelineTime.value * effectSampleFps).toInt() == timeBucket)
                 if (stillCurrent) {
-                    if (motionTile == null) {
-                        val oldTile = motionTileFrames.remove(layer.id)
-                        if (oldTile != null && !oldTile.isRecycled) oldTile.recycle()
-                        motionTileKeys.remove(layer.id)
-                    } else if (tileRendered != null) {
-                        val oldTile = motionTileFrames.put(layer.id, tileRendered)
-                        if (oldTile != null && oldTile !== tileRendered && !oldTile.isRecycled) oldTile.recycle()
-                        motionTileKeys[layer.id] = keyValue
-                    }
-                    val next = rendered ?: source
+                    val next = result?.bitmap ?: source
                     val previous = effectedFrames.put(layer.id, next)
                     if (previous != null && previous !== source && previous !== next && !previous.isRecycled) {
                         previous.recycle()
                     }
+                    if (result != null && result.grown) {
+                        effectMargins[layer.id] = floatArrayOf(result.left, result.top, result.right, result.bottom)
+                    } else effectMargins.remove(layer.id)
                     effectFrameKeys[layer.id] = keyValue
                 } else {
-                    if (rendered != null && rendered !== source && !rendered.isRecycled) rendered.recycle()
-                    if (tileRendered != null && !tileRendered.isRecycled) tileRendered.recycle()
+                    if (result != null && !result.bitmap.isRecycled) result.bitmap.recycle()
                 }
             }
             kotlinx.coroutines.delay(if (playing) 16L else 50L)
@@ -615,22 +608,6 @@ private fun GpuCompositionPreviewCanvas(
         val sourceBitmap = when (layer.type) {
             LayerType.IMAGE, LayerType.VIDEO -> effectedFrames[layer.id] ?: frames[layer.id]
             else -> null
-        }
-        val tileBitmap = motionTileFrames[layer.id]
-        if (tileBitmap != null && sourceBitmap != null && !tileBitmap.isRecycled) {
-            val tileEffect = layer.effectStack.lastOrNull { it.enabled && it.name == "Motion Tile" }
-            val expandedWidth = layer.width * ((tileEffect?.parameterAt("Output Width", editor.time, 2000f) ?: 2000f).coerceIn(100f, 2000f) / 100f)
-            val expandedHeight = layer.height * ((tileEffect?.parameterAt("Output Height", editor.time, 2000f) ?: 2000f).coerceIn(100f, 2000f) / 100f)
-            val marginX = (expandedWidth - layer.width) * 0.5f
-            val marginY = (expandedHeight - layer.height) * 0.5f
-            val backdropMatrix = Matrix(layerMatrix(layer, editor.time, byId)).apply {
-                preTranslate(-marginX, -marginY)
-            }
-            renderLayers += GpuLayer(
-                "${layer.id}#motion-tile", tileBitmap, backdropMatrix,
-                expandedWidth, expandedHeight, (layer.p(PropId.OPACITY).valueAt(editor.time) / 100f).coerceIn(0f, 1f),
-                false, "Grayscale" in layer.effects, layer.blendMode, false, emptyList()
-            )
         }
         val bitmap = when (layer.type) {
             LayerType.IMAGE, LayerType.VIDEO -> sourceBitmap
@@ -694,9 +671,19 @@ private fun GpuCompositionPreviewCanvas(
             else -> null
         } ?: continue
         val opacity = (layer.p(PropId.OPACITY).valueAt(editor.time) / 100f).coerceIn(0f, 1f)
+        val effected = if (layer.type == LayerType.TEXT || layer.type == LayerType.SHAPE)
+            effectedFrames[layer.id]?.takeIf { !it.isRecycled } else null
+        val drawBitmap = effected ?: bitmap
+        // Effects may paint beyond the layer (glow, shadow, tiling): draw the enlarged result,
+        // shifted so the original content stays where it was.
+        val margin = if (effected != null || layer.type == LayerType.IMAGE || layer.type == LayerType.VIDEO)
+            effectMargins[layer.id] else null
+        val quadMatrix = Matrix(layerMatrix(layer, editor.time, byId))
+        if (margin != null) quadMatrix.preTranslate(-margin[0], -margin[1])
         renderLayers += GpuLayer(
-            layer.id, bitmap, Matrix(layerMatrix(layer, editor.time, byId)),
-            layer.width, layer.height, opacity, layer.maskEnabled,
+            layer.id, drawBitmap, quadMatrix,
+            layer.width + (margin?.let { it[0] + it[2] } ?: 0f), layer.height + (margin?.let { it[1] + it[3] } ?: 0f),
+            opacity, layer.maskEnabled,
             "Grayscale" in layer.effects, layer.blendMode, false, emptyList()
         )
     }

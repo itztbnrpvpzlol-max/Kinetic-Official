@@ -136,6 +136,38 @@ jobs:
             test -s "app/src/main/cpp/ffmpeg/prebuilt/${abi}/include/libavcodec/mediacodec.h"
           done
 
+      - name: Set up Rust
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
+          rustc --version
+
+      - name: Cache Rust build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin
+            ~/.cargo/registry
+            ~/.cargo/git
+            native/effectcraft-android/target
+          key: kinetic-effectcraft-${{ hashFiles('native/effectcraft-android/Cargo.lock') }}-v1
+
+      - name: Build EffectCraft engine (all ABIs)
+        shell: bash
+        working-directory: native/effectcraft-android
+        run: |
+          set -euo pipefail
+          command -v cargo-ndk >/dev/null || cargo install cargo-ndk --locked
+          export ANDROID_NDK_HOME="${ANDROID_HOME}/ndk/26.1.10909125"
+          cargo ndk -t arm64-v8a -t armeabi-v7a -t x86_64 --platform 26 \
+            -o ../../app/src/main/jniLibs build --release --locked
+          for abi in arm64-v8a armeabi-v7a x86_64; do
+            test -s "../../app/src/main/jniLibs/${abi}/libkinetic_effectcraft.so"
+          done
+
       - name: Build debug APK
         run: gradle assembleDebug --no-daemon -PKINETIC_VERSION_CODE="${KINETIC_VERSION_CODE}" -PKINETIC_VERSION_NAME="${KINETIC_VERSION_NAME}"
 

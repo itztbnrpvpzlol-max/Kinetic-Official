@@ -795,9 +795,9 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
         selectedKey = sorted.indexOf(moved)
     }
 
-    fun addEffect(layerId: String, name: String): Boolean {
+    fun addEffect(layerId: String, effectId: String): Boolean {
         if (layers.none { it.id == layerId }) return false
-        val effect = createEffect(name) ?: return false
+        val effect = createEffect(effectId) ?: return false
         updateLayer(layerId) { layer -> layer.copy(effectStack = layer.effectStack + effect) }
         return layers.firstOrNull { it.id == layerId }?.effectStack?.any { it.id == effect.id } == true
     }

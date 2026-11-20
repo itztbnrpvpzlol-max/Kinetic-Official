@@ -1,5 +1,6 @@
 package com.kinetic.app.ui
 
+import com.kinetic.app.engine.EffectStackRunner
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.SurfaceTexture
@@ -58,7 +59,7 @@ import kotlinx.coroutines.delay
 internal fun canUseDirectSurfaceVideo(layer: Layer): Boolean {
     if (layer.type != com.kinetic.app.model.LayerType.VIDEO ||
         layer.parentId != null || layer.maskEnabled || layer.blendMode != "Normal" ||
-        layer.effects.isNotEmpty() || layer.effectStack.any { it.enabled }
+        layer.effects.isNotEmpty() || EffectStackRunner.hasPictureEffects(layer.effectStack)
     ) return false
 
     val speedProp = layer.p(PropId.SPEED)

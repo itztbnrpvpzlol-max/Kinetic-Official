@@ -39,7 +39,7 @@ class ProjectStore(context: Context) {
         val layers = JSONArray()
         editor.layers.forEach { layer -> layers.put(layerToJson(layer)) }
         val json = JSONObject()
-            .put("version", 2)
+            .put("version", 3)
             .put("id", editor.projectId)
             .put("name", editor.projectName)
             .put("updatedAt", System.currentTimeMillis())
@@ -60,20 +60,10 @@ class ProjectStore(context: Context) {
 
     fun load(id: String): LoadedProject? = try {
         val json = JSONObject(File(root, "$id.kinetic").readText())
-        val projectVersion = json.optInt("version", 1)
         val layersJson = json.optJSONArray("layers") ?: JSONArray()
         val layers = (0 until layersJson.length()).mapNotNull { i ->
             try {
                 val layerJson = layersJson.getJSONObject(i)
-                // Version 1 called the original ghost-trail treatment "Deep Glow".
-                // Preserve those saved projects by migrating it to Morphosis.
-                if (projectVersion < 2) {
-                    val stack = layerJson.optJSONArray("effectStack") ?: JSONArray()
-                    for (effectIndex in 0 until stack.length()) {
-                        val effect = stack.optJSONObject(effectIndex) ?: continue
-                        if (effect.optString("name") == "Deep Glow") effect.put("name", "Morphosis")
-                    }
-                }
                 layerFromJson(layerJson)
             } catch (_: Exception) { null }
         }
@@ -139,9 +129,12 @@ class ProjectStore(context: Context) {
                             }
                         })
                     }
+                    val texts = JSONObject()
+                    effect.texts.forEach { (key, value) -> texts.put(key, value) }
                     array.put(JSONObject().put("id", effect.id).put("name", effect.name)
+                        .put("effectId", effect.effectId)
                         .put("enabled", effect.enabled).put("parameters", parameters)
-                        .put("parameterKeys", parameterKeys))
+                        .put("parameterKeys", parameterKeys).put("texts", texts))
                 }
             })
             .put("speed", l.p(PropId.SPEED).base.toDouble()).put("volume", l.p(PropId.VOLUME).base.toDouble())
@@ -223,8 +216,13 @@ class ProjectStore(context: Context) {
             effectStack = (j.optJSONArray("effectStack") ?: JSONArray()).let { array ->
                 (0 until array.length()).mapNotNull { index ->
                     val item = array.optJSONObject(index) ?: return@mapNotNull null
-                    val name = item.optString("name")
-                    val defaults = createEffect(name)?.parameters ?: return@mapNotNull null
+                    // Effects saved before the EffectCraft engine have no effect id. They were
+                    // Kinetic's built-in effects, which no longer exist, so they are not loaded.
+                    val effectId = item.optString("effectId")
+                    if (effectId.isBlank()) return@mapNotNull null
+                    val template = createEffect(effectId) ?: return@mapNotNull null
+                    val name = template.name
+                    val defaults = template.parameters
                     val jsonParameters = item.optJSONObject("parameters") ?: JSONObject()
                     val parameters = defaults.toMutableMap()
                     val iterator = jsonParameters.keys()
@@ -247,8 +245,11 @@ class ProjectStore(context: Context) {
                         }.sortedBy { it.t }
                         if (keys.isNotEmpty()) parameterKeys[parameter] = keys
                     }
+                    val textJson = item.optJSONObject("texts") ?: JSONObject()
+                    val texts = template.texts.toMutableMap()
+                    textJson.keys().forEach { key -> texts[key] = textJson.optString(key) }
                     EffectInstance(item.optString("id", UUID.randomUUID().toString()), name,
-                        item.optBoolean("enabled", true), parameters, parameterKeys)
+                        item.optBoolean("enabled", true), parameters, parameterKeys, effectId, texts)
                 }
             },
             speed = j.optDouble("speed", 1.0).toFloat().coerceIn(0.1f, 4f),

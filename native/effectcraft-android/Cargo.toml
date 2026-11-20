@@ -1,0 +1,29 @@
+[package]
+name = "kinetic-effectcraft"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+publish = false
+description = "JNI bridge exposing the EffectCraft effects library (catalog, parameters, CPU image and audio processing) to Kinetic"
+
+[lib]
+name = "kinetic_effectcraft"
+crate-type = ["cdylib", "rlib"]
+
+# Only the effects library and its tiny dependency set are compiled for Android.
+# The desktop UI, GPU compositor, audio backends and helper processes of the
+# upstream workspace are intentionally not part of this build.
+[dependencies]
+effectcraft-effects = { git = "https://github.com/storytold/effectcraft", rev = "f32ad3aa3b0a8e853ad41db3965fe19455a693cb" }
+effectcraft-keyframe = { git = "https://github.com/storytold/effectcraft", rev = "f32ad3aa3b0a8e853ad41db3965fe19455a693cb" }
+effectcraft-raster = { git = "https://github.com/storytold/effectcraft", rev = "f32ad3aa3b0a8e853ad41db3965fe19455a693cb" }
+effectcraft-project = { git = "https://github.com/storytold/effectcraft", rev = "f32ad3aa3b0a8e853ad41db3965fe19455a693cb" }
+jni = "0.21.1"
+serde_json = "1"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 4
+strip = true
+panic = "unwind"

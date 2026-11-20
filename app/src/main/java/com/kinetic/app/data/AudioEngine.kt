@@ -1,5 +1,7 @@
 package com.kinetic.app.data
 
+import com.kinetic.app.engine.EffectStackRunner
+import com.kinetic.app.model.EffectInstance
 import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioFormat
@@ -107,7 +109,7 @@ class AudioEngine(context: Context) {
             }
             // Keep audio on the exact same timeline time as the video transport clock.
             val targetMs = sourcePositionMs(layer, time)
-            player.sync(targetMs, layer.speedAt(time), clipVolume)
+            player.sync(targetMs, layer.speedAt(time), clipVolume, layer.effectStack, time)
         }
         players.keys.filter { it !in activeIds }.toList().forEach(::releasePlayer)
     }
@@ -161,6 +163,11 @@ class AudioEngine(context: Context) {
         @Volatile private var dropBeforeUs = -1L
         @Volatile private var track: AudioTrack? = null
         @Volatile private var prepareSucceeded = false
+        // EffectCraft audio effects for this clip, and the recent raw input that is fed back in
+        // as pre-roll so filters, delays and reverbs stay continuous across decoder blocks.
+        @Volatile private var audioStack: List<EffectInstance> = emptyList()
+        @Volatile private var audioTime = 0f
+        private var effectHistory = FloatArray(0)
         private val prepareLatch = CountDownLatch(1)
         private val worker = Thread(::decodeLoop, "KineticAudioClip").apply {
             priority = Thread.NORM_PRIORITY + 1
@@ -176,8 +183,10 @@ class AudioEngine(context: Context) {
             }
         }
 
-        fun sync(positionMs: Long, speed: Float, volume: Float) {
+        fun sync(positionMs: Long, speed: Float, volume: Float, effects: List<EffectInstance>, time: Float) {
             if (closed) return
+            audioStack = EffectStackRunner.audioEffects(effects)
+            audioTime = time
             requestedSpeed = speed.coerceIn(0.1f, 4f)
             requestedVolume = volume.coerceIn(0f, 2f)
             val now = SystemClock.elapsedRealtime()
@@ -241,7 +250,7 @@ class AudioEngine(context: Context) {
                         pendingSeekMs = -1L
                         runCatching { track?.pause(); track?.flush() }
                         trackStarted = false
-                        dropBeforeUs = seek * 1_000L
+                        effectHistory = FloatArray(0); dropBeforeUs = seek * 1_000L
                         extractor.seekTo(seek * 1000L, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
                         codec.flush()
                         inputEos = false
@@ -393,6 +402,45 @@ class AudioEngine(context: Context) {
             // block first, otherwise startup underrun adds audible delay.
         }
 
+        /** Runs the clip's audio effects over 16-bit PCM in place (mono is processed as stereo). */
+        private fun applyAudioEffects(buffer: ByteBuffer, start: Int, bytes: Int, presentationUs: Long) {
+            val stack = audioStack
+            val channels = pcmChannelCount
+            if (stack.isEmpty() || bytesPerSample != 2 || channels !in 1..2) return
+            val frames = bytes / (2 * channels)
+            if (frames <= 0) return
+            val rate = sampleRate
+            // Real-time budget: at most a quarter second of pre-roll per block.
+            val wanted = (EffectStackRunner.audioPreroll(stack, audioTime).coerceIn(0.0, 0.25) * rate).toInt()
+            val keep = minOf(wanted, effectHistory.size / 2)
+            val block = FloatArray((keep + frames) * 2)
+            if (keep > 0) System.arraycopy(effectHistory, effectHistory.size - keep * 2, block, 0, keep * 2)
+            val input = buffer.duplicate().order(buffer.order())
+            input.position(start)
+            val shorts = input.asShortBuffer()
+            for (f in 0 until frames) {
+                val l = shorts.get() / 32768f
+                val r = if (channels == 2) shorts.get() / 32768f else l
+                block[(keep + f) * 2] = l
+                block[(keep + f) * 2 + 1] = r
+            }
+            // Remember the raw input (before effects) as the next block's pre-roll.
+            val total = keep + frames
+            val histFrames = minOf(wanted, total)
+            effectHistory = if (histFrames > 0) block.copyOfRange((total - histFrames) * 2, total * 2) else FloatArray(0)
+            val startSeconds = presentationUs / 1_000_000.0 - keep.toDouble() / rate
+            if (!EffectStackRunner.processAudio(block, rate, startSeconds, stack, audioTime)) return
+            val output = buffer.duplicate().order(buffer.order())
+            output.position(start)
+            val out = output.asShortBuffer()
+            for (f in 0 until frames) {
+                val l = block[(keep + f) * 2].coerceIn(-1f, 1f)
+                val r = block[(keep + f) * 2 + 1].coerceIn(-1f, 1f)
+                out.put((l * 32767f).toInt().toShort())
+                if (channels == 2) out.put((r * 32767f).toInt().toShort())
+            }
+        }
+
         private fun writePcm(buffer: ByteBuffer, size: Int, presentationTimeUs: Long) {
             val output = track ?: return
             var remaining = size
@@ -413,6 +461,10 @@ class AudioEngine(context: Context) {
                 }
                 dropBeforeUs = -1L
             }
+
+            if (remaining > 0 && audioStack.isNotEmpty()) {
+                runCatching { applyAudioEffects(buffer, buffer.position(), remaining, presentationTimeUs) }
+            } else if (effectHistory.isNotEmpty()) effectHistory = FloatArray(0)
 
             while (remaining > 0 && !closed && wantsPlayback) {
                 output.setVolume(requestedVolume.coerceIn(0f, 1f))

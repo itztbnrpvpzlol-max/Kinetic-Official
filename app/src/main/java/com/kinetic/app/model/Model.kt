@@ -4,7 +4,8 @@ import android.graphics.Matrix
 import java.util.Locale
 import java.util.UUID
 import com.kinetic.app.engine.NativeRenderEngine
-import com.kinetic.app.engine.NativeEffectsEngine
+import com.kinetic.app.engine.EffectCatalog
+import com.kinetic.app.engine.EffectKeyframes
 import kotlin.math.abs
 import kotlin.math.pow
 
@@ -311,30 +312,38 @@ data class LayerMask(
 
 data class EffectInstance(
     val id: String = UUID.randomUUID().toString(),
+    /** Display name (the EffectCraft effect's name). */
     val name: String,
     val enabled: Boolean = true,
+    /**
+     * Numeric parameter components keyed by [com.kinetic.app.engine.EcComponent.key]: `id` for
+     * plain values, `id.x`/`id.y` for points (fractions of the layer), `id.r/g/b/a` for colours.
+     */
     val parameters: Map<String, Float> = emptyMap(),
-    val parameterKeys: Map<String, List<Keyframe>> = emptyMap()
+    val parameterKeys: Map<String, List<Keyframe>> = emptyMap(),
+    /** EffectCraft effect id, for example `ec.blur.gaussian`. */
+    val effectId: String = "",
+    /** Text and file parameters by EffectCraft parameter id. */
+    val texts: Map<String, String> = emptyMap()
 ) {
+    /** Stable per instance, so random-based effects look the same on every frame and export. */
+    val seed: Int get() = id.hashCode() and 0x7fffffff
+
     fun parameterAt(key: String, time: Float, fallback: Float = 0f): Float {
         val base = parameters[key] ?: fallback
-        return NativeEffectsEngine.evaluateParameter(base, parameterKeys[key].orEmpty(), time)
+        return EffectKeyframes.evaluate(base, parameterKeys[key].orEmpty(), time)
             .takeIf { it.isFinite() } ?: fallback
     }
 }
 
-fun createEffect(name: String): EffectInstance? {
-    if (!NativeEffectsEngine.available) return null
-    val encoded = runCatching { NativeEffectsEngine.nativeCreateEffect(name) }.getOrNull() ?: return null
-    if (encoded.isEmpty() || encoded.size % 2 != 0) return null
-    val parameters = LinkedHashMap<String, Float>(encoded.size / 2)
-    var index = 0
-    while (index < encoded.size) {
-        val value = encoded[index + 1].toFloatOrNull()?.takeIf { it.isFinite() } ?: return null
-        parameters[encoded[index]] = value
-        index += 2
-    }
-    return EffectInstance(name = name, parameters = parameters)
+/** A new instance of the EffectCraft effect [effectId] with the engine's default parameters. */
+fun createEffect(effectId: String): EffectInstance? {
+    val spec = EffectCatalog.find(effectId) ?: return null
+    val parameters = LinkedHashMap<String, Float>()
+    spec.components.forEach { parameters[it.key] = it.default }
+    val texts = spec.params.filter { it.components.isEmpty() && it.defaultText != null }
+        .associate { it.id to it.defaultText!! }
+    return EffectInstance(name = spec.name, effectId = spec.id, parameters = parameters, texts = texts)
 }
 
 data class Layer(

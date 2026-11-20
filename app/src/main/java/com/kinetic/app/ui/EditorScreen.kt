@@ -58,7 +58,8 @@ import androidx.compose.runtime.snapshotFlow
 import android.os.SystemClock
 import com.kinetic.app.engine.NativePlaybackEngine
 import com.kinetic.app.engine.KreEngine
-import com.kinetic.app.engine.NativeEffectsEngine
+import com.kinetic.app.engine.EffectCatalog
+import com.kinetic.app.engine.EffectCraftNative
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -437,18 +438,19 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
         if (showEffectsScreen) {
             EffectsBrowserScreen(
                 onClose = { showEffectsScreen = false },
-                onAddEffect = { name ->
+                onAddEffect = { effectId ->
                     val layer = editor.selected
                     when {
                         layer == null -> {
                             Toast.makeText(ctx, "Select a layer before adding an effect", Toast.LENGTH_SHORT).show()
                         }
-                        !NativeEffectsEngine.available -> {
-                            val reason = NativeEffectsEngine.loadError?.take(96) ?: "unknown linker error"
-                            Toast.makeText(ctx, "CPU effects engine failed: $reason", Toast.LENGTH_LONG).show()
+                        !EffectCraftNative.available -> {
+                            val reason = EffectCraftNative.loadError?.take(96) ?: "unknown linker error"
+                            Toast.makeText(ctx, "EffectCraft engine failed: $reason", Toast.LENGTH_LONG).show()
                         }
-                        !editor.addEffect(layer.id, name) -> {
-                            Toast.makeText(ctx, "The native engine could not create $name", Toast.LENGTH_LONG).show()
+                        !editor.addEffect(layer.id, effectId) -> {
+                            val label = EffectCatalog.find(effectId)?.name ?: effectId
+                            Toast.makeText(ctx, "The effects engine could not create $label", Toast.LENGTH_LONG).show()
                         }
                         else -> {
                             showEffectsScreen = false

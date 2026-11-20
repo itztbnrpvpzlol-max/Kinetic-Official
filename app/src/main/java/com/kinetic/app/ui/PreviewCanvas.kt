@@ -40,7 +40,7 @@ import com.kinetic.app.model.PropId
 import com.kinetic.app.model.VectorPoint
 import com.kinetic.app.model.sourceElapsedAt
 import com.kinetic.app.model.layerMatrixInto
-import com.kinetic.app.engine.NativeEffectsEngine
+import com.kinetic.app.engine.EffectStackRunner
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import android.graphics.Path as AndroidPath
@@ -59,7 +59,14 @@ fun CpuPreviewCanvas(
     val ctx = LocalContext.current
     val bitmaps = remember { mutableStateMapOf<String, Bitmap>() }
     val effectedBitmaps = remember { mutableStateMapOf<String, Bitmap>() }
-    val motionTileBitmaps = remember { mutableStateMapOf<String, Bitmap>() }
+    // Room (layer units: left, top, right, bottom) that a clip's effects painted outside its bounds.
+    val effectMargins = remember { mutableMapOf<String, FloatArray>() }
+    // Effected rasters of text and shape layers, with their margins.
+    val vectorEffected = remember { mutableStateMapOf<String, EffectStackRunner.Effected>() }
+    val vectorKeys = remember { mutableMapOf<String, Long>() }
+    // Processed composition snapshots of adjustment layers (what lies beneath, after their effects).
+    val adjustmentFrames = remember { mutableStateMapOf<String, Bitmap>() }
+    val adjustmentKeys = remember { mutableMapOf<String, Long>() }
     val previewClock = remember(editor) { CpuPreviewClock() }
     val mediaLayers = editor.layers.filter {
         it.id != directVideoLayerId && it.uri != null && (it.type == LayerType.IMAGE || it.type == LayerType.VIDEO)
@@ -84,10 +91,10 @@ fun CpuPreviewCanvas(
         for (videoLayer in mediaLayers) {
             if (videoLayer.type != LayerType.VIDEO) continue
             val videoUri = videoLayer.uri ?: continue
-            val layerFps = if (MediaWorkers.isConstrainedDevice && videoLayer.effectStack.any { it.enabled }) {
+            val layerFps = if (MediaWorkers.isConstrainedDevice && EffectStackRunner.hasPictureEffects(videoLayer.effectStack)) {
                 12
             } else MediaLoader.CPU_PREVIEW_SAMPLE_FPS
-            val effected = videoLayer.effectStack.any { it.enabled }
+            val effected = EffectStackRunner.hasPictureEffects(videoLayer.effectStack)
             SmartFrameCache.startPrefetch(
                 this, ctx, Uri.parse(videoUri), layerFps,
                 edgeOf = { playing -> if (effected || playing || MediaWorkers.isConstrainedDevice) 320 else 640 }
@@ -114,9 +121,7 @@ fun CpuPreviewCanvas(
             if (old != null && old !== source && !old.isRecycled) old.recycle()
         }
         bitmaps.keys.toList().filterNot { it in validIds }.forEach { bitmaps.remove(it) }
-        motionTileBitmaps.keys.toList().filterNot { it in validIds }.forEach { id ->
-            motionTileBitmaps.remove(id)?.let { if (!it.isRecycled) it.recycle() }
-        }
+        effectMargins.keys.toList().filterNot { it in validIds }.forEach { effectMargins.remove(it) }
         val lastRequests = mutableMapOf<String, Pair<Int, Int>>()
         val retryAfterNs = mutableMapOf<String, Long>()
 
@@ -141,14 +146,14 @@ fun CpuPreviewCanvas(
                 } else 0f
                 // CPU effects are expensive on low-memory phones. Limit effect-bearing
                 // preview frames to 12 fps instead of queuing 20 fps of native work.
-                val sampleFps = if (MediaWorkers.isConstrainedDevice && layer.effectStack.any { it.enabled }) {
+                val sampleFps = if (MediaWorkers.isConstrainedDevice && EffectStackRunner.hasPictureEffects(layer.effectStack)) {
                     12
                 } else MediaLoader.CPU_PREVIEW_SAMPLE_FPS
                 val bucket = if (layer.type == LayerType.VIDEO) {
                     (sourceTime * sampleFps.toFloat()).toInt()
                 } else 0
                 val frameEdge = if (
-                    layer.effectStack.any { it.enabled } ||
+                    EffectStackRunner.hasPictureEffects(layer.effectStack) ||
                     (layer.type == LayerType.VIDEO && (playing || MediaWorkers.isConstrainedDevice))
                 ) 320 else 640
                 val requestKey = bucket to frameEdge
@@ -182,7 +187,7 @@ fun CpuPreviewCanvas(
                     (currentSourceTime * sampleFps.toFloat()).toInt()
                 } else 0
                 val currentEdge = if (
-                    layer.effectStack.any { it.enabled } ||
+                    EffectStackRunner.hasPictureEffects(layer.effectStack) ||
                     (layer.type == LayerType.VIDEO &&
                         (previewClock.playing || MediaWorkers.isConstrainedDevice))
                 ) 320 else 640
@@ -214,64 +219,97 @@ fun CpuPreviewCanvas(
     // worker is latest-only and samples animated effects at the preview rate;
     // no effect shader or Kotlin pixel-processing fallback is involved.
     LaunchedEffect(mediaLayerSignature) {
-        if (mediaLayers.none { layer -> layer.effectStack.any { it.enabled } }) return@LaunchedEffect
+        if (mediaLayers.none { layer -> EffectStackRunner.hasPictureEffects(layer.effectStack) }) return@LaunchedEffect
         val lastProcessed = mutableMapOf<String, Long>()
         while (true) {
             val timelineTime = previewClock.timeSec
             val playing = previewClock.playing
             for (layer in mediaLayers) {
                 if (!layer.visible || !layer.activeAt(timelineTime)) {
-                    motionTileBitmaps.remove(layer.id)?.let { if (!it.isRecycled) it.recycle() }
+                    effectMargins.remove(layer.id)
                     continue
                 }
                 val source = bitmaps[layer.id] ?: continue
-                val activeEffects = layer.effectStack.filter { it.enabled }.take(8)
+                val activeEffects = EffectStackRunner.pictureEffects(layer.effectStack).take(12)
                 if (activeEffects.isEmpty()) {
                     val previous = effectedBitmaps.remove(layer.id)
                     if (previous != null && previous !== source && !previous.isRecycled) previous.recycle()
-                    motionTileBitmaps.remove(layer.id)?.let { if (!it.isRecycled) it.recycle() }
+                    effectMargins.remove(layer.id)
                     lastProcessed.remove(layer.id)
                     continue
                 }
-                if (!layer.visible || !layer.activeAt(timelineTime)) continue
-                val timeDependent = playing || activeEffects.any { effect ->
-                    effect.name == "Wave Warp" || effect.name == "Warp Shake" ||
-                        effect.name == "Oscillate" || effect.parameterKeys.values.any { it.isNotEmpty() }
-                }
+                val timeDependent = playing || EffectStackRunner.isTimeDependent(activeEffects)
                 val effectSampleFps = if (MediaWorkers.isConstrainedDevice) 12 else MediaLoader.CPU_PREVIEW_SAMPLE_FPS
                 val timeBucket = if (timeDependent) (timelineTime * effectSampleFps).toInt() else 0
                 var key = System.identityHashCode(source).toLong()
                 key = (key * 31L) + activeEffects.hashCode().toLong()
                 key = (key * 31L) + timeBucket.toLong()
                 if (lastProcessed[layer.id] == key) continue
-                val motionTile = activeEffects.lastOrNull { it.name == "Motion Tile" }
-                val rendered = withContext(Dispatchers.Default) {
-                    NativeEffectsEngine.processBitmap(source, activeEffects.filterNot { it.name == "Motion Tile" }, timelineTime)
+                val maxPixels = if (MediaWorkers.isConstrainedDevice) 1_500_000 else 4_000_000
+                val result = withContext(Dispatchers.Default) {
+                    EffectStackRunner.processBitmapGrown(
+                        source, activeEffects, timelineTime, timelineTime - layer.start,
+                        editor.compSettings.fps.toFloat(), layer.width, layer.height, maxPixels
+                    )
                 }
-                val tileSource = rendered ?: source
-                val tileRendered = if (motionTile != null) {
-                    withContext(Dispatchers.Default) {
-                        NativeEffectsEngine.createMotionTileBackground(tileSource, motionTile, timelineTime)
-                    }
-                } else null
                 if (bitmaps[layer.id] === source && previewClock.timeSec.let { !timeDependent || (it * effectSampleFps).toInt() == timeBucket }) {
-                    if (motionTile == null) {
-                        motionTileBitmaps.remove(layer.id)?.let { if (!it.isRecycled) it.recycle() }
-                    } else if (tileRendered != null) {
-                        val oldTile = motionTileBitmaps.put(layer.id, tileRendered)
-                        if (oldTile != null && oldTile !== tileRendered && !oldTile.isRecycled) oldTile.recycle()
-                    }
-                    val previous = effectedBitmaps.put(layer.id, rendered ?: source)
-                    if (previous != null && previous !== source && previous !== rendered && !previous.isRecycled) previous.recycle()
+                    val next = result?.bitmap ?: source
+                    val previous = effectedBitmaps.put(layer.id, next)
+                    if (previous != null && previous !== source && previous !== next && !previous.isRecycled) previous.recycle()
+                    if (result != null && result.grown) effectMargins[layer.id] = floatArrayOf(result.left, result.top, result.right, result.bottom)
+                    else effectMargins.remove(layer.id)
                     lastProcessed[layer.id] = key
                 } else {
-                    if (rendered != null && rendered !== source && !rendered.isRecycled) rendered.recycle()
-                    if (tileRendered != null && !tileRendered.isRecycled) tileRendered.recycle()
+                    if (result != null && !result.bitmap.isRecycled) result.bitmap.recycle()
                 }
             }
             delay(if (playing) 40L else 80L)
         }
     }
+
+    // Text and shape layers take effects too: rasterize, process, and draw the result in place
+    // of the plain vector drawing. Old results are left to the GC rather than recycled, because
+    // the draw pass may still hold them.
+    val vectorSignature = editor.layers.filter { it.type == LayerType.TEXT || it.type == LayerType.SHAPE }.map {
+        "${it.id}|${it.text}|${it.color}|${it.width}|${it.height}|${it.shapeKind}|${it.vectorClosed}|${it.vectorPoints.hashCode()}|${it.visible}|${it.start}|${it.duration}|${it.effectStack.hashCode()}"
+    }
+    LaunchedEffect(vectorSignature) {
+        while (true) {
+            val time = previewClock.timeSec
+            val playing = previewClock.playing
+            for (layer in editor.layers) {
+                if (layer.type != LayerType.TEXT && layer.type != LayerType.SHAPE) continue
+                val stack = EffectStackRunner.pictureEffects(layer.effectStack).take(12)
+                if (stack.isEmpty() || !layer.visible || !layer.activeAt(time)) {
+                    vectorEffected.remove(layer.id)
+                    vectorKeys.remove(layer.id)
+                    continue
+                }
+                val timeDependent = playing || EffectStackRunner.isTimeDependent(stack)
+                val bucket = if (timeDependent) (time * 12).toInt() else 0
+                var key = layer.text.hashCode().toLong()
+                key = key * 31L + layer.color + layer.width.hashCode() + layer.height.hashCode() + layer.shapeKind.hashCode()
+                key = key * 31L + layer.vectorPointsAt(time).hashCode() + layer.vectorClosed.hashCode()
+                key = key * 31L + stack.hashCode() + bucket
+                if (vectorKeys[layer.id] == key) continue
+                val maxEdge = if (MediaWorkers.isConstrainedDevice) 320 else 768
+                val maxPixels = if (MediaWorkers.isConstrainedDevice) 1_000_000 else 3_000_000
+                val result = withContext(Dispatchers.Default) {
+                    val raster = LayerRaster.render(layer, time, maxEdge) ?: return@withContext null
+                    try {
+                        EffectStackRunner.processBitmapGrown(
+                            raster, stack, time, time - layer.start, editor.compSettings.fps.toFloat(),
+                            layer.width, layer.height, maxPixels
+                        )
+                    } finally { raster.recycle() }
+                }
+                if (result != null) vectorEffected[layer.id] = result else vectorEffected.remove(layer.id)
+                vectorKeys[layer.id] = key
+            }
+            delay(if (playing) 40L else 80L)
+        }
+    }
+
 
     val shapePaths = remember { mutableMapOf<String, android.graphics.Path>() }
     val layerSnapshot = editor.layers
@@ -304,6 +342,63 @@ fun CpuPreviewCanvas(
         Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; color = 0xFF3F95F7.toInt() }
     }
 
+    // Adjustment layers apply their effects to the whole composition beneath them: flatten those
+    // layers (after their own effects), run the stack, and draw the result at the layer's position.
+    val adjustmentSignature = editor.layers.filter { it.type == LayerType.ADJUSTMENT }.map {
+        "${it.id}|${it.visible}|${it.start}|${it.duration}|${it.effectStack.hashCode()}"
+    }
+    LaunchedEffect(adjustmentSignature) {
+        while (true) {
+            val time = previewClock.timeSec
+            val playing = previewClock.playing
+            for ((index, adj) in editor.layers.withIndex()) {
+                if (adj.type != LayerType.ADJUSTMENT) continue
+                val stack = EffectStackRunner.pictureEffects(adj.effectStack).take(12)
+                if (stack.isEmpty() || !adj.visible || !adj.activeAt(time)) {
+                    adjustmentFrames.remove(adj.id)
+                    adjustmentKeys.remove(adj.id)
+                    continue
+                }
+                val below = editor.layers.drop(index + 1).asReversed()
+                val sampleFps = if (MediaWorkers.isConstrainedDevice) 12 else 24
+                var key = editor.layers.hashCode().toLong()
+                key = key * 31L + stack.hashCode() + (time * sampleFps).toInt()
+                below.forEach { l ->
+                    key = key * 31L + System.identityHashCode(effectedBitmaps[l.id] ?: bitmaps[l.id] ?: vectorEffected[l.id]?.bitmap)
+                }
+                if (adjustmentKeys[adj.id] == key) continue
+                val maxEdge = if (MediaWorkers.isConstrainedDevice) 480 else 960
+                val result = withContext(Dispatchers.Default) {
+                    val flat = CompositeSnapshot.render(below, time, editor.compSettings.background.toInt(), maxEdge) { l ->
+                        when (l.type) {
+                            LayerType.IMAGE, LayerType.VIDEO -> {
+                                val bmp = effectedBitmaps[l.id] ?: bitmaps[l.id] ?: return@render null
+                                val base = destinationRects[l.id] ?: RectF(0f, 0f, l.width, l.height)
+                                val m = effectMargins[l.id]
+                                SnapshotPiece(bmp, if (m != null && effectedBitmaps[l.id] === bmp)
+                                    RectF(base.left - m[0], base.top - m[1], base.right + m[2], base.bottom + m[3]) else base)
+                            }
+                            LayerType.TEXT, LayerType.SHAPE -> {
+                                val fx = vectorEffected[l.id]?.takeIf { !it.bitmap.isRecycled }
+                                if (fx != null) SnapshotPiece(fx.bitmap, RectF(-fx.left, -fx.top, l.width + fx.right, l.height + fx.bottom))
+                                else LayerRaster.render(l, time, 512)?.let { SnapshotPiece(it, RectF(0f, 0f, l.width, l.height), temporary = true) }
+                            }
+                            else -> null
+                        }
+                    } ?: return@withContext null
+                    val processed = EffectStackRunner.processBitmap(
+                        flat, stack, time, time - adj.start, editor.compSettings.fps.toFloat(), adjustment = true
+                    )
+                    if (processed != null) flat.recycle()
+                    processed ?: flat
+                }
+                if (result != null) adjustmentFrames[adj.id] = result else adjustmentFrames.remove(adj.id)
+                adjustmentKeys[adj.id] = key
+            }
+            delay(if (playing) 40L else 100L)
+        }
+    }
+
     Canvas(
         if (directVideoLayerId == null) modifier.background(Color(editor.compSettings.background)) else modifier
     ) {
@@ -327,28 +422,22 @@ fun CpuPreviewCanvas(
             for (l in layers.asReversed()) {
                 if (!l.visible || !l.activeAt(time) || l.type == LayerType.AUDIO || l.id == directVideoLayerId) continue
                 val alpha = (l.p(PropId.OPACITY).valueAt(time) * 2.55f).toInt().coerceIn(0, 255)
+                if (l.type == LayerType.ADJUSTMENT) {
+                    // The processed snapshot already contains everything beneath this layer.
+                    val flat = adjustmentFrames[l.id]?.takeIf { !it.isRecycled }
+                    if (flat != null) {
+                        paint.alpha = alpha
+                        paint.color = android.graphics.Color.WHITE
+                        paint.xfermode = null
+                        paint.colorFilter = null
+                        nc.drawBitmap(flat, null, RectF(0f, 0f, COMP_W, COMP_H), paint)
+                    }
+                    continue
+                }
                 nc.save()
                 val layerMatrix = layerMatrices.getOrPut(l.id) { Matrix() }
                 layerMatrixInto(l, time, byId, layerMatrix, matrixScratch)
                 nc.concat(layerMatrix)
-                val motionTile = motionTileBitmaps[l.id]
-                val sourceForTile = bitmaps[l.id]
-                if (motionTile != null && sourceForTile != null && !motionTile.isRecycled && !sourceForTile.isRecycled) {
-                    val tileEffect = l.effectStack.lastOrNull { it.enabled && it.name == "Motion Tile" }
-                    val expandedWidth = l.width * ((tileEffect?.parameterAt("Output Width", time, 2000f) ?: 2000f).coerceIn(100f, 2000f) / 100f)
-                    val expandedHeight = l.height * ((tileEffect?.parameterAt("Output Height", time, 2000f) ?: 2000f).coerceIn(100f, 2000f) / 100f)
-                    val marginX = (expandedWidth - l.width) * 0.5f
-                    val marginY = (expandedHeight - l.height) * 0.5f
-                    paint.alpha = alpha
-                    paint.color = android.graphics.Color.WHITE
-                    paint.xfermode = blendModes[l.blendMode]
-                    paint.colorFilter = if ("Grayscale" in l.effects) grayscaleFilter else null
-                    nc.drawBitmap(
-                        motionTile, null,
-                        RectF(-marginX, -marginY, l.width + marginX, l.height + marginY),
-                        paint
-                    )
-                }
                 val activeMask = l.maskAt(time).takeIf { l.maskEnabled }
                 if (activeMask != null) nc.saveLayer(RectF(0f, 0f, l.width, l.height), null)
                 paint.xfermode = blendModes[l.blendMode]
@@ -359,13 +448,27 @@ fun CpuPreviewCanvas(
                         paint.alpha = alpha
                         if (bmp != null) {
                             paint.color = android.graphics.Color.WHITE
-                            nc.drawBitmap(bmp, null, destinationRects[l.id] ?: RectF(0f, 0f, l.width, l.height), paint)
+                            val base = destinationRects[l.id] ?: RectF(0f, 0f, l.width, l.height)
+                            val m = effectMargins[l.id]
+                            val dest = if (m != null && effectedBitmaps[l.id] === bmp)
+                                RectF(base.left - m[0], base.top - m[1], base.right + m[2], base.bottom + m[3]) else base
+                            nc.drawBitmap(bmp, null, dest, paint)
                         }
                         // A missing decode is transparent to the composition.
                         // Never paint a gray placeholder over the clip: it can
                         // persist through animated transforms and transitions.
                     }
-                    LayerType.SHAPE -> {
+                    LayerType.SHAPE, LayerType.TEXT -> {
+                        val fx = vectorEffected[l.id]?.takeIf { !it.bitmap.isRecycled }
+                        if (fx != null) {
+                            paint.color = android.graphics.Color.WHITE; paint.alpha = alpha
+                            nc.drawBitmap(fx.bitmap, null, RectF(-fx.left, -fx.top, l.width + fx.right, l.height + fx.bottom), paint)
+                        } else if (l.type == LayerType.TEXT) {
+                            textPaint.color = l.color; textPaint.alpha = alpha
+                            textPaint.xfermode = blendModes[l.blendMode]
+                            textPaint.colorFilter = if ("Grayscale" in l.effects) grayscaleFilter else null
+                            nc.drawText(l.text, l.width / 2f, l.height / 2f + 40f, textPaint)
+                        } else {
                         paint.color = l.color; paint.alpha = alpha
                         val points = if (l.vectorPoints.isEmpty() && !l.isVector) listOf(VectorPoint(0f, 0f), VectorPoint(1f, 0f), VectorPoint(1f, 1f), VectorPoint(0f, 1f)) else l.vectorPointsAt(time)
                         if (points.size >= 2) {
@@ -382,12 +485,7 @@ fun CpuPreviewCanvas(
                                 paint.strokeJoin = Paint.Join.MITER
                             }
                         }
-                    }
-                    LayerType.TEXT -> {
-                        textPaint.color = l.color; textPaint.alpha = alpha
-                        textPaint.xfermode = blendModes[l.blendMode]
-                        textPaint.colorFilter = if ("Grayscale" in l.effects) grayscaleFilter else null
-                        nc.drawText(l.text, l.width / 2f, l.height / 2f + 40f, textPaint)
+                        }
                     }
                     else -> Unit
                 }

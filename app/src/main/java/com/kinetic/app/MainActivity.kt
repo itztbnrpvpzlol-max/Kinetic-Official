@@ -40,6 +40,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Parse the EffectCraft catalog off the UI thread so the effects browser opens instantly.
+        Thread { runCatching { com.kinetic.app.engine.EffectCatalog.effects } }.apply { name = "EffectCatalogLoad"; start() }
         enableEdgeToEdge(statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT), navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT))
         val settings = AppSettings(applicationContext)
         val store = ProjectStore(applicationContext)

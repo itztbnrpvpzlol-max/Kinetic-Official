@@ -25,6 +25,11 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextStyle
+import com.kinetic.app.engine.EcEffect
+import com.kinetic.app.engine.EffectCatalog
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -46,17 +51,15 @@ private data class EffectCategory(
     val title: String,
     val icon: IconKind,
     val accent: Color,
-    val background: Color,
-    val effects: List<String> = emptyList()
+    val background: Color
 )
 
 private val effectCategories = listOf(
-    EffectCategory("COLOR & LIGHT", IconKind.ADJ, Color(0xFFFF82B2), Color(0xFF281C2A), listOf("Exposure And Gamma", "Deep Glow")),
+    EffectCategory("COLOR & LIGHT", IconKind.ADJ, Color(0xFFFF82B2), Color(0xFF281C2A)),
     EffectCategory("STYLIZE", IconKind.EFFECTS, Color(0xFFC0A2FF), Color(0xFF241E35)),
-    EffectCategory("DRAWING & EDGE", IconKind.GRAPH, Color(0xFFFFC078), Color(0xFF30251D), listOf("Morphosis")),
-    EffectCategory("MOTION", IconKind.MOTION, Color(0xFF86B7FF), Color(0xFF1D2940), listOf("Oscillate")),
-    EffectCategory("DISTORTION & WARP", IconKind.BLEND, Color(0xFF70DAD4), Color(0xFF1A2D32),
-        listOf("Motion Tile", "Wave Warp", "Warp Shake", "RGB Split")),
+    EffectCategory("DRAWING & EDGE", IconKind.GRAPH, Color(0xFFFFC078), Color(0xFF30251D)),
+    EffectCategory("MOTION", IconKind.MOTION, Color(0xFF86B7FF), Color(0xFF1D2940)),
+    EffectCategory("DISTORTION & WARP", IconKind.BLEND, Color(0xFF70DAD4), Color(0xFF1A2D32)),
     EffectCategory("PROCEDURAL", IconKind.GRID, Color(0xFFB5A4FF), Color(0xFF252238)),
     EffectCategory("BLUR", IconKind.FILTER, Color(0xFF8BC8FF), Color(0xFF1D2B39)),
     EffectCategory("3D", IconKind.SHAPES, Color(0xFFFF987C), Color(0xFF332326)),
@@ -70,6 +73,8 @@ private val effectCategories = listOf(
 fun EffectsBrowserScreen(onClose: () -> Unit, onAddEffect: (String) -> Unit) {
     val shelfPager = rememberPagerState(pageCount = { 2 })
     var selectedCategory by remember { mutableStateOf<EffectCategory?>(null) }
+    var query by remember { mutableStateOf("") }
+    val catalogEffects = EffectCatalog.effects
 
     Column(
         Modifier.fillMaxSize().background(KColors.Bg).statusBarsPadding().navigationBarsPadding()
@@ -113,35 +118,74 @@ fun EffectsBrowserScreen(onClose: () -> Unit, onAddEffect: (String) -> Unit) {
                         .background(if (shelfPager.currentPage == page) KColors.Text else KColors.Dim.copy(alpha = 0.55f)))
                 }
             }
+            SearchField(query, onChange = { query = it })
+            Spacer(Modifier.height(16.dp))
+            if (query.isNotBlank()) {
+                val results = EffectCatalog.search(query)
+                Text("${results.size} result${if (results.size == 1) "" else "s"}", color = KColors.Muted, fontSize = 11.sp)
+                Spacer(Modifier.height(10.dp))
+                EffectGrid(results, onAddEffect)
+            } else {
             SectionHeading("Categories")
             Spacer(Modifier.height(12.dp))
+            if (catalogEffects.isEmpty()) {
+                Text(
+                    EffectCatalog.error?.let { "Effects engine unavailable: ${it.take(96)}" } ?: "Loading effects…",
+                    color = KColors.Dim, fontSize = 12.sp, modifier = Modifier.padding(vertical = 12.dp)
+                )
+            }
             effectCategories.chunked(2).forEach { row ->
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    row.forEach { category -> CategoryTile(category, Modifier.weight(1f)) { selectedCategory = category } }
+                    row.forEach { category ->
+                        CategoryTile(category, catalogEffects.count { it.category == category.title }, Modifier.weight(1f)) { selectedCategory = category }
+                    }
                     if (row.size == 1) Spacer(Modifier.weight(1f))
                 }
                 Spacer(Modifier.height(10.dp))
+            }
             }
         } else {
             val category = selectedCategory!!
             Text("Choose an effect to add it to the selected layer.", color = KColors.Muted, fontSize = 11.sp)
             Spacer(Modifier.height(14.dp))
-            if (category.effects.isEmpty()) {
-                Text("No effects in this category yet.", color = KColors.Dim, fontSize = 12.sp,
+            val inCategory = EffectCatalog.inCategory(category.title)
+            if (inCategory.isEmpty()) {
+                Text("No effects in this category.", color = KColors.Dim, fontSize = 12.sp,
                     modifier = Modifier.padding(vertical = 20.dp))
             } else {
-                category.effects.chunked(4).forEach { row ->
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        row.forEach { effect ->
-                            EffectChoice(effect, category.accent, Modifier.weight(1f)) { onAddEffect(effect) }
-                        }
-                        repeat(4 - row.size) { Spacer(Modifier.weight(1f)) }
-                    }
-                    Spacer(Modifier.height(6.dp))
-                }
+                EffectGrid(inCategory, onAddEffect, category.accent)
             }
         }
         Spacer(Modifier.height(18.dp))
+    }
+}
+
+@Composable
+private fun EffectGrid(effects: List<EcEffect>, onAdd: (String) -> Unit, accent: Color = Color(0xFFC0A2FF)) {
+    effects.chunked(4).forEach { row ->
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            row.forEach { effect ->
+                EffectChoice(effect.name, accent, Modifier.weight(1f)) { onAdd(effect.id) }
+            }
+            repeat(4 - row.size) { Spacer(Modifier.weight(1f)) }
+        }
+        Spacer(Modifier.height(6.dp))
+    }
+}
+
+@Composable
+private fun SearchField(query: String, onChange: (String) -> Unit) {
+    Box(
+        Modifier.fillMaxWidth().height(42.dp).clip(RoundedCornerShape(12.dp)).background(KColors.Surface)
+            .border(1.dp, KColors.Line, RoundedCornerShape(12.dp)).padding(horizontal = 14.dp),
+        contentAlignment = Alignment.CenterStart
+    ) {
+        if (query.isEmpty()) Text("Search all effects", color = KColors.Dim, fontSize = 13.sp)
+        BasicTextField(
+            value = query, onValueChange = onChange, singleLine = true,
+            textStyle = TextStyle(color = KColors.Text, fontSize = 13.sp),
+            cursorBrush = SolidColor(KColors.Accent), modifier = Modifier.fillMaxWidth()
+        )
     }
 }
 
@@ -251,7 +295,7 @@ private fun EffectArtwork(name: String, accent: Color, modifier: Modifier = Modi
     }
 }
 @Composable
-private fun CategoryTile(category: EffectCategory, modifier: Modifier = Modifier, onClick: () -> Unit) {
+private fun CategoryTile(category: EffectCategory, count: Int, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Box(modifier.height(116.dp).clip(RoundedCornerShape(15.dp)).background(category.background)
         .border(1.dp, KColors.Line.copy(alpha = 0.65f), RoundedCornerShape(15.dp)).clickable(onClick = onClick)) {
         CategoryArtwork(category, Modifier.fillMaxSize())
@@ -261,6 +305,10 @@ private fun CategoryTile(category: EffectCategory, modifier: Modifier = Modifier
             Spacer(Modifier.height(9.dp))
             Text(category.title, color = Color.White.copy(alpha = 0.94f), fontSize = 10.sp, lineHeight = 12.sp,
                 fontWeight = FontWeight.Bold, letterSpacing = 0.25.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            if (count > 0) {
+                Spacer(Modifier.height(3.dp))
+                Text("$count effects", color = Color.White.copy(alpha = 0.5f), fontSize = 8.sp)
+            }
         }
     }
 }

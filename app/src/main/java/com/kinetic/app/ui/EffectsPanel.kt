@@ -34,6 +34,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.kinetic.app.engine.EcKind
+import com.kinetic.app.engine.EcParam
+import com.kinetic.app.engine.EffectCatalog
 import com.kinetic.app.model.EditorState
 import com.kinetic.app.model.EffectInstance
 import com.kinetic.app.model.Layer
@@ -43,76 +46,48 @@ internal data class EffectControlSpec(
     val label: String, val key: String, val min: Float = 0f, val max: Float = 1f,
     val step: Float = 0.1f, val default: Float = 0f, val decimals: Int = 2,
     val suffix: String = "", val choices: List<Pair<String, Float>> = emptyList(),
-    val toggle: Boolean = false
+    val toggle: Boolean = false,
+    /** Display multiplier: min, max, step and values stay in stored units; the bar shows value * scale. */
+    val scale: Float = 1f
 )
-private fun number(label: String, key: String, min: Float, max: Float, step: Float, default: Float, decimals: Int = 2, suffix: String = "") =
-    EffectControlSpec(label, key, min, max, step, default, decimals, suffix)
-private fun choice(label: String, key: String, values: List<String>) =
-    EffectControlSpec(label, key, default = 0f, choices = values.mapIndexed { i, v -> v to i.toFloat() })
-private fun toggle(label: String, key: String, default: Boolean = false) =
-    EffectControlSpec(label, key, default = if (default) 1f else 0f, toggle = true)
 
-internal fun controlsFor(effect: EffectInstance): List<EffectControlSpec> = when (effect.name) {
-    "Motion Tile" -> listOf(
-        number("Tile Width", "Tile Width", 10f, 300f, 1f, 100f, 0, "%"),
-        number("Tile Height", "Tile Height", 10f, 300f, 1f, 100f, 0, "%"),
-        number("Output Width", "Output Width", 100f, 2000f, 5f, 2000f, 0, "%"),
-        number("Output Height", "Output Height", 100f, 2000f, 5f, 2000f, 0, "%"),
-        toggle("Mirror Edges", "Mirror Edges", true),
-        number("Phase X", "Phase X", -2f, 2f, 0.01f, 0f, 2),
-        number("Phase Y", "Phase Y", -2f, 2f, 0.01f, 0f, 2)
-    )
-    "Wave Warp" -> listOf(
-        choice("Wave Type", "Wave Type", listOf("Sine", "Square", "Triangle", "Sawtooth")),
-        number("Wave Height", "Wave Height", 0f, 0.08f, 0.002f, 0.012f, 3),
-        number("Wave Width", "Wave Width", 1f, 24f, 1f, 4f, 0),
-        number("Direction", "Direction", 0f, 360f, 15f, 0f, 0, "°"),
-        number("Wave Speed", "Wave Speed", -8f, 8f, 0.25f, 1f),
-        number("Phase", "Phase", 0f, 360f, 15f, 0f, 0, "°"),
-        choice("Pinning", "Pinning", listOf("None", "Top & Bottom", "Left & Right", "All Edges"))
-    )
-    "Warp Shake" -> listOf(
-        number("X Amount", "X Amount", 0f, 0.08f, 0.002f, 0.008f, 3),
-        number("Y Amount", "Y Amount", 0f, 0.08f, 0.002f, 0.008f, 3),
-        number("Frequency", "Frequency", 0.1f, 30f, 0.5f, 8f, 1, " Hz"),
-        choice("Motion", "Motion", listOf("Smooth", "Jitter")),
-        number("Direction", "Direction", 0f, 360f, 15f, 0f, 0, "°"),
-        number("Seed", "Seed", 0f, 100f, 1f, 0f, 0)
-    )
-    "RGB Split" -> listOf(
-        number("Red Offset", "Red Offset", -0.04f, 0.04f, 0.001f, 0.006f, 3),
-        number("Green Offset", "Green Offset", -0.04f, 0.04f, 0.001f, 0f, 3),
-        number("Blue Offset", "Blue Offset", -0.04f, 0.04f, 0.001f, -0.006f, 3),
-        number("Angle", "Angle", 0f, 360f, 5f, 0f, 0, "°"),
-        toggle("Radial Split", "Radial Split"),
-        number("Center X", "Center X", 0f, 1f, 0.05f, 0.5f),
-        number("Center Y", "Center Y", 0f, 1f, 0.05f, 0.5f)
-    )
-    "Oscillate" -> listOf(
-        number("X Amplitude", "X Amplitude", 0f, 0.15f, 0.005f, 0.02f, 3),
-        number("Y Amplitude", "Y Amplitude", 0f, 0.15f, 0.005f, 0.02f, 3),
-        number("Frequency", "Frequency", 0.1f, 12f, 0.25f, 1f, 2, " Hz"),
-        choice("Wave Shape", "Wave Shape", listOf("Sine", "Triangle", "Square", "Sawtooth")),
-        number("Phase", "Phase", 0f, 360f, 15f, 0f, 0, "°"),
-        toggle("Half Range", "Half Range")
-    )
-    "Morphosis", "Deep Glow" -> listOf(
-        number("Threshold", "Threshold", 0f, 1f, 0.05f, 0.65f),
-        number("Radius", "Radius", 0.001f, 0.08f, 0.002f, 0.012f, 3),
-        number("Intensity", "Intensity", 0f, 4f, 0.1f, 1.2f),
-        choice("Quality", "Quality", listOf("Performance", "High")),
-        number("Spread", "Spread", 0.25f, 3f, 0.25f, 1f, 2, "×"),
-        number("Saturation", "Saturation", 0f, 2f, 0.1f, 1f),
-        toggle("Glow Only", "Glow Only")
-    )
-    "Exposure And Gamma" -> listOf(
-        number("Exposure", "Exposure", -5f, 5f, 0.4f, 0f, 2, " stops"),
-        number("Gamma", "Gamma", 0.1f, 3f, 0.05f, 1f),
-        number("Offset", "Offset", -1f, 1f, 0.05f, 0f),
-        choice("Channel", "Channel", listOf("Master", "Red", "Green", "Blue"))
-    )
+private fun niceStep(range: Float, decimals: Int): Float {
+    val floor = Math.pow(10.0, -decimals.toDouble()).toFloat()
+    val raw = (range / 200f).coerceAtLeast(floor)
+    // Round to 1, 2 or 5 times a power of ten so snapping lands on friendly values.
+    val exp = Math.floor(Math.log10(raw.toDouble())).toInt()
+    val base = Math.pow(10.0, exp.toDouble()).toFloat()
+    val f = raw / base
+    val snapped = when { f <= 1.5f -> 1f; f <= 3.5f -> 2f; f <= 7.5f -> 5f; else -> 10f }
+    return (snapped * base).coerceAtLeast(floor)
+}
+
+/** Controls for one EffectCraft parameter: one row per animatable component. */
+private fun controlsForParam(p: EcParam): List<EffectControlSpec> = when (p.kind) {
+    EcKind.CHECKBOX -> listOf(EffectControlSpec(p.name, p.id, default = if ((p.defaults.firstOrNull() ?: 0f) >= 0.5f) 1f else 0f, toggle = true))
+    EcKind.POPUP -> listOf(EffectControlSpec(p.name, p.id, default = p.defaults.firstOrNull() ?: 0f,
+        choices = p.options.mapIndexed { i, label -> label to i.toFloat() }))
+    EcKind.POINT, EcKind.POINT3 -> p.components.map { c ->
+        EffectControlSpec(p.name + c.suffix, c.key, p.min, p.max, 0.01f, c.default, 1, "%", scale = 100f)
+    }
+    EcKind.COLOR -> p.components.map { c ->
+        EffectControlSpec(p.name + c.suffix, c.key, 0f, 1f, 0.01f, c.default, 2)
+    }
+    EcKind.PERCENT -> listOf(EffectControlSpec(p.name, p.id, p.min, p.max, niceStep(p.max - p.min, p.decimals), p.defaults.firstOrNull() ?: 0f, p.decimals, "%"))
+    EcKind.ANGLE -> listOf(EffectControlSpec(p.name, p.id, p.min, p.max, niceStep(p.max - p.min, p.decimals), p.defaults.firstOrNull() ?: 0f, p.decimals, "°"))
+    EcKind.PIXELS -> listOf(EffectControlSpec(p.name, p.id, p.min, p.max, niceStep(p.max - p.min, p.decimals), p.defaults.firstOrNull() ?: 0f, p.decimals, " px"))
+    EcKind.NUMBER, EcKind.SLIDER, EcKind.MASK -> listOf(EffectControlSpec(p.name, p.id, p.min, p.max, niceStep(p.max - p.min, p.decimals), p.defaults.firstOrNull() ?: 0f, p.decimals))
+    // Layer references, paths, gradients, text and files have no numeric control yet; the
+    // engine keeps their defaults.
     else -> emptyList()
 }
+
+/** Controls for [effect], generated from the EffectCraft parameter definitions. */
+internal fun controlsFor(effect: EffectInstance): List<EffectControlSpec> {
+    val spec = EffectCatalog.find(effect.effectId) ?: return emptyList()
+    return spec.params.flatMap { controlsForParam(it) }
+}
+
 @Composable
 fun EffectControlsPanel(editor: EditorState, layer: Layer, onBrowseEffects: () -> Unit) {
     // Reopening the panel never auto-expands the most recently added effect.
@@ -299,11 +274,12 @@ private fun EffectParameterLine(
                 else -> {
                     val safeSuffix = spec.suffix.replace("%", "%%")
                     val valueFormat = "%." + spec.decimals + "f" + safeSuffix
-                    ScrubValueBar(spec.label, current, Modifier.weight(1f), step = spec.step / 10f, snapStep = spec.step,
+                    val scale = spec.scale
+                    ScrubValueBar(spec.label, current * scale, Modifier.weight(1f), step = spec.step * scale / 10f, snapStep = spec.step * scale,
                         selected = selected, onSelect = onSelect,
-                        minValue = spec.min, maxValue = spec.max, valueFormat = valueFormat,
+                        minValue = spec.min * scale, maxValue = spec.max * scale, valueFormat = valueFormat,
                         onScrubStart = { onSelect(); editor.beginEdit() }) { value ->
-                        editor.updateEffectParameter(layer.id, effect.id, spec.key, value.coerceIn(spec.min, spec.max))
+                        editor.updateEffectParameter(layer.id, effect.id, spec.key, (value / scale).coerceIn(spec.min, spec.max))
                     }
                 }
             }
