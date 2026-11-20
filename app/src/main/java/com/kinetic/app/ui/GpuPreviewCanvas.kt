@@ -114,12 +114,12 @@ fun PreviewCanvas(
     // Importing or splitting a clip prepares its segment-start frame once.
     // Samples persist in filesDir and are shared by source URI/time across split clips.
     LaunchedEffect(
-        editor.layers.filter { it.type == LayerType.VIDEO && it.uri != null }
+        editor.previewLayers.filter { it.type == LayerType.VIDEO && it.uri != null }
             .map { Triple(it.id, it.uri, it.srcOffset) },
         editor.playing
     ) {
         if (!editor.playing) {
-            val clipsToWarm = editor.layers
+            val clipsToWarm = editor.previewLayers
                 .filter { it.visible && it.type == LayerType.VIDEO && it.uri != null }
                 .sortedBy { it.start }
             for (clip in clipsToWarm) {
@@ -153,7 +153,7 @@ fun PreviewCanvas(
         }
     }
 
-    LaunchedEffect(editor.layers.map { it.id }, editor.playing) {
+    LaunchedEffect(editor.previewLayers.map { it.id }, editor.playing) {
         onVideoReady(true)
     }
 
@@ -166,14 +166,14 @@ fun PreviewCanvas(
     // when a clip starts or ends, or when the layers themselves change.
     val activeIds by remember(editor) {
         derivedStateOf(structuralEqualityPolicy()) {
-            editor.layers.filter {
+            editor.previewLayers.filter {
                 it.visible && it.activeAt(editor.time) &&
                     it.type != LayerType.AUDIO && it.type != LayerType.NULL &&
                     it.type != LayerType.ADJUSTMENT
             }.map { it.id }
         }
     }
-    val activeVisualLayers = remember(activeIds, editor.layers) { editor.layers.filter { it.id in activeIds } }
+    val activeVisualLayers = remember(activeIds, editor.previewLayers) { editor.previewLayers.filter { it.id in activeIds } }
     val videoLayers = activeVisualLayers.filter { it.type == LayerType.VIDEO && it.uri != null }
     // TextureView is a bottom-layer surface. Keep it only when the one active
     // video is the lowest visual layer; Canvas then draws stills/text/shapes
@@ -182,7 +182,7 @@ fun PreviewCanvas(
     // compositor builds; the GLES and direct-surface paths do not.
     val hasAdjustmentFx by remember(editor) {
         derivedStateOf {
-            editor.layers.any {
+            editor.previewLayers.any {
                 it.type == LayerType.ADJUSTMENT && it.visible && it.activeAt(editor.time) &&
                     EffectStackRunner.hasPictureEffects(it.effectStack)
             }
@@ -315,7 +315,7 @@ private fun GpuCompositionPreviewCanvas(
     // Excess video layers use the existing bitmap preview path rather than
     // exhausting MediaCodec resources.
     val decoderLimit = com.kinetic.app.data.MediaWorkers.maxConcurrentVideoDecoders
-    val activeVideoLayers = editor.layers.filter {
+    val activeVideoLayers = editor.previewLayers.filter {
         it.visible && it.activeAt(editor.time) && it.type == LayerType.VIDEO && it.uri != null
     }
     // Video layers without enabled effects use SurfaceTexture external textures.
@@ -326,8 +326,8 @@ private fun GpuCompositionPreviewCanvas(
         .take(decoderLimit)
     val textureVideoIds = videoLayers.mapTo(HashSet<String>()) { it.id }
 
-    LaunchedEffect(editor.layers.map { it.id to it.uri }) {
-        val currentIds = editor.layers.mapTo(HashSet<String>()) { it.id }
+    LaunchedEffect(editor.previewLayers.map { it.id to it.uri }) {
+        val currentIds = editor.previewLayers.mapTo(HashSet<String>()) { it.id }
         // Drop removed segment entries; the tiny recent-by-source cache may
         // still retain a shared frame for an adjacent split segment.
         frames.keys.filter { it !in currentIds }.toList().forEach { frames.remove(it) }
@@ -367,7 +367,7 @@ private fun GpuCompositionPreviewCanvas(
         var bytes = frames.values.sumOf { it.byteCount.toLong() }
         if (bytes <= budget) return
         val now = latestTimelineTime.value
-        val activeIds = editor.layers.asSequence()
+        val activeIds = editor.previewLayers.asSequence()
             .filter { it.visible && it.activeAt(now) }
             .map { it.id }
             .toHashSet()
@@ -379,7 +379,7 @@ private fun GpuCompositionPreviewCanvas(
         }
     }
 
-    for (layer in editor.layers) {
+    for (layer in editor.previewLayers) {
         val uri = layer.uri
         val needsBitmap = layer.visible && (
             layer.type == LayerType.IMAGE ||
@@ -535,11 +535,11 @@ private fun GpuCompositionPreviewCanvas(
 
     // Effect processing can be substantially more expensive than texture upload.
     // Keep it on a latest-only worker so Deep Glow / warps never stall the GL thread.
-    LaunchedEffect(editor.layers.map { it.id to it.effectStack.hashCode() }) {
+    LaunchedEffect(editor.previewLayers.map { it.id to it.effectStack.hashCode() }) {
         while (true) {
             val now = latestTimelineTime.value
             val playing = latestPlaying.value
-            for (layer in editor.layers) {
+            for (layer in editor.previewLayers) {
                 if (!layer.visible || !layer.activeAt(now) || layer.type == LayerType.AUDIO) {
                     effectMargins.remove(layer.id)
                     continue
@@ -590,10 +590,10 @@ private fun GpuCompositionPreviewCanvas(
         }
     }
 
-    val byId = editor.layers.associateBy { it.id }
+    val byId = editor.previewLayers.associateBy { it.id }
     val renderLayers = ArrayList<GpuLayer>()
     val activeTextTextureIds = HashSet<String>()
-    for (layer in editor.layers.asReversed()) {
+    for (layer in editor.previewLayers.asReversed()) {
         if (!layer.visible || !layer.activeAt(editor.time) || layer.type == LayerType.AUDIO ||
             layer.type == LayerType.NULL || layer.type == LayerType.ADJUSTMENT) continue
         if (layer.type == LayerType.VIDEO && layer.id in textureVideoIds) {
@@ -705,7 +705,7 @@ private fun GpuCompositionPreviewCanvas(
             iterator.remove()
         }
     }
-    val selectedLayer = editor.layers.firstOrNull {
+    val selectedLayer = editor.previewLayers.firstOrNull {
         it.id == editor.selectedId && it.visible && it.activeAt(editor.time) && it.type != LayerType.AUDIO
     }?.let { layer ->
         GpuLayer(
