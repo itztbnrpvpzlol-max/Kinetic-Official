@@ -37,7 +37,7 @@ class ProjectStore(context: Context) {
 
     fun save(editor: EditorState) {
         val layers = JSONArray()
-        editor.layers.forEach { layer -> layers.put(layerToJson(layer)) }
+        editor.projectLayers.forEach { layer -> layers.put(layerToJson(layer)) }
         val json = JSONObject()
             .put("version", 3)
             .put("id", editor.projectId)
@@ -146,6 +146,7 @@ class ProjectStore(context: Context) {
             .put("vectorSmooth", JSONArray().also { a -> l.vectorSmooth.forEach { a.put(it) } })
             .put("vectorClosed", l.vectorClosed)
             .put("maskPath", maskJson)
+            .put("precompLayers", JSONArray().also { children -> l.precompLayers.forEach { children.put(layerToJson(it)) } })
     }
 
     private fun layerFromJson(j: JSONObject): Layer {
@@ -263,6 +264,11 @@ class ProjectStore(context: Context) {
             vectorPoints = (j.optJSONArray("vectorPoints") ?: JSONArray()).let { points -> (0 until points.length()).mapNotNull { index -> points.optJSONObject(index)?.let { point -> VectorPoint(point.optDouble("x", 0.5).toFloat(), point.optDouble("y", 0.5).toFloat()) } } },
             vectorSmooth = (j.optJSONArray("vectorSmooth") ?: JSONArray()).let { a -> (0 until a.length()).map { a.optBoolean(it, false) } },
             vectorClosed = j.optBoolean("vectorClosed", true),
-            maskPath = maskPath)
+            maskPath = maskPath,
+            precompLayers = (j.optJSONArray("precompLayers") ?: JSONArray()).let { children ->
+                (0 until children.length()).mapNotNull { index ->
+                    children.optJSONObject(index)?.let { child -> runCatching { layerFromJson(child) }.getOrNull() }
+                }
+            })
     }
 }
