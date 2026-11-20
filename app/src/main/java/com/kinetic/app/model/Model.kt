@@ -24,7 +24,7 @@ fun fmt(f: String, vararg a: Any): String = String.format(Locale.US, f, *a)
 
 enum class LayerType(val label: String) {
     VIDEO("Video"), IMAGE("Image"), AUDIO("Audio"), TEXT("Text"),
-    SHAPE("Shape"), ADJUSTMENT("Adjustment"), NULL("Null")
+    SHAPE("Shape"), ADJUSTMENT("Adjustment"), NULL("Null"), PRECOMP("Pre-comp")
 }
 
 /** Transform properties, in After Effects order. scrubStep = value change per dp dragged. */
@@ -381,7 +381,9 @@ data class Layer(
     val vectorPoints: List<VectorPoint> = emptyList(),
     val vectorSmooth: List<Boolean> = emptyList(),
     val vectorClosed: Boolean = true,
-    val maskPath: LayerMask? = null
+    val maskPath: LayerMask? = null,
+    /** Child layers stored inside a pre-composition. */
+    val precompLayers: List<Layer> = emptyList()
 ) {
     val end: Float get() = start + duration
     fun p(id: PropId): Prop = props[id] ?: Prop(
