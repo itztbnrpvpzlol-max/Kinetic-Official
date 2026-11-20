@@ -297,7 +297,9 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
             editor.playing = false; onOpenSettings()
         }, onCompSettings = {
             editor.playing = false; showCompSettings = true
-        }, onExport = { editor.playing = false; showExport = true })
+        }, onExport = { editor.playing = false; showExport = true },
+            onPrecompose = { Toast.makeText(ctx, "Pre-compose is coming soon", Toast.LENGTH_SHORT).show() },
+            onDeselect = { editor.select(null) })
         if (showCompSettings) CompSettingsDialog(
             "Composition Settings", "OK", editor.compSettings,
             onConfirm = { editor.applyComp(it); editor.settings.rememberComp(it); showCompSettings = false },
@@ -547,8 +549,24 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
 }
 
 @Composable
-private fun TopBar(editor: EditorState, onMenuHome: () -> Unit, onOpenSettings: () -> Unit, onCompSettings: () -> Unit, onExport: () -> Unit) {
+private fun TopBar(
+    editor: EditorState,
+    onMenuHome: () -> Unit,
+    onOpenSettings: () -> Unit,
+    onCompSettings: () -> Unit,
+    onExport: () -> Unit,
+    onPrecompose: () -> Unit,
+    onDeselect: () -> Unit
+) {
     val comp = editor.compSettings
+    if (editor.selectedId != null) {
+        Row(Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onPrecompose) { KIcon(IconKind.LAYERS, KColors.Text, Modifier.size(23.dp)) }
+            Spacer(Modifier.weight(1f))
+            IconButton(onClick = onDeselect) { KIcon(IconKind.CLOSE, KColors.Text, Modifier.size(22.dp)) }
+        }
+        return
+    }
     Row(Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
         IconButton(onClick = onMenuHome) { KIcon(IconKind.HOME, KColors.Text) }
         Text(
