@@ -27,6 +27,8 @@ internal object CompositeSnapshot {
         "Darken" to PorterDuff.Mode.DARKEN, "Lighten" to PorterDuff.Mode.LIGHTEN
     ).mapValues { PorterDuffXfermode(it.value) }
 
+    fun blendMode(name: String): PorterDuffXfermode? = modes[name]
+
     /** [below] is ordered bottom to top. The result is composition-shaped, at most [maxEdge] on its long side. */
     fun render(
         below: List<Layer>, time: Float, background: Int, maxEdge: Int,

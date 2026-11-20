@@ -34,7 +34,7 @@ fn gaussian_blur_spreads_a_bright_pixel() {
     px[mid..mid + 4].copy_from_slice(&[255, 255, 255, 255]);
     let stack = process::parse_stack(r#"[{"id":"ec.blur.gaussian","params":{"blurriness":6.0}}]"#, false).unwrap();
     assert_eq!(stack.len(), 1);
-    let applied = process::process_rgba8(&mut px, w, h, &stack, 0.0, 30.0, false);
+    let applied = process::process_rgba8(&mut px, w, h, [w as f64, h as f64], &stack, 0.0, 30.0, false);
     assert_eq!(applied, 1);
     let neighbour = (((16 * w + 18) * 4) + 3) as usize;
     assert!(px[neighbour] > 0, "blur should leak alpha into neighbouring pixels");
@@ -72,13 +72,30 @@ fn glow_style_effects_can_paint_outside_the_layer() {
         }
     }
     let stack = process::parse_stack(r#"[{"id":"ec.blur.gaussian","params":{"blurriness":8.0}}]"#, false).unwrap();
-    let grown = process::process_rgba8_grow(&px, w, h, &stack, 0.0, 30.0, false, 1 << 20).expect("effect applied");
+    let grown = process::process_rgba8_grow(&px, w, h, [w as f64, h as f64], &stack, 0.0, 30.0, false, 1 << 20).expect("effect applied");
     assert_eq!(grown.pixels.len(), (grown.width * grown.height * 4) as usize);
     assert_eq!(grown.width, w + grown.left + grown.right);
     assert_eq!(grown.height, h + grown.top + grown.bottom);
     // An empty stack changes nothing and reports nothing.
-    assert!(process::process_rgba8_grow(&px, w, h, &[], 0.0, 30.0, false, 1 << 20).is_none());
+    assert!(process::process_rgba8_grow(&px, w, h, [w as f64, h as f64], &[], 0.0, 30.0, false, 1 << 20).is_none());
     // A zero budget falls back to the layer rectangle.
-    let tight = process::process_rgba8_grow(&px, w, h, &stack, 0.0, 30.0, false, 0).expect("effect applied");
+    let tight = process::process_rgba8_grow(&px, w, h, [w as f64, h as f64], &stack, 0.0, 30.0, false, 0).expect("effect applied");
     assert_eq!((tight.width, tight.height, tight.left, tight.top), (w, h, 0, 0));
+}
+
+#[test]
+fn blur_strength_follows_the_layer_not_the_bitmap() {
+    // The same 64-unit layer shown at 64 px and at 32 px: a 8-unit blur should spread the same
+    // fraction of the picture in both.
+    fn spread(bitmap: u32) -> f64 {
+        let mut px = vec![0u8; (bitmap * bitmap * 4) as usize];
+        let mid = ((bitmap / 2 * bitmap + bitmap / 2) * 4) as usize;
+        px[mid..mid + 4].copy_from_slice(&[255, 255, 255, 255]);
+        let stack = process::parse_stack(r#"[{"id":"ec.blur.gaussian","params":{"blurriness":8.0}}]"#, false).unwrap();
+        process::process_rgba8(&mut px, bitmap, bitmap, [64.0, 64.0], &stack, 0.0, 30.0, false);
+        let lit = px.chunks_exact(4).filter(|p| p[3] > 8).count() as f64;
+        lit / (bitmap * bitmap) as f64
+    }
+    let (full, half) = (spread(64), spread(32));
+    assert!((full - half).abs() < 0.08, "coverage differs too much: {full} vs {half}");
 }

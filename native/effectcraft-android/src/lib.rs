@@ -53,6 +53,8 @@ pub extern "system" fn Java_com_kinetic_app_engine_EffectCraftNative_nativeCatal
 }
 
 /// Apply a picture-effect stack to a direct `ByteBuffer` of premultiplied RGBA8 pixels, in place.
+/// `layer_width`/`layer_height` are the logical size of the layer the bitmap shows; the bitmap
+/// itself may be any resolution of it.
 /// Returns the number of effects applied, or a negative error code:
 /// -1 bad arguments, -2 bad stack JSON, -3 internal panic.
 #[unsafe(no_mangle)]
@@ -62,6 +64,8 @@ pub extern "system" fn Java_com_kinetic_app_engine_EffectCraftNative_nativeProce
     buffer: JByteBuffer<'l>,
     width: jint,
     height: jint,
+    layer_width: jdouble,
+    layer_height: jdouble,
     stack_json: JString<'l>,
     time: jdouble,
     frame_rate: jdouble,
@@ -85,7 +89,7 @@ pub extern "system" fn Java_com_kinetic_app_engine_EffectCraftNative_nativeProce
     // not touch for the duration of this call.
     let pixels = unsafe { std::slice::from_raw_parts_mut(ptr, needed) };
     match catch_unwind(AssertUnwindSafe(|| {
-        process::process_rgba8(pixels, width as u32, height as u32, &stack, time, frame_rate, adjustment != 0)
+        process::process_rgba8(pixels, width as u32, height as u32, [layer_width, layer_height], &stack, time, frame_rate, adjustment != 0)
     })) {
         Ok(n) => n as jint,
         Err(_) => -3,
@@ -104,6 +108,8 @@ pub extern "system" fn Java_com_kinetic_app_engine_EffectCraftNative_nativeProce
     buffer: JByteBuffer<'l>,
     width: jint,
     height: jint,
+    layer_width: jdouble,
+    layer_height: jdouble,
     stack_json: JString<'l>,
     time: jdouble,
     frame_rate: jdouble,
@@ -128,7 +134,7 @@ pub extern "system" fn Java_com_kinetic_app_engine_EffectCraftNative_nativeProce
     // SAFETY: a live direct ByteBuffer of at least `needed` bytes, read-only for this call.
     let pixels = unsafe { std::slice::from_raw_parts(ptr as *const u8, needed) };
     let grown = match catch_unwind(AssertUnwindSafe(|| {
-        process::process_rgba8_grow(pixels, width as u32, height as u32, &stack, time, frame_rate, adjustment != 0, max_pixels.max(0) as u64)
+        process::process_rgba8_grow(pixels, width as u32, height as u32, [layer_width, layer_height], &stack, time, frame_rate, adjustment != 0, max_pixels.max(0) as u64)
     })) {
         Ok(Some(grown)) => grown,
         Ok(None) => return 0,

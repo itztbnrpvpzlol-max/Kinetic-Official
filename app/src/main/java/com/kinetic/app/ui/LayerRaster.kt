@@ -13,11 +13,13 @@ import kotlin.math.roundToInt
 
 /** Rasterizes a text or shape layer so picture effects can run on it like on any clip. */
 internal object LayerRaster {
-    fun render(layer: Layer, time: Float, maxEdge: Int): Bitmap? {
+    /** [allowUpscale] renders larger than the layer's logical size, for export at high resolution. */
+    fun render(layer: Layer, time: Float, maxEdge: Int, allowUpscale: Boolean = false): Bitmap? {
         if (layer.type != LayerType.TEXT && layer.type != LayerType.SHAPE) return null
         val logicalWidth = layer.width.toInt().coerceIn(1, 4096)
         val logicalHeight = layer.height.toInt().coerceIn(1, 4096)
-        val scale = minOf(1f, maxEdge.toFloat() / maxOf(logicalWidth, logicalHeight))
+        val fit = maxEdge.toFloat() / maxOf(logicalWidth, logicalHeight)
+        val scale = if (allowUpscale) fit else minOf(1f, fit)
         val w = (logicalWidth * scale).roundToInt().coerceAtLeast(1)
         val h = (logicalHeight * scale).roundToInt().coerceAtLeast(1)
         val bitmap = runCatching { Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888) }.getOrNull() ?: return null

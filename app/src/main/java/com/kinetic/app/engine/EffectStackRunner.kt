@@ -76,7 +76,7 @@ object EffectStackRunner {
      */
     fun processBitmap(
         source: Bitmap, effects: List<EffectInstance>, time: Float, layerTime: Float,
-        frameRate: Float, adjustment: Boolean = false
+        frameRate: Float, layerWidth: Float, layerHeight: Float, adjustment: Boolean = false
     ): Bitmap? {
         val active = pictureEffects(effects)
         if (active.isEmpty() || !EffectCraftNative.available || source.isRecycled) return null
@@ -85,7 +85,7 @@ object EffectStackRunner {
             val buffer = scratch(output.width * output.height * 4)
             output.copyPixelsToBuffer(buffer)
             val count = EffectCraftNative.nativeProcessImage(
-                buffer, output.width, output.height, stackJson(active, time),
+                buffer, output.width, output.height, layerWidth.toDouble(), layerHeight.toDouble(), stackJson(active, time),
                 layerTime.toDouble(), frameRate.toDouble(), adjustment
             )
             if (count > 0) {
@@ -124,7 +124,7 @@ object EffectStackRunner {
             if (copy !== source) copy.recycle()
             val info = IntArray(6)
             val count = EffectCraftNative.nativeProcessImageGrow(
-                input, w, h, stackJson(active, time), layerTime.toDouble(), frameRate.toDouble(),
+                input, w, h, layerWidth.toDouble(), layerHeight.toDouble(), stackJson(active, time), layerTime.toDouble(), frameRate.toDouble(),
                 adjustment, maxPixels, info
             )
             if (count <= 0) return@runCatching null

@@ -101,6 +101,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
     val scope = rememberCoroutineScope()
     var showImport by remember { mutableStateOf(false) }
     var showCompSettings by remember { mutableStateOf(false) }
+    var showExport by remember { mutableStateOf(false) }
     var editVectorId by remember { mutableStateOf<String?>(null) }
     val vecState = remember(editVectorId) { VectorEditState() }
     var showLayers by remember { mutableStateOf(false) }
@@ -296,7 +297,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
             editor.playing = false; onOpenSettings()
         }, onCompSettings = {
             editor.playing = false; showCompSettings = true
-        }, onExport = { Toast.makeText(ctx, "Export isn't built yet", Toast.LENGTH_SHORT).show() })
+        }, onExport = { editor.playing = false; showExport = true })
         if (showCompSettings) CompSettingsDialog(
             "Composition Settings", "OK", editor.compSettings,
             onConfirm = { editor.applyComp(it); editor.settings.rememberComp(it); showCompSettings = false },
@@ -524,6 +525,15 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
             }
         }
     }
+    if (showExport) {
+        androidx.compose.ui.window.Dialog(
+            onDismissRequest = {},
+            properties = androidx.compose.ui.window.DialogProperties(
+                dismissOnBackPress = false, dismissOnClickOutside = false,
+                usePlatformDefaultWidth = false, decorFitsSystemWindows = false
+            )
+        ) { ExportScreen(editor = editor, onClose = { showExport = false }) }
+    }
     if (showLeave) {
         AlertDialog(
             onDismissRequest = { showLeave = false },
@@ -554,7 +564,7 @@ private fun TopBar(editor: EditorState, onMenuHome: () -> Unit, onOpenSettings: 
             Text("${comp.width}\u00D7${comp.height} \u00B7 ${comp.fps}", color = KColors.Text, fontSize = 13.sp)
             KIcon(IconKind.CHEVRON_DOWN, KColors.Muted, Modifier.size(18.dp))
         }
-        IconButton(onClick = onExport) { KIcon(IconKind.PLAY, KColors.Text, Modifier.size(24.dp)) }
+        IconButton(onClick = onExport) { KIcon(IconKind.EXPORT, KColors.Text, Modifier.size(24.dp)) }
         IconButton(onClick = onOpenSettings) { KIcon(IconKind.SETTINGS, KColors.Text) }
     }
 }

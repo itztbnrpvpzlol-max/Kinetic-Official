@@ -34,20 +34,25 @@ pub fn parse_stack(json: &str, audio: bool) -> Result<Vec<Resolved>, String> {
     Ok(out)
 }
 
-fn run_stack(px: &[u8], width: u32, height: u32, stack: &[Resolved], time: f64, frame_rate: f64, adjustment: bool) -> Buf {
+/// Run the stack over a bitmap that shows a `layer_size` layer at `width` x `height` pixels.
+/// Effects work in layer space (`Buf::scale` is pixels per layer unit), so the same project
+/// looks the same in a small preview bitmap and in a full-resolution export. Returns the result
+/// and the starting scale.
+fn run_stack(px: &[u8], width: u32, height: u32, layer_size: [f64; 2], stack: &[Resolved], time: f64, frame_rate: f64, adjustment: bool) -> (Buf, f64) {
     let mut img = Image::new(width, height);
     for (dst, src) in img.data.iter_mut().zip(px.chunks_exact(4)) {
         *dst = [src[0] as f32 / 255.0, src[1] as f32 / 255.0, src[2] as f32 / 255.0, src[3] as f32 / 255.0];
     }
-    let size = [width as f64, height as f64];
-    let mut buf = Buf { img, offset: [0.0, 0.0], scale: 1.0 };
+    let size = [layer_size[0].max(1.0), layer_size[1].max(1.0)];
+    let base = width as f64 / size[0];
+    let mut buf = Buf { img, offset: [0.0, 0.0], scale: base };
     for (index, fx) in stack.iter().enumerate() {
         let params = build_params(fx.spec, fx.overrides.as_ref(), size);
         let env = EffectEnv { comp_time: time, frame_rate, effect_index: index, ..EffectEnv::default() };
         let ctx = EffectCtx { params: &params, time, layer_size: size, seed: fx.seed, adjustment, env };
         buf = apply(fx.spec, &ctx, buf);
     }
-    buf
+    (buf, base)
 }
 
 /// Premultiplied 8-bit pixel from a float pixel. Colour can never exceed alpha in a bitmap.
@@ -57,17 +62,17 @@ fn to_rgba8(p: [f32; 4]) -> [u8; 4] {
     [c(p[0]), c(p[1]), c(p[2]), (a * 255.0 + 0.5) as u8]
 }
 
-/// Process premultiplied RGBA8 pixels in place, keeping the layer rectangle. Returns the number of
+/// Process premultiplied RGBA8 pixels in place, keeping the source rectangle. Returns the number of
 /// effects applied.
-pub fn process_rgba8(px: &mut [u8], width: u32, height: u32, stack: &[Resolved], time: f64, frame_rate: f64, adjustment: bool) -> usize {
+pub fn process_rgba8(px: &mut [u8], width: u32, height: u32, layer_size: [f64; 2], stack: &[Resolved], time: f64, frame_rate: f64, adjustment: bool) -> usize {
     let n = width as usize * height as usize;
     if stack.is_empty() || width == 0 || height == 0 || px.len() < n * 4 {
         return 0;
     }
-    let buf = run_stack(px, width, height, stack, time, frame_rate, adjustment);
-    // Read the layer rectangle back out of the (possibly grown) buffer.
+    let (buf, base) = run_stack(px, width, height, layer_size, stack, time, frame_rate, adjustment);
+    // Read the source rectangle back out of the (possibly grown) buffer.
     let (ox, oy) = (buf.offset[0], buf.offset[1]);
-    let scale = if buf.scale.is_finite() && buf.scale > 0.0 { buf.scale } else { 1.0 };
+    let scale = if buf.scale.is_finite() && buf.scale > 0.0 { buf.scale / base } else { 1.0 };
     for y in 0..height as usize {
         for x in 0..width as usize {
             let sx = (x as f64 * scale + ox).round() as i64;
@@ -94,13 +99,13 @@ pub struct Grown {
 
 /// Like [`process_rgba8`] but keeps everything the effects painted, up to `max_pixels` in total.
 /// Past the budget (or when an effect rescaled the buffer) the result is the layer rectangle only.
-pub fn process_rgba8_grow(px: &[u8], width: u32, height: u32, stack: &[Resolved], time: f64, frame_rate: f64, adjustment: bool, max_pixels: u64) -> Option<Grown> {
+pub fn process_rgba8_grow(px: &[u8], width: u32, height: u32, layer_size: [f64; 2], stack: &[Resolved], time: f64, frame_rate: f64, adjustment: bool, max_pixels: u64) -> Option<Grown> {
     let n = width as usize * height as usize;
     if stack.is_empty() || width == 0 || height == 0 || px.len() < n * 4 {
         return None;
     }
-    let buf = run_stack(px, width, height, stack, time, frame_rate, adjustment);
-    let unit = (buf.scale - 1.0).abs() < 1e-6 && buf.offset[0].is_finite() && buf.offset[1].is_finite();
+    let (buf, base) = run_stack(px, width, height, layer_size, stack, time, frame_rate, adjustment);
+    let unit = ((buf.scale / base) - 1.0).abs() < 1e-6 && buf.offset[0].is_finite() && buf.offset[1].is_finite();
     let (ox, oy) = (buf.offset[0].round() as i64, buf.offset[1].round() as i64);
     let (bw, bh) = (buf.img.width as i64, buf.img.height as i64);
     // Output canvas in layer coordinates: the union of the layer rectangle and the buffer.
@@ -115,7 +120,7 @@ pub fn process_rgba8_grow(px: &[u8], width: u32, height: u32, stack: &[Resolved]
         (left, top, right, bottom, w, h)
     };
     let mut pixels = vec![0u8; (w * h * 4) as usize];
-    let scale = if buf.scale.is_finite() && buf.scale > 0.0 { buf.scale } else { 1.0 };
+    let scale = if buf.scale.is_finite() && buf.scale > 0.0 { buf.scale / base } else { 1.0 };
     for y in 0..h {
         for x in 0..w {
             // Output (x, y) is layer pixel (x - left, y - top).

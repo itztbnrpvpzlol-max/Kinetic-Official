@@ -19,10 +19,12 @@ object EffectCraftNative {
 
     /**
      * Applies a picture-effect stack to premultiplied RGBA8 pixels in a direct buffer, in place.
+     * [layerWidth]/[layerHeight] are the logical size of the layer the bitmap shows: effects work
+     * in that space, so any bitmap resolution of the layer gives the same look.
      * Returns the number of effects applied, or a negative error code.
      */
     @JvmStatic external fun nativeProcessImage(
-        buffer: ByteBuffer, width: Int, height: Int, stackJson: String,
+        buffer: ByteBuffer, width: Int, height: Int, layerWidth: Double, layerHeight: Double, stackJson: String,
         time: Double, frameRate: Double, adjustment: Boolean
     ): Int
 
@@ -32,7 +34,7 @@ object EffectCraftNative {
      * in source pixels); fetch the pixels with [nativeTakeGrown] on the SAME thread.
      */
     @JvmStatic external fun nativeProcessImageGrow(
-        buffer: ByteBuffer, width: Int, height: Int, stackJson: String,
+        buffer: ByteBuffer, width: Int, height: Int, layerWidth: Double, layerHeight: Double, stackJson: String,
         time: Double, frameRate: Double, adjustment: Boolean, maxPixels: Int, out: IntArray
     ): Int
 

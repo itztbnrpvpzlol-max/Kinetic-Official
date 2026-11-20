@@ -387,7 +387,7 @@ fun CpuPreviewCanvas(
                         }
                     } ?: return@withContext null
                     val processed = EffectStackRunner.processBitmap(
-                        flat, stack, time, time - adj.start, editor.compSettings.fps.toFloat(), adjustment = true
+                        flat, stack, time, time - adj.start, editor.compSettings.fps.toFloat(), COMP_W, COMP_H, adjustment = true
                     )
                     if (processed != null) flat.recycle()
                     processed ?: flat

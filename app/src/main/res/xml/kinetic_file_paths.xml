@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- Exports on Android 8 and 9 are saved in the app's own Movies folder and shared from there. -->
+    <external-files-path name="exports" path="Movies/" />
+    <cache-path name="export_cache" path="exports/" />
+</paths>
