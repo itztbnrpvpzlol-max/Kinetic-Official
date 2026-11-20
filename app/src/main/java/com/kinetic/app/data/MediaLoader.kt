@@ -54,6 +54,7 @@ object MediaLoader {
 
     /** Called from Android memory callbacks. Keep only a small warm cache under pressure. */
     fun trimMemory(level: Int) {
+        SmartFrameCache.trim(level)
         when {
             level >= android.content.ComponentCallbacks2.TRIM_MEMORY_COMPLETE -> maxCachedRetrievers = 1
             level >= android.content.ComponentCallbacks2.TRIM_MEMORY_BACKGROUND -> maxCachedRetrievers = 1
@@ -77,6 +78,7 @@ object MediaLoader {
     }
 
     fun releaseAll() {
+        SmartFrameCache.clear()
         sequentialVideoDecoder.release()
         val toRelease = synchronized(retrieverRegistryLock) {
             val snapshot = retrievers.entries.map { it.key to it.value }

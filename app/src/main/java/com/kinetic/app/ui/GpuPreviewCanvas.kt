@@ -50,6 +50,8 @@ import kotlin.math.roundToInt
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import com.kinetic.app.data.MediaLoader
+import com.kinetic.app.data.PrefetchTarget
+import com.kinetic.app.data.SmartFrameCache
 import com.kinetic.app.engine.NativeRenderEngine
 import com.kinetic.app.engine.NativePlaybackEngine
 import com.kinetic.app.data.MediaWorkers
@@ -434,6 +436,25 @@ private fun GpuCompositionPreviewCanvas(
                             kotlinx.coroutines.delay(80L)
                         }
                     } else {
+                        SmartFrameCache.startPrefetch(
+                            this, context, source, compositionFps,
+                            edgeOf = { playing -> SmartFrameCache.edgeFor(playing, if (playing) 320 else 448) }
+                        ) {
+                            val now = latestTimelineTime.value
+                            when {
+                                !layer.visible -> null
+                                layer.activeAt(now) -> PrefetchTarget(
+                                    (((now - layer.start).coerceAtLeast(0f) * layer.speed + layer.srcOffset)
+                                        .coerceAtLeast(0f) * compositionFps).toInt(),
+                                    latestPlaying.value, layer.speed, false
+                                )
+                                layer.start > now && layer.start - now < 1.5f -> PrefetchTarget(
+                                    (layer.srcOffset.coerceAtLeast(0f) * compositionFps).toInt(),
+                                    latestPlaying.value, layer.speed, true
+                                )
+                                else -> null
+                            }
+                        }
                         var lastBucket = Int.MIN_VALUE
                         var wasActive = false
                         while (true) {
@@ -461,11 +482,11 @@ private fun GpuCompositionPreviewCanvas(
                             }
                             val requestedBucket = (sourceTime * compositionFps).toInt()
                             if (requestedBucket != lastBucket) {
-                                val frame = MediaLoader.bitmapFor(
-                                    context, source, LayerType.VIDEO, sourceTime,
-                                    sampleFps = compositionFps,
-                                    maxEdge = if (latestPlaying.value) 320 else 448,
-                                    persistToDisk = !latestPlaying.value
+                                val playingNow = latestPlaying.value
+                                val frame = SmartFrameCache.fetch(
+                                    context, source, sourceTime, compositionFps,
+                                    SmartFrameCache.edgeFor(playingNow, if (playingNow) 320 else 448),
+                                    playingNow, !playingNow
                                 )
                                 val currentTime = latestTimelineTime.value
                                 val currentSourceTime = (

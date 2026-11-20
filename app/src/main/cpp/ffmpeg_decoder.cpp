@@ -16,6 +16,7 @@ extern "C" {
 #include <libswscale/swscale.h>
 }
 #include <pthread.h>
+#include <unistd.h>
 #include <atomic>
 #include <algorithm>
 #include <chrono>
@@ -182,6 +183,15 @@ static bool openCodec(DecoderSession* session, const AVCodec* decoder, bool hard
     session->codec->pkt_timebase = stream->time_base;
     session->codec->thread_count = 1;
     session->codec->thread_type = 0;
+    if (!hardware) {
+        // Software decode is the usual cause of choppy 1080p playback. Frame and
+        // slice threading use the spare cores; presentation is clock-paced, so the
+        // extra frame latency is invisible.
+        const long cores = sysconf(_SC_NPROCESSORS_ONLN);
+        session->codec->thread_count = static_cast<int>(std::clamp<long>(cores - 1, 1, 4));
+        session->codec->thread_type = FF_THREAD_FRAME | FF_THREAD_SLICE;
+        session->codec->flags2 |= AV_CODEC_FLAG2_FAST;
+    }
 
     if (hardware) {
         session->mediaCodec = av_mediacodec_alloc_context();
@@ -441,12 +451,19 @@ static bool renderSoftwareFrame(DecoderSession* session, AVFrame* frame) {
 
     if (!shouldRender || session->stop.load()) return true;
 
-    if (session->windowWidth != frame->width || session->windowHeight != frame->height) {
+    // Convert to a preview-sized buffer instead of the full source resolution:
+    // 1080p+ sources cost ~2x the colour conversion and memory bandwidth for no
+    // visible gain on a phone-sized preview.
+    const int longEdge = std::max(frame->width, frame->height);
+    const double previewScale = longEdge > 1280 ? 1280.0 / longEdge : 1.0;
+    const int targetWidth = std::max(2, static_cast<int>(frame->width * previewScale) & ~1);
+    const int targetHeight = std::max(2, static_cast<int>(frame->height * previewScale) & ~1);
+    if (session->windowWidth != targetWidth || session->windowHeight != targetHeight) {
         const int geometryResult = ANativeWindow_setBuffersGeometry(
-            session->outputWindow, frame->width, frame->height, WINDOW_FORMAT_RGBA_8888);
+            session->outputWindow, targetWidth, targetHeight, WINDOW_FORMAT_RGBA_8888);
         if (geometryResult < 0) return false;
-        session->windowWidth = frame->width;
-        session->windowHeight = frame->height;
+        session->windowWidth = targetWidth;
+        session->windowHeight = targetHeight;
     }
 
     ANativeWindow_Buffer buffer{};

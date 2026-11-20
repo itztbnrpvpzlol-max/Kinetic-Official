@@ -28,6 +28,8 @@ import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.platform.LocalContext
 import com.kinetic.app.data.MediaLoader
+import com.kinetic.app.data.PrefetchTarget
+import com.kinetic.app.data.SmartFrameCache
 import com.kinetic.app.data.MediaWorkers
 import com.kinetic.app.data.PreviewDiagnostics
 import com.kinetic.app.model.COMP_H
@@ -79,6 +81,32 @@ fun CpuPreviewCanvas(
     // the safe limit on this device class; per-layer polling coroutines used
     // to queue obsolete frame requests behind blocking native decodes.
     LaunchedEffect(mediaLayerSignature) {
+        for (videoLayer in mediaLayers) {
+            if (videoLayer.type != LayerType.VIDEO) continue
+            val videoUri = videoLayer.uri ?: continue
+            val layerFps = if (MediaWorkers.isConstrainedDevice && videoLayer.effectStack.any { it.enabled }) {
+                12
+            } else MediaLoader.CPU_PREVIEW_SAMPLE_FPS
+            val effected = videoLayer.effectStack.any { it.enabled }
+            SmartFrameCache.startPrefetch(
+                this, ctx, Uri.parse(videoUri), layerFps,
+                edgeOf = { playing -> if (effected || playing || MediaWorkers.isConstrainedDevice) 320 else 640 }
+            ) {
+                val now = previewClock.timeSec
+                when {
+                    !videoLayer.visible -> null
+                    videoLayer.activeAt(now) -> PrefetchTarget(
+                        ((videoLayer.sourceElapsedAt(now) + videoLayer.srcOffset).coerceAtLeast(0f) * layerFps).toInt(),
+                        previewClock.playing, videoLayer.speed, false
+                    )
+                    videoLayer.start > now && videoLayer.start - now < 1.5f -> PrefetchTarget(
+                        (videoLayer.srcOffset.coerceAtLeast(0f) * layerFps).toInt(),
+                        previewClock.playing, videoLayer.speed, true
+                    )
+                    else -> null
+                }
+            }
+        }
         val validIds = mediaLayers.map { it.id }.toSet()
         effectedBitmaps.keys.toList().filterNot { it in validIds }.forEach { id ->
             val source = bitmaps[id]
@@ -132,16 +160,15 @@ fun CpuPreviewCanvas(
                 }
                 lastRequests[layer.id] = requestKey
 
-                val frame = MediaLoader.bitmapFor(
+                val frame = if (layer.type == LayerType.VIDEO) {
+                    SmartFrameCache.fetch(ctx, Uri.parse(rawUri), sourceTime, sampleFps, frameEdge, playing, !playing)
+                } else MediaLoader.bitmapFor(
                     ctx,
                     Uri.parse(rawUri),
                     layer.type,
                     sourceTime,
                     sampleFps = sampleFps,
                     maxEdge = frameEdge,
-                    // Playback frames stay RAM-only: synchronous JPEG compression and
-                    // app-private file writes must never sit on the frame delivery path.
-                    // Paused frames remain persistent so seeking back is still fast.
                     persistToDisk = !playing
                 )
 
