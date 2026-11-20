@@ -112,6 +112,7 @@ class ProjectStore(context: Context) {
             .put("uri", l.uri).put("start", l.start.toDouble()).put("duration", l.duration.toDouble())
             .put("srcOffset", l.srcOffset.toDouble()).put("srcLength", if (l.srcLength.isFinite()) l.srcLength.toDouble() else -1.0)
             .put("width", l.width.toDouble()).put("height", l.height.toDouble()).put("visible", l.visible)
+            .put("is3D", l.is3D).put("motionBlur", l.motionBlur)
             .put("parentId", l.parentId).put("scaleLinked", l.scaleLinked).put("text", l.text)
             .put("color", l.color).put("props", props)
             .put("effects", JSONArray(l.effects))
@@ -209,7 +210,9 @@ class ProjectStore(context: Context) {
             start = j.optDouble("start", 0.0).toFloat(), duration = j.optDouble("duration", 5.0).toFloat(),
             srcOffset = j.optDouble("srcOffset", 0.0).toFloat(), srcLength = srcLength,
             width = j.optDouble("width", 100.0).toFloat(), height = j.optDouble("height", 100.0).toFloat(),
-            visible = j.optBoolean("visible", true), parentId = j.optString("parentId").takeIf { it.isNotBlank() && it != "null" },
+            visible = j.optBoolean("visible", true),
+            is3D = j.optBoolean("is3D", false), motionBlur = j.optBoolean("motionBlur", false),
+            parentId = j.optString("parentId").takeIf { it.isNotBlank() && it != "null" },
             scaleLinked = j.optBoolean("scaleLinked", false), text = j.optString("text", "Text"),
             color = j.optInt("color", 0xFF8D8BA3.toInt()), props = props,
             effects = (j.optJSONArray("effects") ?: JSONArray()).let { a -> (0 until a.length()).map { a.optString(it) } },
