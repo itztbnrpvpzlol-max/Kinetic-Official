@@ -1017,6 +1017,18 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
     }
 }
 
-private fun flattenPrecomps(items: List<Layer>): List<Layer> = items.flatMap { layer ->
-    if (layer.type == LayerType.PRECOMP) flattenPrecomps(layer.precompLayers) else listOf(layer)
+private fun flattenPrecomps(
+    items: List<Layer>,
+    parentVisible: Boolean = true,
+    parentStart: Float = 0f,
+    parentEnd: Float = Float.POSITIVE_INFINITY
+): List<Layer> = items.flatMap { layer ->
+    val start = maxOf(layer.start, parentStart)
+    val end = minOf(layer.end, parentEnd)
+    if (end <= start) emptyList()
+    else if (layer.type == LayerType.PRECOMP) {
+        flattenPrecomps(layer.precompLayers, parentVisible && layer.visible, start, end)
+    } else {
+        listOf(layer.copy(start = start, duration = end - start, visible = layer.visible && parentVisible))
+    }
 }
