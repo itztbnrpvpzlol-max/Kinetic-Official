@@ -64,7 +64,11 @@ internal class ExportFrameRenderer(
             when (layer.type) {
                 LayerType.AUDIO, LayerType.NULL -> Unit
                 LayerType.ADJUSTMENT -> drawAdjustment(layer, time)
-                else -> drawLayer(layer, time)
+                else -> if (layer.motionBlur && comp.shutterAngle > 0f) {
+                    drawMotionBlurLayer(layer, time)
+                } else {
+                    drawLayer(layer, time)
+                }
             }
         }
         return bitmap
@@ -88,7 +92,28 @@ internal class ExportFrameRenderer(
 
     private class Piece(val bitmap: Bitmap, val dest: RectF, val recycle: Boolean)
 
-    private fun drawLayer(layer: Layer, time: Float) {
+    private fun drawMotionBlurLayer(layer: Layer, frameTime: Float) {
+        val samples = MOTION_BLUR_SAMPLES
+        val exposure = (comp.shutterAngle.coerceIn(0f, 360f) / 360f) / fps.coerceAtLeast(1)
+        if (exposure <= 0f) {
+            drawLayer(layer, frameTime)
+            return
+        }
+        // Accumulate temporal samples into an isolated layer, then composite it once.
+        val compositePaint = Paint().apply { xfermode = CompositeSnapshot.blendMode(layer.blendMode) }
+        val checkpoint = canvas.saveLayer(null, compositePaint)
+        for (index in 0 until samples) {
+            val offset = ((index + 0.5f) / samples - 0.5f) * exposure
+            val sampleTime = frameTime + offset
+            if (sampleTime >= layer.start && sampleTime < layer.end) {
+                drawLayer(layer, sampleTime, 1f / samples, additive = true)
+            }
+        }
+        canvas.restoreToCount(checkpoint)
+        compositePaint.xfermode = null
+    }
+
+    private fun drawLayer(layer: Layer, time: Float, opacityMultiplier: Float = 1f, additive: Boolean = false) {
         var piece = rasterFor(layer, time) ?: return
         val stack = EffectStackRunner.pictureEffects(layer.effectStack).take(12)
         if (stack.isNotEmpty()) {
@@ -116,8 +141,8 @@ internal class ExportFrameRenderer(
         paint.reset()
         paint.isFilterBitmap = true
         paint.isAntiAlias = true
-        paint.alpha = opacityOf(layer, time)
-        paint.xfermode = CompositeSnapshot.blendMode(layer.blendMode)
+        paint.alpha = (opacityOf(layer, time) * opacityMultiplier).toInt().coerceIn(0, 255)
+        paint.xfermode = if (additive) PorterDuffXfermode(PorterDuff.Mode.ADD) else CompositeSnapshot.blendMode(layer.blendMode)
         paint.colorFilter = if ("Grayscale" in layer.effects) grayscale else null
         canvas.drawBitmap(piece.bitmap, null, piece.dest, paint)
         if (mask != null) {
@@ -243,6 +268,7 @@ internal class ExportFrameRenderer(
     }
 
     private companion object {
+        const val MOTION_BLUR_SAMPLES = 8
         const val MAX_EDGE = 4096
         /** Memory budget for one layer's effect result (RGBA float working copy is 16 bytes per pixel). */
         const val MAX_EFFECT_PIXELS = 12_000_000
