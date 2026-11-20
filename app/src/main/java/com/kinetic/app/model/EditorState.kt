@@ -209,6 +209,7 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
         timelineFrames.add(TimelineFrame(id, layers))
         layers = target.precompLayers
         timelinePath = timelinePath + id
+        undoStack.clear(); redoStack.clear(); sync()
         clearSelection()
         time = time.coerceIn(0f, duration)
         return true
@@ -220,6 +221,7 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
             if (layer.id == frame.precompId) layer.copy(precompLayers = layers) else layer
         }
         timelinePath = timelinePath.dropLast(1)
+        undoStack.clear(); redoStack.clear(); sync()
         clearSelection()
         time = time.coerceIn(0f, duration)
         return true
@@ -1010,7 +1012,8 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
             }
         }
         selectedKey = -1
-    }}
+    }
+}
 
 private fun flattenPrecomps(items: List<Layer>): List<Layer> = items.flatMap { layer ->
     if (layer.type == LayerType.PRECOMP) flattenPrecomps(layer.precompLayers) else listOf(layer)
