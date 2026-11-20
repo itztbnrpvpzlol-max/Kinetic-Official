@@ -590,6 +590,17 @@ private fun GpuCompositionPreviewCanvas(
         }
     }
 
+    fun motionBlurSampleTimes(layer: com.kinetic.app.model.Layer): List<Float> {
+        if (!layer.motionBlur || editor.compSettings.shutterAngle <= 0f) return listOf(editor.time)
+        val exposure = editor.compSettings.shutterAngle.coerceIn(0f, 360f) / 360f / editor.compSettings.fps.coerceAtLeast(1)
+        val samples = 5
+        return (0 until samples).map { index ->
+            editor.time + ((index + 0.5f) / samples - 0.5f) * exposure
+        }.filter { it >= layer.start && it < layer.end }.ifEmpty { listOf(editor.time) }
+    }
+    fun sampleOpacity(opacity: Float, count: Int): Float =
+        if (count <= 1) opacity else (1f - Math.pow((1f - opacity.coerceIn(0f, 1f)).toDouble(), 1.0 / count).toFloat())
+
     val byId = editor.previewLayers.associateBy { it.id }
     val renderLayers = ArrayList<GpuLayer>()
     val activeTextTextureIds = HashSet<String>()
@@ -598,11 +609,15 @@ private fun GpuCompositionPreviewCanvas(
             layer.type == LayerType.NULL || layer.type == LayerType.ADJUSTMENT) continue
         if (layer.type == LayerType.VIDEO && layer.id in textureVideoIds) {
             val opacity = (layer.p(PropId.OPACITY).valueAt(editor.time) / 100f).coerceIn(0f, 1f)
-            renderLayers += GpuLayer(
-                layer.id, frames[layer.id], Matrix(layerMatrix(layer, editor.time, byId)),
-                layer.width, layer.height, opacity, layer.maskEnabled,
-                "Grayscale" in layer.effects, layer.blendMode, true, layer.effectStack
-            )
+            val sampleTimes = motionBlurSampleTimes(layer)
+            val sampleAlpha = sampleOpacity(opacity, sampleTimes.size)
+            sampleTimes.forEach { sampleTime ->
+                renderLayers += GpuLayer(
+                    layer.id, frames[layer.id], Matrix(layerMatrix(layer, sampleTime, byId)),
+                    layer.width, layer.height, sampleAlpha, layer.maskEnabled,
+                    "Grayscale" in layer.effects, layer.blendMode, true, layer.effectStack
+                )
+            }
             continue
         }
         val sourceBitmap = when (layer.type) {
@@ -678,14 +693,18 @@ private fun GpuCompositionPreviewCanvas(
         // shifted so the original content stays where it was.
         val margin = if (effected != null || layer.type == LayerType.IMAGE || layer.type == LayerType.VIDEO)
             effectMargins[layer.id] else null
-        val quadMatrix = Matrix(layerMatrix(layer, editor.time, byId))
-        if (margin != null) quadMatrix.preTranslate(-margin[0], -margin[1])
-        renderLayers += GpuLayer(
-            layer.id, drawBitmap, quadMatrix,
-            layer.width + (margin?.let { it[0] + it[2] } ?: 0f), layer.height + (margin?.let { it[1] + it[3] } ?: 0f),
-            opacity, layer.maskEnabled,
-            "Grayscale" in layer.effects, layer.blendMode, false, emptyList()
-        )
+        val sampleTimes = motionBlurSampleTimes(layer)
+        val sampleAlpha = sampleOpacity(opacity, sampleTimes.size)
+        sampleTimes.forEach { sampleTime ->
+            val quadMatrix = Matrix(layerMatrix(layer, sampleTime, byId))
+            if (margin != null) quadMatrix.preTranslate(-margin[0], -margin[1])
+            renderLayers += GpuLayer(
+                layer.id, drawBitmap, quadMatrix,
+                layer.width + (margin?.let { it[0] + it[2] } ?: 0f), layer.height + (margin?.let { it[1] + it[3] } ?: 0f),
+                sampleAlpha, layer.maskEnabled,
+                "Grayscale" in layer.effects, layer.blendMode, false, emptyList()
+            )
+        }
     }
     // Keep only a small warm set of inactive text/vector bitmaps. Active
     // textures are protected for this composition; old project layers are
