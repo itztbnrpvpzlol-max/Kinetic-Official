@@ -46,7 +46,8 @@ class ProjectStore(context: Context) {
             .put("duration", editor.duration.toDouble())
             .put("resolution", editor.resolution)
             .put("comp", JSONObject().put("w", editor.compSettings.width).put("h", editor.compSettings.height)
-                .put("fps", editor.compSettings.fps).put("bg", editor.compSettings.background))
+                .put("fps", editor.compSettings.fps).put("bg", editor.compSettings.background)
+                .put("shutterAngle", editor.compSettings.shutterAngle))
             .put("time", editor.time.toDouble())
             .put("layers", layers)
         val target = File(root, "${editor.projectId}.kinetic")
@@ -71,7 +72,7 @@ class ProjectStore(context: Context) {
         val savedDuration = json.optDouble("duration", 5.0).toFloat().coerceAtLeast(0.1f)
         val comp = json.optJSONObject("comp")?.let {
             CompSettings(savedName, it.optInt("w", 1920), it.optInt("h", 1080), it.optInt("fps", 30),
-                savedDuration, it.optLong("bg", 0xFF000000L)).sanitized()
+                savedDuration, it.optLong("bg", 0xFF000000L), it.optDouble("shutterAngle", 180.0).toFloat()).sanitized()
         }
         LoadedProject(json.optString("id", id), savedName, savedDuration,
             json.optInt("resolution", 1), json.optDouble("time", 0.0).toFloat(), layers, comp)
