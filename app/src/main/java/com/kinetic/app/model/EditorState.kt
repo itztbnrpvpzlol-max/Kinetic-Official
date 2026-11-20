@@ -12,6 +12,10 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.roundToInt
 
+data class TimelineTab(val path: List<String>, val name: String)
+
+private data class TimelineFrame(val precompId: String, val parentLayers: List<Layer>)
+
 /** One open composition. A new instance is always empty. */
 class EditorState(val settings: AppSettings, val projectId: String = UUID.randomUUID().toString(), var projectName: String = "Untitled") {
     var compSettings by mutableStateOf(settings.lastComp)
@@ -25,6 +29,36 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
     val duration: Float get() = maxOf(baseDuration, layers.maxOfOrNull { it.end } ?: 0f, 0.1f)
     var layers by mutableStateOf<List<Layer>>(emptyList())
         private set
+    private val timelineFrames = mutableListOf<TimelineFrame>()
+    var timelinePath by mutableStateOf<List<String>>(emptyList())
+        private set
+    /** Root project layers, including edits made while nested pre-comps are open. */
+    val projectLayers: List<Layer>
+        get() {
+            var current = layers
+            timelineFrames.asReversed().forEach { frame ->
+                current = frame.parentLayers.map { layer ->
+                    if (layer.id == frame.precompId) layer.copy(precompLayers = current) else layer
+                }
+            }
+            return current
+        }
+    /** Flattened visual stack: pre-comp children render in the parent stack's position. */
+    val previewLayers: List<Layer>
+        get() = flattenPrecomps(layers)
+    val timelineTabs: List<TimelineTab>
+        get() {
+            val result = mutableListOf(TimelineTab(emptyList(), projectName))
+            fun collect(items: List<Layer>, parent: List<String>) {
+                items.filter { it.type == LayerType.PRECOMP }.forEach { layer ->
+                    val path = parent + layer.id
+                    result.add(TimelineTab(path, layer.name))
+                    collect(layer.precompLayers, path)
+                }
+            }
+            collect(projectLayers, emptyList())
+            return result
+        }
     var time by mutableFloatStateOf(0f)
     var playing by mutableStateOf(false)
     var selectedId by mutableStateOf<String?>(null)
@@ -67,6 +101,8 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
         baseDuration = maxOf(savedDuration, savedLayers.maxOfOrNull { it.end } ?: 0f, 0.1f)
         resolution = savedResolution.coerceIn(0, 3)
         time = savedTime.coerceIn(0f, duration)
+        timelineFrames.clear()
+        timelinePath = emptyList()
         layers = savedLayers.map(::syncPositionKeyframes)
         selectedId = null; selectedProp = null; selectedKey = -1
         selectedEffectId = null; selectedEffectParameter = null; selectedEffectKey = -1
@@ -153,6 +189,45 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
 
     fun toggleMotionBlur(id: String) {
         updateLayer(id) { it.copy(motionBlur = !it.motionBlur) }
+    }
+
+    /** Wrap the selected layer in a new pre-comp container without changing its visual timing. */
+    fun precomposeSelected(): Boolean {
+        val child = selected ?: return false
+        if (child.type == LayerType.PRECOMP) return false
+        val precomp = newLayer(
+            LayerType.PRECOMP, child.name + " Pre-comp", 0f, duration,
+            COMP_W, COMP_H
+        ).copy(precompLayers = listOf(child))
+        commit { current -> current.map { if (it.id == child.id) precomp else it } }
+        select(precomp.id)
+        return true
+    }
+
+    fun enterPrecomp(id: String): Boolean {
+        val target = layers.firstOrNull { it.id == id && it.type == LayerType.PRECOMP } ?: return false
+        timelineFrames.add(TimelineFrame(id, layers))
+        layers = target.precompLayers
+        timelinePath = timelinePath + id
+        clearSelection()
+        time = time.coerceIn(0f, duration)
+        return true
+    }
+
+    fun exitPrecomp(): Boolean {
+        val frame = timelineFrames.removeLastOrNull() ?: return false
+        layers = frame.parentLayers.map { layer ->
+            if (layer.id == frame.precompId) layer.copy(precompLayers = layers) else layer
+        }
+        timelinePath = timelinePath.dropLast(1)
+        clearSelection()
+        time = time.coerceIn(0f, duration)
+        return true
+    }
+
+    fun navigateTimeline(path: List<String>) {
+        while (timelineFrames.isNotEmpty()) exitPrecomp()
+        path.forEach { id -> if (!enterPrecomp(id)) return }
     }
 
     // ---------- selection / time ----------
@@ -936,3 +1011,7 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
         }
         selectedKey = -1
     }}
+
+private fun flattenPrecomps(items: List<Layer>): List<Layer> = items.flatMap { layer ->
+    if (layer.type == LayerType.PRECOMP) flattenPrecomps(layer.precompLayers) else listOf(layer)
+}
