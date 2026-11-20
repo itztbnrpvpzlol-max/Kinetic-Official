@@ -893,21 +893,18 @@ private fun CutAction(
     onLongClick: (() -> Unit)? = null,
     onClick: () -> Unit
 ) {
-    Row(
-        modifier.height(34.dp).clip(RoundedCornerShape(8.dp))            .background(KColors.Surface2)
+    Box(
+        modifier.height(34.7.dp).clip(RoundedCornerShape(8.dp))
+            .background(KColors.Surface2)
             .pointerInput(onClick, onLongClick) {
                 detectTapGestures(
                     onTap = { onClick() },
                     onLongPress = { (onLongClick ?: onClick).invoke() }
                 )
-            }
-            .padding(horizontal = 3.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.Center
+            },
+        contentAlignment = Alignment.Center
     ) {
         KIcon(icon, KColors.Text, Modifier.size(17.dp))
-        Spacer(Modifier.width(3.dp))
-        Text(label, color = KColors.Text, fontSize = 8.sp, maxLines = 1, softWrap = false)
     }
 }
 
