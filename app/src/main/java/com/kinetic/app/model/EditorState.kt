@@ -46,6 +46,8 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
     /** Flattened visual stack: pre-comp children render in the parent stack's position. */
     val previewLayers: List<Layer>
         get() = flattenPrecomps(layers)
+    val projectPreviewLayers: List<Layer>
+        get() = flattenPrecomps(projectLayers)
     val timelineTabs: List<TimelineTab>
         get() {
             val result = mutableListOf(TimelineTab(emptyList(), projectName))
