@@ -38,9 +38,12 @@ enum class PropId(
     ANCHOR_Y("Anchor Y", 0.15f),
     POS_X("Position X", 0.15f),
     POS_Y("Position Y", 0.15f),
+    POS_Z("Position Z", 0.15f),
     SCALE_X("Scale X", 0.08f),
     SCALE_Y("Scale Y", 0.08f),
-    ROTATION("Rotation", 0.15f),
+    ROTATION("Rotation Z", 0.15f),
+    ROTATION_X("Rotation X", 0.15f),
+    ROTATION_Y("Rotation Y", 0.15f),
     OPACITY("Opacity", 0.12f),
     SPEED("Speed", 0.003f),
     VOLUME("Volume", 0.003f),
@@ -160,9 +163,9 @@ enum class PropId(
     val isVectorPoint: Boolean get() = vectorPointIndex >= 0
 
     fun format(v: Float): String = when (this) {
-        ANCHOR_X, ANCHOR_Y, POS_X, POS_Y -> fmt("%.1f px", v)
+        ANCHOR_X, ANCHOR_Y, POS_X, POS_Y, POS_Z -> fmt("%.1f px", v)
         SCALE_X, SCALE_Y -> fmt("%.1f%%", v)
-        ROTATION -> fmt("%.1f\u00B0", v)
+        ROTATION, ROTATION_X, ROTATION_Y -> fmt("%.1f\u00B0", v)
         OPACITY -> fmt("%.0f%%", v)
         SPEED -> fmt("%.2f×", v)
         VOLUME -> fmt("%.0f%%", v * 100f)
@@ -358,6 +361,8 @@ data class Layer(
     val width: Float,
     val height: Float,
     val visible: Boolean = true,
+    val is3D: Boolean = false,
+    val motionBlur: Boolean = false,
     val parentId: String? = null,
     val scaleLinked: Boolean = true,
     val positionLinked: Boolean = true,
@@ -385,6 +390,7 @@ data class Layer(
             PropId.ANCHOR_Y -> height / 2f
             PropId.POS_X -> COMP_W / 2f
             PropId.POS_Y -> COMP_H / 2f
+            PropId.POS_Z -> 0f
             PropId.SCALE_X, PropId.SCALE_Y -> 100f
             PropId.OPACITY, PropId.MASK_OPACITY -> 100f
             PropId.SPEED, PropId.VOLUME -> 1f
