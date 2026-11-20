@@ -196,11 +196,11 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
             if (MediaWorkers.isConstrainedDevice) 512 * 1024 else 2 * 1024 * 1024
         )
     }
-    LaunchedEffect(editor.layers.map { it.id to it.uri }) { audio.prepare(editor.layers) }
+    LaunchedEffect(editor.previewLayers.map { it.id to it.uri }) { audio.prepare(editor.previewLayers) }
 
     // Preview frames are prepared once during media import and read from disk.
 
-    LaunchedEffect(editor.layers, editor.duration, editor.compSettings, editor.projectName) {
+    LaunchedEffect(editor.projectLayers, editor.duration, editor.compSettings, editor.projectName) {
         delay(400)
         withContext(Dispatchers.IO) { runCatching { projectStore.save(editor) } }
     }
@@ -221,7 +221,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
             var publishedFrame = (editor.time * uiFps).toInt()
             var publishedGeneration = playback.clockSnapshot().generation
             var lastAudioSyncMs = 0L
-            audio.sync(editor.layers, editor.time, true)
+            audio.sync(editor.previewLayers, editor.time, true)
 
             while (editor.playing) {
                 delay(16L)
@@ -247,7 +247,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
 
                 val now = SystemClock.elapsedRealtime()
                 if (now - lastAudioSyncMs >= 33L) {
-                    audio.sync(editor.layers, transportTime, playback.isPlaying())
+                    audio.sync(editor.previewLayers, transportTime, playback.isPlaying())
                     lastAudioSyncMs = now
                 }
             }
@@ -257,7 +257,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                 editor.time = editor.duration
                 editor.playing = false
             }
-            audio.sync(editor.layers, editor.time, false)
+            audio.sync(editor.previewLayers, editor.time, false)
         } else {
             playback.pause()
             audio.pauseAll()
@@ -298,7 +298,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
         }, onCompSettings = {
             editor.playing = false; showCompSettings = true
         }, onExport = { editor.playing = false; showExport = true },
-            onPrecompose = { Toast.makeText(ctx, "Pre-compose is coming soon", Toast.LENGTH_SHORT).show() },
+            onPrecompose = { if (!editor.precomposeSelected()) Toast.makeText(ctx, "Select a non-pre-comp layer first", Toast.LENGTH_SHORT).show() },
             onDeselect = { editor.select(null) })
         if (showCompSettings) CompSettingsDialog(
             "Composition Settings", "OK", editor.compSettings,
