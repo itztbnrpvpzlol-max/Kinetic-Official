@@ -147,6 +147,14 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
         if (push) commit(fn) else live(fn)
     }
 
+    fun toggleLayer3D(id: String) {
+        updateLayer(id) { it.copy(is3D = !it.is3D) }
+    }
+
+    fun toggleMotionBlur(id: String) {
+        updateLayer(id) { it.copy(motionBlur = !it.motionBlur) }
+    }
+
     // ---------- selection / time ----------
     fun select(id: String?) {
         selectedId = id; selectedProp = null; selectedKey = -1
