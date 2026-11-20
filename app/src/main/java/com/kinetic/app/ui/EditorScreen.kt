@@ -560,12 +560,12 @@ private fun TopBar(
 ) {
     val comp = editor.compSettings
     if (editor.selectedId != null) {
-        Row(Modifier.fillMaxWidth().height(60.5.dp).padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onDeselect, modifier = Modifier.size(width = 56.dp, height = 60.5.dp)) {
+        Row(Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onDeselect, modifier = Modifier.size(width = 56.dp, height = 56.dp)) {
                 KIcon(IconKind.CLOSE, KColors.Text, Modifier.size(22.dp))
             }
             Spacer(Modifier.weight(1f))
-            IconButton(onClick = onPrecompose, modifier = Modifier.size(width = 56.dp, height = 60.5.dp)) {
+            IconButton(onClick = onPrecompose, modifier = Modifier.size(width = 56.dp, height = 56.dp)) {
                 KIcon(IconKind.LAYERS, KColors.Text, Modifier.size(23.dp))
             }
         }
@@ -916,7 +916,7 @@ private fun CutAction(
     onClick: () -> Unit
 ) {
     Box(
-        modifier.height(34.7.dp).clip(RoundedCornerShape(8.dp))
+        modifier.height(36.72.dp).clip(RoundedCornerShape(8.dp))
             .background(KColors.Surface2)
             .pointerInput(onClick, onLongClick) {
                 detectTapGestures(
