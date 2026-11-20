@@ -99,6 +99,7 @@ fun clipColor(t: LayerType): Color = when (t) {
     LayerType.SHAPE -> Color(0xFFB07A3A)
     LayerType.ADJUSTMENT -> Color(0xFF7D6CA8)
     LayerType.NULL -> Color(0xFF8C3E3E)
+    LayerType.PRECOMP -> Color(0xFF7563B7)
 }
 
 fun typeIcon(t: LayerType): IconKind = when (t) {
@@ -109,6 +110,7 @@ fun typeIcon(t: LayerType): IconKind = when (t) {
     LayerType.SHAPE -> IconKind.SHAPES
     LayerType.ADJUSTMENT -> IconKind.ADJ
     LayerType.NULL -> IconKind.NULL
+    LayerType.PRECOMP -> IconKind.LAYERS
 }
 
 @OptIn(kotlinx.coroutines.FlowPreview::class)
@@ -175,7 +177,31 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
         // One horizontal scroll container owns the ruler, every layer row,
         // keyframe rows and blank track area. The left control rail counter-moves
         // by the scroll offset, so only the timeline canvas moves underneath it.
-        Column(Modifier.fillMaxSize().horizontalScroll(hScroll)) {
+        Row(
+            Modifier.align(Alignment.TopStart).fillMaxWidth().height(30.dp)
+                .background(KColors.Bg).horizontalScroll(rememberScrollState()),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            editor.timelineTabs.forEach { tab ->
+                val active = tab.path == editor.timelinePath
+                Box(
+                    Modifier.padding(horizontal = 3.dp, vertical = 2.dp)
+                        .clip(RoundedCornerShape(7.dp))
+                        .background(if (active) KColors.Surface2 else Color.Transparent)
+                        .clickable { editor.navigateTimeline(tab.path) }
+                        .padding(horizontal = 10.dp, vertical = 5.dp)
+                ) {
+                    Text(
+                        tab.name,
+                        color = if (active) KColors.Text else KColors.Dim,
+                        fontSize = 10.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+        }
+        Column(Modifier.fillMaxSize().padding(top = 30.dp).horizontalScroll(hScroll)) {
             Column(Modifier.width(leftW + contentW).fillMaxHeight()) {
                 Row(Modifier.fillMaxWidth().height(30.dp)) {
                     Spacer(
@@ -238,7 +264,7 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
                 ) * 28.0 else 0.0) +
                 (if (layer.parentId != null) 20.0 else 0.0)
         }.toFloat()
-        val handleTop = (30f + layerStackHeight / 2f - 17f)
+        val handleTop = (60f + layerStackHeight / 2f - 17f)
             .coerceIn(30f, (paneH / dens - 34f).coerceAtLeast(30f))
         if (editor.layers.isNotEmpty()) {
             Box(
@@ -262,11 +288,11 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
             // The playhead is the fixed center marker, aligned with PreviewToolsBar's centered transport.
             val x = size.width / 2f
             if (x >= leftPx - 1f && x <= size.width) {
-                drawLine(Color.White, Offset(x, 14.dp.toPx()), Offset(x, size.height), 2.dp.toPx())
+                drawLine(Color.White, Offset(x, 44.dp.toPx()), Offset(x, size.height), 2.dp.toPx())
                 val tri = Path().apply {
-                    moveTo(x - 7.dp.toPx(), 4.dp.toPx())
-                    lineTo(x + 7.dp.toPx(), 4.dp.toPx())
-                    lineTo(x, 17.dp.toPx())
+                    moveTo(x - 7.dp.toPx(), 34.dp.toPx())
+                    lineTo(x + 7.dp.toPx(), 34.dp.toPx())
+                    lineTo(x, 47.dp.toPx())
                     close()
                 }
                 drawPath(tri, Color.White)
@@ -276,7 +302,7 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
         // in the track viewport is left to horizontalScroll for normal timeline panning.
         Box(
             Modifier
-                .offset(x = (paneW / dens / 2f - 14f).dp)
+                .offset(x = (paneW / dens / 2f - 14f).dp, y = 30.dp)
                 .size(28.dp, 30.dp)
                 .pointerInput(pps, dens) {
                     detectHorizontalDragGestures { change, drag ->
