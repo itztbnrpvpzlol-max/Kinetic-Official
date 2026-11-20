@@ -68,7 +68,7 @@ fun CpuPreviewCanvas(
     val adjustmentFrames = remember { mutableStateMapOf<String, Bitmap>() }
     val adjustmentKeys = remember { mutableMapOf<String, Long>() }
     val previewClock = remember(editor) { CpuPreviewClock() }
-    val mediaLayers = editor.layers.filter {
+    val mediaLayers = editor.previewLayers.filter {
         it.id != directVideoLayerId && it.uri != null && (it.type == LayerType.IMAGE || it.type == LayerType.VIDEO)
     }
     val mediaLayerSignature = mediaLayers.map {
@@ -270,14 +270,14 @@ fun CpuPreviewCanvas(
     // Text and shape layers take effects too: rasterize, process, and draw the result in place
     // of the plain vector drawing. Old results are left to the GC rather than recycled, because
     // the draw pass may still hold them.
-    val vectorSignature = editor.layers.filter { it.type == LayerType.TEXT || it.type == LayerType.SHAPE }.map {
+    val vectorSignature = editor.previewLayers.filter { it.type == LayerType.TEXT || it.type == LayerType.SHAPE }.map {
         "${it.id}|${it.text}|${it.color}|${it.width}|${it.height}|${it.shapeKind}|${it.vectorClosed}|${it.vectorPoints.hashCode()}|${it.visible}|${it.start}|${it.duration}|${it.effectStack.hashCode()}"
     }
     LaunchedEffect(vectorSignature) {
         while (true) {
             val time = previewClock.timeSec
             val playing = previewClock.playing
-            for (layer in editor.layers) {
+            for (layer in editor.previewLayers) {
                 if (layer.type != LayerType.TEXT && layer.type != LayerType.SHAPE) continue
                 val stack = EffectStackRunner.pictureEffects(layer.effectStack).take(12)
                 if (stack.isEmpty() || !layer.visible || !layer.activeAt(time)) {
@@ -312,7 +312,7 @@ fun CpuPreviewCanvas(
 
 
     val shapePaths = remember { mutableMapOf<String, android.graphics.Path>() }
-    val layerSnapshot = editor.layers
+    val layerSnapshot = editor.previewLayers
     val layerLookup = remember(layerSnapshot) { layerSnapshot.associateBy { it.id } }
     val destinationRects = remember(layerSnapshot) {
         layerSnapshot.associate { it.id to RectF(0f, 0f, it.width, it.height) }
@@ -344,14 +344,14 @@ fun CpuPreviewCanvas(
 
     // Adjustment layers apply their effects to the whole composition beneath them: flatten those
     // layers (after their own effects), run the stack, and draw the result at the layer's position.
-    val adjustmentSignature = editor.layers.filter { it.type == LayerType.ADJUSTMENT }.map {
+    val adjustmentSignature = editor.previewLayers.filter { it.type == LayerType.ADJUSTMENT }.map {
         "${it.id}|${it.visible}|${it.start}|${it.duration}|${it.effectStack.hashCode()}"
     }
     LaunchedEffect(adjustmentSignature) {
         while (true) {
             val time = previewClock.timeSec
             val playing = previewClock.playing
-            for ((index, adj) in editor.layers.withIndex()) {
+            for ((index, adj) in editor.previewLayers.withIndex()) {
                 if (adj.type != LayerType.ADJUSTMENT) continue
                 val stack = EffectStackRunner.pictureEffects(adj.effectStack).take(12)
                 if (stack.isEmpty() || !adj.visible || !adj.activeAt(time)) {
@@ -359,9 +359,9 @@ fun CpuPreviewCanvas(
                     adjustmentKeys.remove(adj.id)
                     continue
                 }
-                val below = editor.layers.drop(index + 1).asReversed()
+                val below = editor.previewLayers.drop(index + 1).asReversed()
                 val sampleFps = if (MediaWorkers.isConstrainedDevice) 12 else 24
-                var key = editor.layers.hashCode().toLong()
+                var key = editor.previewLayers.hashCode().toLong()
                 key = key * 31L + stack.hashCode() + (time * sampleFps).toInt()
                 below.forEach { l ->
                     key = key * 31L + System.identityHashCode(effectedBitmaps[l.id] ?: bitmaps[l.id] ?: vectorEffected[l.id]?.bitmap)
