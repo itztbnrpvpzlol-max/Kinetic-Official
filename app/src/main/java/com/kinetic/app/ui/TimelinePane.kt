@@ -122,8 +122,8 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
     var paneH by remember { mutableIntStateOf(0) }
     var leftWidth by remember { mutableFloatStateOf(160f) }
     // Never let the layer column cover the transport center; the playhead must remain visible there.
-    val maxLeftWidth = (paneW / dens / 2f - 16f).coerceAtLeast(124f).coerceAtMost(320f)
-    val leftW = leftWidth.coerceIn(124f, maxLeftWidth).dp
+    val maxLeftWidth = (paneW / dens / 2f - 16f).coerceAtLeast(152f).coerceAtMost(320f)
+    val leftW = leftWidth.coerceIn(152f, maxLeftWidth).dp
     val leftPx = with(density) { leftW.toPx() }
     val contentSec = max(editor.duration, editor.layers.maxOfOrNull { it.end } ?: 0f)
     // The track viewport starts immediately after the resizable layer-controls column.
@@ -370,7 +370,7 @@ private fun LayerRow(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Box(
-                    Modifier.size(36.dp).clickable { editor.toggleVisible(layer.id) },
+                    Modifier.size(32.dp).clickable { editor.toggleVisible(layer.id) },
                     contentAlignment = Alignment.Center
                 ) {
                     KIcon(
@@ -379,7 +379,7 @@ private fun LayerRow(
                     )
                 }
                 Box(
-                    Modifier.size(36.dp).pointerInput(layer.id) {
+                    Modifier.size(32.dp).pointerInput(layer.id) {
                         detectDragGestures(onDragStart = { acc = 0f; editor.beginEdit() }) { change, d ->
                             change.consume()
                             acc += d.y
@@ -391,7 +391,7 @@ private fun LayerRow(
                     contentAlignment = Alignment.Center
                 ) { KIcon(IconKind.HANDLE, KColors.Dim) }
                 Box(
-                    Modifier.size(36.dp).pointerInput(layer.id, editor.layers) {
+                    Modifier.size(32.dp).pointerInput(layer.id, editor.layers) {
                         detectDragGesturesAfterLongPress(
                             onDragStart = { parentDrag = 0f; isParentDragging = true },
                             onDragEnd = {
@@ -416,6 +416,22 @@ private fun LayerRow(
                         drawLine(KColors.Accent, Offset(x, size.height / 2f), Offset(x, size.height / 2f + parentDrag), 2.dp.toPx())
                         drawCircle(KColors.Accent, 4.dp.toPx(), Offset(x, size.height / 2f + parentDrag))
                     }
+                }
+                Box(
+                    Modifier.size(28.dp).clip(RoundedCornerShape(6.dp))
+                        .background(if (layer.motionBlur) KColors.Accent.copy(alpha = 0.16f) else Color.Transparent)
+                        .clickable { editor.toggleMotionBlur(layer.id) },
+                    contentAlignment = Alignment.Center
+                ) {
+                    KIcon(IconKind.MOTION, if (layer.motionBlur) KColors.Accent else KColors.Dim, Modifier.size(18.dp))
+                }
+                Box(
+                    Modifier.size(28.dp).clip(RoundedCornerShape(6.dp))
+                        .background(if (layer.is3D) KColors.Accent.copy(alpha = 0.16f) else Color.Transparent)
+                        .clickable { editor.toggleLayer3D(layer.id) },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("3D", color = if (layer.is3D) KColors.Accent else KColors.Dim, fontSize = 10.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
                 }
             }
             Box(
