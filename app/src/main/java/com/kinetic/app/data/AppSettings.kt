@@ -27,13 +27,15 @@ class AppSettings(context: Context) {
         return CompSettings(
             width = prefs.getInt("compW", 1920), height = prefs.getInt("compH", 1080),
             fps = prefs.getInt("compFps", oldFps), duration = prefs.getFloat("compDur", oldLength.toFloat()),
-            background = prefs.getLong("compBg", 0xFF000000L)
+            background = prefs.getLong("compBg", 0xFF000000L),
+            shutterAngle = prefs.getFloat("compShutterAngle", 180f)
         ).sanitized()
     }
     fun rememberComp(c: CompSettings) {
         lastComp = c.sanitized()
         prefs.edit().putInt("compW", lastComp.width).putInt("compH", lastComp.height).putInt("compFps", lastComp.fps)
-            .putFloat("compDur", lastComp.duration).putLong("compBg", lastComp.background).apply()
+            .putFloat("compDur", lastComp.duration).putLong("compBg", lastComp.background)
+            .putFloat("compShutterAngle", lastComp.shutterAngle).apply()
     }
     fun updateTimeFormat(i: Int) { timeFormat = i; prefs.edit().putInt("timeFormat", i).apply() }
     fun updateSnap(v: Boolean) { snap = v; prefs.edit().putBoolean("snap", v).apply() }
