@@ -560,10 +560,14 @@ private fun TopBar(
 ) {
     val comp = editor.compSettings
     if (editor.selectedId != null) {
-        Row(Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onPrecompose) { KIcon(IconKind.LAYERS, KColors.Text, Modifier.size(23.dp)) }
+        Row(Modifier.fillMaxWidth().height(60.5.dp).padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onDeselect, modifier = Modifier.size(width = 56.dp, height = 60.5.dp)) {
+                KIcon(IconKind.CLOSE, KColors.Text, Modifier.size(22.dp))
+            }
             Spacer(Modifier.weight(1f))
-            IconButton(onClick = onDeselect) { KIcon(IconKind.CLOSE, KColors.Text, Modifier.size(22.dp)) }
+            IconButton(onClick = onPrecompose, modifier = Modifier.size(width = 56.dp, height = 60.5.dp)) {
+                KIcon(IconKind.LAYERS, KColors.Text, Modifier.size(23.dp))
+            }
         }
         return
     }
