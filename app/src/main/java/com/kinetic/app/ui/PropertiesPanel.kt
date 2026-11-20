@@ -53,20 +53,20 @@ fun PropertiesList(editor: EditorState, layer: Layer, onParent: () -> Unit) {
         }
         Text("TRANSFORM", color = KColors.Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.1.sp,
             modifier = Modifier.padding(start = 2.dp, top = 3.dp, bottom = 5.dp))
-        PropertyLine("Position", editor, layer, listOf(PropId.POS_X, PropId.POS_Y))
-        if (layer.is3D) {
-            PropertyLine("Position Z", editor, layer, listOf(PropId.POS_Z))
-        }
+        PropertyLine(
+            "Position", editor, layer,
+            if (layer.is3D) listOf(PropId.POS_X, PropId.POS_Y, PropId.POS_Z)
+            else listOf(PropId.POS_X, PropId.POS_Y)
+        )
         if (layer.type != LayerType.AUDIO) {
             PropertyLine("Scale", editor, layer,
                 if (layer.scaleLinked) listOf(PropId.SCALE_X) else listOf(PropId.SCALE_X, PropId.SCALE_Y),
                 onLongPress = { editor.toggleScaleLink(layer.id) })
-            if (layer.is3D) {
-                PropertyLine("Rotation", editor, layer, listOf(PropId.ROTATION_X, PropId.ROTATION_Y))
-                PropertyLine("Rotation Z", editor, layer, listOf(PropId.ROTATION))
-            } else {
-                PropertyLine("Rotation", editor, layer, listOf(PropId.ROTATION))
-            }
+            PropertyLine(
+                "Rotation", editor, layer,
+                if (layer.is3D) listOf(PropId.ROTATION_X, PropId.ROTATION_Y, PropId.ROTATION)
+                else listOf(PropId.ROTATION)
+            )
         }
         PropertyLine("Opacity", editor, layer, listOf(PropId.OPACITY))
         if (layer.type != LayerType.AUDIO) {
@@ -98,9 +98,10 @@ fun PropertyLine(label: String, editor: EditorState, layer: Layer, ids: List<Pro
             Text(label, color = if (ids.any { editor.selectedProp == it }) KColors.Accent else KColors.Text,
                 fontSize = 12.sp, fontWeight = FontWeight.Medium)
         }
+        val axes = listOf("X", "Y", "Z")
         ids.forEachIndexed { index, id ->
             if (ids.size > 1 && index > 0) Spacer(Modifier.width(5.dp))
-            ValueController(editor, layer, id, if (ids.size > 1) if (index == 0) "X" else "Y" else "", Modifier.weight(1f))
+            ValueController(editor, layer, id, if (ids.size > 1) axes[index] else "", Modifier.weight(1f))
         }
     }
     Box(Modifier.fillMaxWidth().height(1.dp).background(KColors.Line.copy(alpha = 0.55f)))
