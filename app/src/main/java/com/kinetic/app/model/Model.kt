@@ -1,6 +1,7 @@
 package com.kinetic.app.model
 
 import android.graphics.Matrix
+import android.graphics.Camera
 import java.util.Locale
 import java.util.UUID
 import com.kinetic.app.engine.NativeRenderEngine
@@ -486,9 +487,22 @@ fun layerMatrixInto(
     out.reset()
     out.postTranslate(-layer.transformValue(PropId.ANCHOR_X, t, layer.width / 2f),
         -layer.transformValue(PropId.ANCHOR_Y, t, layer.height / 2f))
+    if (layer.is3D) {
+        val camera = Camera()
+        val cameraMatrix = Matrix()
+        camera.save()
+        camera.translate(0f, 0f, layer.transformValue(PropId.POS_Z, t, 0f))
+        camera.rotateX(layer.transformValue(PropId.ROTATION_X, t, 0f))
+        camera.rotateY(layer.transformValue(PropId.ROTATION_Y, t, 0f))
+        camera.rotateZ(layer.transformValue(PropId.ROTATION, t, 0f))
+        camera.getMatrix(cameraMatrix)
+        camera.restore()
+        out.postConcat(cameraMatrix)
+    } else {
+        out.postRotate(layer.transformValue(PropId.ROTATION, t, 0f))
+    }
     out.postScale(layer.transformValue(PropId.SCALE_X, t, 100f) / 100f,
         layer.transformValue(PropId.SCALE_Y, t, 100f) / 100f)
-    out.postRotate(layer.transformValue(PropId.ROTATION, t, 0f))
     out.postTranslate(layer.transformValue(PropId.POS_X, t, COMP_W / 2f),
         layer.transformValue(PropId.POS_Y, t, COMP_H / 2f))
     val parent = layer.parentId?.let { byId[it] }
@@ -506,9 +520,22 @@ fun layerMatrix(layer: Layer, t: Float, byId: Map<String, Layer>, depth: Int = 0
     val m = Matrix()
     m.postTranslate(-layer.transformValue(PropId.ANCHOR_X, t, layer.width / 2f),
         -layer.transformValue(PropId.ANCHOR_Y, t, layer.height / 2f))
+    if (layer.is3D) {
+        val camera = Camera()
+        val cameraMatrix = Matrix()
+        camera.save()
+        camera.translate(0f, 0f, layer.transformValue(PropId.POS_Z, t, 0f))
+        camera.rotateX(layer.transformValue(PropId.ROTATION_X, t, 0f))
+        camera.rotateY(layer.transformValue(PropId.ROTATION_Y, t, 0f))
+        camera.rotateZ(layer.transformValue(PropId.ROTATION, t, 0f))
+        camera.getMatrix(cameraMatrix)
+        camera.restore()
+        m.postConcat(cameraMatrix)
+    } else {
+        m.postRotate(layer.transformValue(PropId.ROTATION, t, 0f))
+    }
     m.postScale(layer.transformValue(PropId.SCALE_X, t, 100f) / 100f,
         layer.transformValue(PropId.SCALE_Y, t, 100f) / 100f)
-    m.postRotate(layer.transformValue(PropId.ROTATION, t, 0f))
     m.postTranslate(layer.transformValue(PropId.POS_X, t, COMP_W / 2f),
         layer.transformValue(PropId.POS_Y, t, COMP_H / 2f))
     val parent = layer.parentId?.let { byId[it] }
