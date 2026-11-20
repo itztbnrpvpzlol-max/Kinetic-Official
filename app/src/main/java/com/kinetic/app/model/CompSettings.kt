@@ -6,7 +6,8 @@ data class CompSettings(
     val height: Int = 1080,
     val fps: Int = 30,
     val duration: Float = 5f,
-    val background: Long = 0xFF000000L
+    val background: Long = 0xFF000000L,
+    val shutterAngle: Float = 180f
 ) {
     fun sanitized(): CompSettings = copy(
         name = name.trim().ifEmpty { "Comp 1" },
@@ -14,7 +15,8 @@ data class CompSettings(
         height = height.coerceIn(MIN_SIZE, MAX_SIZE),
         fps = fps.coerceIn(1, 120),
         duration = if (duration.isFinite()) duration.coerceIn(0.1f, MAX_DURATION) else 5f,
-        background = background or 0xFF000000L
+        background = background or 0xFF000000L,
+        shutterAngle = if (shutterAngle.isFinite()) shutterAngle.coerceIn(0f, 360f) else 180f
     )
 
     data class Preset(val label: String, val width: Int, val height: Int, val fps: Int)
