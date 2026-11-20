@@ -75,6 +75,7 @@ fun CompSettingsDialog(
     var h by remember { mutableStateOf(initial.height.toString()) }
     var fps by remember { mutableIntStateOf(initial.fps) }
     var dur by remember { mutableStateOf(trimFloat(initial.duration)) }
+    var shutterAngle by remember { mutableStateOf(trimFloat(initial.shutterAngle)) }
     var bg by remember { mutableStateOf(initial.background) }
     var hex by remember { mutableStateOf(hexOf(initial.background)) }
     var lock by remember { mutableStateOf(false) }
@@ -83,6 +84,7 @@ fun CompSettingsDialog(
     val wi = w.toIntOrNull() ?: 0
     val hi = h.toIntOrNull() ?: 0
     val durValue = dur.toFloatOrNull()
+    val shutterAngleValue = shutterAngle.toFloatOrNull()
     val shape = RoundedCornerShape(14.dp)
 
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
@@ -146,6 +148,12 @@ fun CompSettingsDialog(
                         color = KColors.Dim, fontSize = 12.sp
                     )
                 }
+                FieldRow("Shutter angle") {
+                    DialogField(shutterAngle, { s ->
+                        shutterAngle = s.filter { it.isDigit() || it == '.' }.take(6)
+                    }, Modifier.width(110.dp), KeyboardType.Decimal)
+                    Text("°  (0–360)", color = KColors.Dim, fontSize = 12.sp)
+                }
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Background color", color = KColors.Muted, fontSize = 12.sp)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -180,7 +188,8 @@ fun CompSettingsDialog(
                                 height = h.toIntOrNull() ?: initial.height,
                                 fps = fps,
                                 duration = durValue ?: initial.duration,
-                                background = bg
+                                background = bg,
+                                shutterAngle = shutterAngleValue ?: initial.shutterAngle
                             ).sanitized()
                         )
                     }.padding(horizontal = 14.dp, vertical = 10.dp))
