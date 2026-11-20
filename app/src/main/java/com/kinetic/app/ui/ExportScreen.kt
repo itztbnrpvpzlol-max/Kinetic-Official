@@ -111,7 +111,7 @@ fun ExportScreen(editor: EditorState, onClose: () -> Unit) {
         progress = null
         live = null
         error = null
-        val layers = editor.layers.toList()
+        val layers = editor.projectPreviewLayers.toList()
         val compSnapshot = editor.compSettings
         val s = settings.copy(fileName = settings.safeFileName)
         job = scope.launch {
@@ -191,8 +191,8 @@ private fun SettingsStage(
     onClose: () -> Unit, onExport: () -> Unit
 ) {
     val comp = editor.compSettings
-    val hasAudio = remember(editor.layers.hashCode(), settings.start, settings.end) {
-        com.kinetic.app.export.ExportAudioProbe.hasAudibleLayers(editor.layers, settings.start, settings.end)
+    val hasAudio = remember(editor.projectPreviewLayers.hashCode(), settings.start, settings.end) {
+        com.kinetic.app.export.ExportAudioProbe.hasAudibleLayers(editor.projectPreviewLayers, settings.start, settings.end)
     }
     val heights = remember(comp.width, comp.height, settings.codec, settings.fps) {
         ExportSettings.heightPresets.filter { h ->
@@ -289,10 +289,10 @@ private fun SettingsStage(
 @Composable
 private fun ExportPreview(editor: EditorState, settings: ExportSettings, time: Float, onTime: (Float) -> Unit) {
     val ctx = LocalContext.current
-    val layersKey = editor.layers.hashCode()
+    val layersKey = editor.projectPreviewLayers.hashCode()
     val frame by produceState<Bitmap?>(null, time, settings.width, settings.height, layersKey, editor.compSettings) {
         delay(180)
-        val layers = editor.layers.toList()
+        val layers = editor.projectPreviewLayers.toList()
         val comp = editor.compSettings
         value = withContext(Dispatchers.Default) {
             val k = min(1f, 720f / max(settings.width, settings.height))
