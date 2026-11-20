@@ -101,6 +101,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
     var showImport by remember { mutableStateOf(false) }
     var showCompSettings by remember { mutableStateOf(false) }
     var editVectorId by remember { mutableStateOf<String?>(null) }
+    val vecState = remember(editVectorId) { VectorEditState() }
     var showLayers by remember { mutableStateOf(false) }
     var showLeave by remember { mutableStateOf(false) }
     var panelTab by remember { mutableIntStateOf(0) }
@@ -115,7 +116,16 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
     var maskTool by remember { mutableStateOf("Pen") }
     var rotoForeground by remember { mutableStateOf(true) }
     var showEffectsScreen by remember { mutableStateOf(false) }
+    fun closeVector() {
+        val id = editVectorId
+        if (id != null) {
+            editor.layers.firstOrNull { it.id == id }?.let { if (it.vectorPoints.size < 2) editor.deleteLayer(it.id) }
+            editVectorId = null
+            if (dockTool == "Masking") dockTool = "Select"
+        }
+    }
     LaunchedEffect(editor.selectedId) {
+        if (editVectorId != null && editor.selectedId != editVectorId) closeVector()
         showToolPanel = false
         showShapePanel = false
         if (editor.selectedId == null) {
@@ -123,7 +133,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
             dockTool = "Select"
         } else {
             // Selection and panel visibility are deliberately independent.
-            dockTool = "Properties"
+            dockTool = if (editVectorId != null && editVectorId == editor.selectedId) "Masking" else "Properties"
         }
     }
 
@@ -138,6 +148,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
         editor.playing = !editor.playing
     }
     BackHandler { leave() }
+    BackHandler(enabled = editVectorId != null) { closeVector() }
     BackHandler(enabled = previewExpanded) { previewExpanded = false }
 
     val audio = remember { AudioEngine(ctx) }
@@ -293,19 +304,20 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
 
         if (previewExpanded) {
             Box(Modifier.weight(1f).fillMaxWidth()) {
-            if (editVectorId == null) PreviewCanvas(editor, Modifier.fillMaxSize(), editor.settings.previewQualityIndex, playback = playback)
+            PreviewCanvas(editor, Modifier.fillMaxSize(), editor.settings.previewQualityIndex, playback = playback)
             PreviewQualityControl(editor, Modifier.align(Alignment.TopStart).padding(8.dp))
                 if (editor.settings.showPreviewDiagnostics) {
                     PreviewDiagnosticsBadge(editor.playing, Modifier.align(Alignment.BottomEnd).padding(8.dp))
                 }
             }
         } else {
-            val visiblePreviewHeight = if (showPropertiesPanel || showToolPanel || showShapePanel) minOf(adaptivePreviewHeight, 150f) else adaptivePreviewHeight
+            val visiblePreviewHeight = if (showPropertiesPanel || showToolPanel || showShapePanel || editVectorId != null) minOf(adaptivePreviewHeight, 150f) else adaptivePreviewHeight
             Box(Modifier.fillMaxWidth().height(visiblePreviewHeight.dp)) {
-                if (editVectorId == null) PreviewCanvas(editor, Modifier.fillMaxSize(), editor.settings.previewQualityIndex, playback = playback)
+                PreviewCanvas(editor, Modifier.fillMaxSize(), editor.settings.previewQualityIndex, playback = playback)
                 if (showToolPanel && dockTool == "Masking") {
                     MaskEditingOverlay(editor, maskTool, rotoForeground, Modifier.fillMaxSize())
                 }
+                editVectorId?.let { VectorEditOverlay(editor, it, vecState, Modifier.fillMaxSize()) }
                 PreviewQualityControl(editor, Modifier.align(Alignment.TopStart).padding(8.dp))
                 if (editor.settings.showPreviewDiagnostics) {
                     PreviewDiagnosticsBadge(editor.playing, Modifier.align(Alignment.BottomEnd).padding(8.dp))
@@ -329,7 +341,13 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
             val activeLayer = editor.selected
             if (activeLayer != null) {
                 AlightCutBar(editor, activeLayer)
-                if (!compactHeight && (showPropertiesPanel || showToolPanel)) {
+                val vectorId = editVectorId
+                if (!compactHeight && vectorId != null) {
+                    VectorEditPanel(
+                        editor, vectorId, vecState, onClose = { closeVector() },
+                        modifier = Modifier.fillMaxWidth().height((windowMaxHeight.value * 0.33f).coerceIn(220f, 290f).dp)
+                    )
+                } else if (!compactHeight && (showPropertiesPanel || showToolPanel)) {
                     // Every dock tool shares the Properties panel shell and workspace footprint.
                     val adaptivePanelHeight = if (dockTool == "Masking") (windowMaxHeight.value * 0.43f).coerceIn(280f, 390f) else (windowMaxHeight.value * 0.27f).coerceIn(180f, 228f)
                     if (showPropertiesPanel) {
@@ -389,7 +407,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                         editor.playing = false
                         val current = activeLayer
                         editVectorId = if (current != null && current.isVector) current.id else editor.addVectorLayer()
-                        dockTool = "Select"
+                        dockTool = "Masking"
                     }
                     "Speed", "Volume", "Effects", "Blending", "Blend modes" -> {
                         if (activeLayer != null) {
@@ -442,15 +460,6 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                 }
             )
         }
-        val vectorId = editVectorId
-        if (vectorId != null) EditPointsScreen(
-            editor, vectorId, playback,
-            onClose = {
-                editor.playing = false
-                editor.layers.firstOrNull { it.id == vectorId }?.let { if (it.vectorPoints.size < 2) editor.deleteLayer(it.id) }
-                editVectorId = null
-            }
-        )
     }
 
     if (showImport) {
@@ -568,6 +577,7 @@ private fun FloatingEditingDock(active: String, hasSelection: Boolean, onSelect:
             "Select" to IconKind.SELECT,
             "Text" to IconKind.TEXT,
             "Shapes" to IconKind.SHAPES,
+            "Masking" to IconKind.MASK,
             "Layers" to IconKind.LAYERS,
             "Adjust" to IconKind.ADJ
         )
