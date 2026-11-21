@@ -62,8 +62,8 @@ private fun graphSegment(keys: List<Keyframe>, selected: Int): Int =
 fun GraphPanel(editor: EditorState, layer: Layer, modifier: Modifier = Modifier) {
     val currentLayer = editor.layers.firstOrNull { it.id == layer.id } ?: layer
     val graphItems = buildList {
-        if (currentLayer.p(PropId.POS_X).keys.isNotEmpty() || currentLayer.p(PropId.POS_Y).keys.isNotEmpty()) {
-            add("Position" to (if (currentLayer.p(PropId.POS_X).keys.isNotEmpty()) PropId.POS_X else PropId.POS_Y))
+        listOf(PropId.POS_X, PropId.POS_Y, PropId.POS_Z).forEach { id ->
+            if (currentLayer.p(id).keys.isNotEmpty()) add(id.label to id)
         }
         if (currentLayer.scaleLinked) {
             if (currentLayer.p(PropId.SCALE_X).keys.isNotEmpty() || currentLayer.p(PropId.SCALE_Y).keys.isNotEmpty()) {
@@ -74,7 +74,7 @@ fun GraphPanel(editor: EditorState, layer: Layer, modifier: Modifier = Modifier)
             if (currentLayer.p(PropId.SCALE_Y).keys.isNotEmpty()) add("Scale Y" to PropId.SCALE_Y)
         }
         PropId.values().filter { id ->
-            id !in setOf(PropId.POS_X, PropId.POS_Y, PropId.SCALE_X, PropId.SCALE_Y) &&
+            id !in setOf(PropId.POS_X, PropId.POS_Y, PropId.POS_Z, PropId.SCALE_X, PropId.SCALE_Y) &&
                 currentLayer.p(id).keys.isNotEmpty()
         }.forEach { add(it.label to it) }
         val selectedTrack = editor.selectedProp
@@ -85,7 +85,6 @@ fun GraphPanel(editor: EditorState, layer: Layer, modifier: Modifier = Modifier)
     val selected = editor.selectedProp?.let { selectedProp ->
         graphItems.firstOrNull { item ->
             item.second == selectedProp ||
-                (item.first == "Position" && selectedProp in setOf(PropId.POS_X, PropId.POS_Y)) ||
                 (item.first == "Scale" && selectedProp in setOf(PropId.SCALE_X, PropId.SCALE_Y))
         }?.second
     } ?: graphItems.firstOrNull()?.second ?: PropId.OPACITY
