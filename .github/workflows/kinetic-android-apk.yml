@@ -172,7 +172,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          base64 --decode ci-signing/kinetic-upload.base64 > app/kinetic-upload.jks
+          SIGNING_KEY_B64="$(tr -d '\r\n ' < ci-signing/kinetic-upload.base64)"
+          while (( ${#SIGNING_KEY_B64} % 4 != 0 )); do
+            SIGNING_KEY_B64="${SIGNING_KEY_B64}="
+          done
+          printf '%s' "$SIGNING_KEY_B64" | base64 --decode > app/kinetic-upload.jks
           test -s app/kinetic-upload.jks
           echo "KINETIC_KEYSTORE_PASSWORD=$(cat ci-signing/password.txt)" >> "$GITHUB_ENV"
 
