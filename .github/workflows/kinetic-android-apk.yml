@@ -172,9 +172,10 @@ jobs:
         shell: bash
         env:
           KINETIC_KEYSTORE_BASE64: ${{ secrets.KINETIC_KEYSTORE_BASE64 }}
+          KINETIC_KEYSTORE_PASSWORD: ${{ secrets.KINETIC_KEYSTORE_PASSWORD }}
         run: |
           set -euo pipefail
-          if [ -z "${KINETIC_KEYSTORE_BASE64}" ] || [ -z "${{ secrets.KINETIC_KEYSTORE_PASSWORD }}" ]; then
+          if [ -z "${KINETIC_KEYSTORE_BASE64}" ] || [ -z "${KINETIC_KEYSTORE_PASSWORD}" ]; then
             echo "Missing KINETIC_KEYSTORE_BASE64 or KINETIC_KEYSTORE_PASSWORD repository secrets."
             echo "Configure both secrets before building APKs; a changing debug key prevents Android in-place updates."
             exit 1
