@@ -14,6 +14,13 @@ class AppSettings(context: Context) {
     companion object {
         val TIME_FORMATS = listOf("00:00", "Frames", "Timecode")
         val PREVIEW_QUALITIES = listOf("Auto", "Full", "Half", "Quarter")
+        val INTERFACE_SIZES = listOf(
+            "Smaller (70%)" to 0.70f,
+            "Small (85%)" to 0.85f,
+            "Automatic" to 1.00f,
+            "Large (115%)" to 1.15f,
+            "Larger (130%)" to 1.30f
+        )
     }
     var lastComp by mutableStateOf(loadComp()); private set
     var timeFormat by mutableIntStateOf(prefs.getInt("timeFormat", 0)); private set
@@ -21,6 +28,7 @@ class AppSettings(context: Context) {
     var loop by mutableStateOf(prefs.getBoolean("loop", false)); private set
     var previewQualityIndex by mutableIntStateOf(prefs.getInt("previewQualityIndex", 0).coerceIn(0, 3)); private set
     var showPreviewDiagnostics by mutableStateOf(prefs.getBoolean("showPreviewDiagnostics", false)); private set
+    var interfaceScale by mutableStateOf(prefs.getFloat("interfaceScale", 1f).coerceIn(0.70f, 1.30f)); private set
     private fun loadComp(): CompSettings {
         val oldFps = listOf(24, 30, 60).getOrElse(prefs.getInt("frameRate", 1)) { 30 }
         val oldLength = listOf(5, 10, 30, 60).getOrElse(prefs.getInt("compLength", 0)) { 5 }
@@ -42,6 +50,10 @@ class AppSettings(context: Context) {
     fun updateLoop(v: Boolean) { loop = v; prefs.edit().putBoolean("loop", v).apply() }
     fun updatePreviewQuality(i: Int) { previewQualityIndex = i.coerceIn(0, 3); prefs.edit().putInt("previewQualityIndex", previewQualityIndex).apply() }
     fun updateShowPreviewDiagnostics(v: Boolean) { showPreviewDiagnostics = v; prefs.edit().putBoolean("showPreviewDiagnostics", v).apply() }
+    fun updateInterfaceScale(v: Float) {
+        interfaceScale = v.coerceIn(0.70f, 1.30f)
+        prefs.edit().putFloat("interfaceScale", interfaceScale).apply()
+    }
     val fps: Int get() = lastComp.fps
     fun formatTime(t: Float): String {
         val total = t.coerceAtLeast(0f)
