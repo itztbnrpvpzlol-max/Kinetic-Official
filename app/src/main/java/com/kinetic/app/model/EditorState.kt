@@ -232,14 +232,26 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
 
     /** Wrap the selected layer in a new pre-comp container without changing its visual timing. */
     fun precomposeSelected(): Boolean {
-        val child = selected ?: return false
-        if (child.type == LayerType.PRECOMP) return false
-        // The pre-comp occupies exactly the selected clip's timeline range.
-        // Its child retains its original source in/out points and playback speed.
+        val selectedLayer = selected ?: return false
+        if (selectedLayer.type == LayerType.PRECOMP) return false
+
+        // A precomp is a composition-space container. Bake any existing parent
+        // transform into the child first so the nested preview matches the main comp.
+        if (selectedLayer.parentId != null) setParent(selectedLayer.id, null)
+        val child = layers.firstOrNull { it.id == selectedLayer.id } ?: return false
+
+        // Keep the container transform as identity: nested children already use
+        // composition-space coordinates, so a centered container anchor/position
+        // would apply an extra half-composition translation in the main preview.
         val precomp = newLayer(
             LayerType.PRECOMP, child.name + " Pre-comp", child.start, child.duration,
             COMP_W, COMP_H
-        ).copy(precompLayers = listOf(child))
+        ).copy(
+            props = newLayer(LayerType.PRECOMP, child.name, child.start, child.duration, COMP_W, COMP_H).props +
+                mapOf(PropId.ANCHOR_X to Prop(0f), PropId.ANCHOR_Y to Prop(0f),
+                    PropId.POS_X to Prop(0f), PropId.POS_Y to Prop(0f)),
+            precompLayers = listOf(child)
+        )
         commit { current -> current.map { if (it.id == child.id) precomp else it } }
         select(precomp.id)
         return true
@@ -576,7 +588,11 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
     }
 
     fun deleteLayer(id: String) {
-        commit { ls -> ls.filter { it.id != id }.map { if (it.parentId == id) it.copy(parentId = null) else it } }
+        val children = layers.filter { it.parentId == id }.map { it.id }
+        // Detach children through the same world-transform compensation used by
+        // the parenting UI; simply clearing parentId makes them jump in preview.
+        children.forEach { childId -> setParent(childId, null) }
+        commit { ls -> ls.filter { it.id != id } }
         fixSelection()
     }
 
