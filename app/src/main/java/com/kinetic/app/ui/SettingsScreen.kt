@@ -72,7 +72,6 @@ fun SettingsScreen(
     var showClearCacheDialog by remember { mutableStateOf(false) }
     var cacheCleared by remember { mutableStateOf(false) }
     var showLanguageDialog by remember { mutableStateOf(false) }
-    var showProDialog by remember { mutableStateOf(false) }
     var pluginRevision by remember { mutableIntStateOf(0) }
     val installedPacks = remember(pluginRevision) { pluginManager.installedPacks() }
 
@@ -124,23 +123,6 @@ fun SettingsScreen(
                 .padding(horizontal = 18.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(2.dp)
         ) {
-            SettingsSection("Kinetic Pro")
-            SettingsCard {
-                Row(
-                    Modifier.fillMaxWidth().clip(SettingsCardShape)
-                        .clickable { showProDialog = true }
-                        .padding(horizontal = 18.dp, vertical = 19.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                        Text("Kinetic Pro", color = KColors.Text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-                        Text("More creative tools and premium effects are in development.",
-                            color = KColors.Muted, fontSize = 12.sp)
-                    }
-                    Text("SOON", color = KColors.Accent, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                }
-            }
-
             SettingsSection("Language")
             SettingsCard {
                 Row(
@@ -299,14 +281,6 @@ fun SettingsScreen(
             title = { Text("Language") },
             text = { Text("Kinetic's interface is currently available in English. Additional languages will be added when localization is supported.") },
             confirmButton = { TextButton(onClick = { showLanguageDialog = false }) { Text("OK") } }
-        )
-    }
-    if (showProDialog) {
-        AlertDialog(
-            onDismissRequest = { showProDialog = false },
-            title = { Text("Kinetic Pro") },
-            text = { Text("Kinetic Pro is not available yet. The app will announce premium features when they are ready.") },
-            confirmButton = { TextButton(onClick = { showProDialog = false }) { Text("OK") } }
         )
     }
     if (showClearCacheDialog) {
