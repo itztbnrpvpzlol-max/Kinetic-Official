@@ -168,17 +168,18 @@ jobs:
             test -s "../../app/src/main/jniLibs/${abi}/libkinetic_effectcraft.so"
           done
 
-      - name: Prepare repository APK signing key
+      - name: Prepare persistent APK signing key
         shell: bash
+        env:
+          KINETIC_KEYSTORE_BASE64: ${{ secrets.KINETIC_KEYSTORE_BASE64 }}
+          KINETIC_KEYSTORE_PASSWORD: ${{ secrets.KINETIC_KEYSTORE_PASSWORD }}
         run: |
           set -euo pipefail
-          SIGNING_KEY_B64="$(tr -d '\r\n ' < ci-signing/kinetic-upload.base64)"
-          while (( ${#SIGNING_KEY_B64} % 4 != 0 )); do
-            SIGNING_KEY_B64="${SIGNING_KEY_B64}="
-          done
-          printf '%s' "$SIGNING_KEY_B64" | base64 --decode > app/kinetic-upload.jks
-          test -s app/kinetic-upload.jks
-          echo "KINETIC_KEYSTORE_PASSWORD=$(cat ci-signing/password.txt)" >> "$GITHUB_ENV"
+          test -n "${KINETIC_KEYSTORE_BASE64}" || { echo "Missing KINETIC_KEYSTORE_BASE64 repository secret."; exit 1; }
+          test -n "${KINETIC_KEYSTORE_PASSWORD}" || { echo "Missing KINETIC_KEYSTORE_PASSWORD repository secret."; exit 1; }
+          printf '%s' "${KINETIC_KEYSTORE_BASE64}" | base64 --decode > app/kinetic-upload.jks
+          keytool -list -keystore app/kinetic-upload.jks -storepass "${KINETIC_KEYSTORE_PASSWORD}" -alias kinetic-upload >/dev/null
+          echo "KINETIC_KEYSTORE_PASSWORD=${KINETIC_KEYSTORE_PASSWORD}" >> "${GITHUB_ENV}"
 
       - name: Build debug APK
         run: gradle assembleDebug --no-daemon -PKINETIC_VERSION_CODE="${KINETIC_VERSION_CODE}" -PKINETIC_VERSION_NAME="${KINETIC_VERSION_NAME}"
