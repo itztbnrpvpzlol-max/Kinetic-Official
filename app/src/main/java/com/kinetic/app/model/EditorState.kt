@@ -26,7 +26,8 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
         COMP_W = compSettings.width.toFloat()
         COMP_H = compSettings.height.toFloat()
     }
-    val duration: Float get() = maxOf(baseDuration, layers.maxOfOrNull { it.end } ?: 0f, 0.1f)
+    /** Duration is always measured against the root composition, including while editing a nested pre-comp. */
+    val duration: Float get() = maxOf(baseDuration, projectLayers.maxOfOrNull { it.end } ?: 0f, 0.1f)
     var layers by mutableStateOf<List<Layer>>(emptyList())
         private set
     private val timelineFrames = mutableListOf<TimelineFrame>()
@@ -223,8 +224,10 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
     fun precomposeSelected(): Boolean {
         val child = selected ?: return false
         if (child.type == LayerType.PRECOMP) return false
+        // The pre-comp occupies exactly the selected clip's timeline range.
+        // Its child retains its original source in/out points and playback speed.
         val precomp = newLayer(
-            LayerType.PRECOMP, child.name + " Pre-comp", 0f, duration,
+            LayerType.PRECOMP, child.name + " Pre-comp", child.start, child.duration,
             COMP_W, COMP_H
         ).copy(precompLayers = listOf(child))
         commit { current -> current.map { if (it.id == child.id) precomp else it } }
@@ -1004,18 +1007,56 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
     }
 }
 
+private fun multiplyOpacity(parent: Prop, child: Prop): Prop {
+    val base = (parent.base * child.base / 100f).coerceIn(0f, 100f)
+    val times = (parent.keys.map { it.t } + child.keys.map { it.t }).distinct().sorted()
+    if (times.isEmpty()) return Prop(base)
+    return Prop(base, times.map { t ->
+        Keyframe(t, (parent.valueAt(t) * child.valueAt(t) / 100f).coerceIn(0f, 100f))
+    })
+}
+
 private fun flattenPrecomps(
     items: List<Layer>,
     parentVisible: Boolean = true,
     parentStart: Float = 0f,
-    parentEnd: Float = Float.POSITIVE_INFINITY
+    parentEnd: Float = Float.POSITIVE_INFINITY,
+    parentId: String? = null,
+    inheritedOpacity: Prop = Prop(100f)
 ): List<Layer> = items.flatMap { layer ->
     val start = maxOf(layer.start, parentStart)
     val end = minOf(layer.end, parentEnd)
     if (end <= start) emptyList()
     else if (layer.type == LayerType.PRECOMP) {
-        flattenPrecomps(layer.precompLayers, parentVisible && layer.visible, start, end)
+        // Keep a non-rendering transform node in the flattened stack. Children
+        // reference it as their parent so container transforms affect the entire pre-comp.
+        val container = layer.copy(
+            type = LayerType.NULL,
+            start = start,
+            duration = end - start,
+            visible = layer.visible && parentVisible,
+            parentId = layer.parentId ?: parentId,
+            precompLayers = emptyList()
+        )
+        val opacity = multiplyOpacity(inheritedOpacity, layer.p(PropId.OPACITY))
+        listOf(container) + flattenPrecomps(
+            layer.precompLayers,
+            parentVisible && layer.visible,
+            start,
+            end,
+            layer.id,
+            opacity
+        )
     } else {
-        listOf(layer.copy(start = start, duration = end - start, visible = layer.visible && parentVisible))
+        val clippedElapsed = layer.sourceElapsedAt(start)
+        val opacity = multiplyOpacity(inheritedOpacity, layer.p(PropId.OPACITY))
+        listOf(layer.copy(
+            start = start,
+            duration = end - start,
+            srcOffset = layer.srcOffset + clippedElapsed,
+            visible = layer.visible && parentVisible,
+            parentId = layer.parentId ?: parentId,
+            props = layer.props + (PropId.OPACITY to opacity)
+        ))
     }
 }
