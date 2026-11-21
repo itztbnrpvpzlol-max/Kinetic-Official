@@ -598,8 +598,15 @@ private fun GpuCompositionPreviewCanvas(
             editor.time + ((index + 0.5f) / samples - 0.5f) * exposure
         }.filter { it >= layer.start && it < layer.end }.ifEmpty { listOf(editor.time) }
     }
-    fun sampleOpacity(opacity: Float, count: Int): Float =
-        if (count <= 1) opacity else (1f - Math.pow((1f - opacity.coerceIn(0f, 1f)).toDouble(), 1.0 / count).toFloat())
+    // Draw temporal samples front-to-back with progressively smaller source-over
+    // alpha so every sample contributes equally to the final exposure.
+    fun sampleOpacity(opacity: Float, index: Int, count: Int): Float {
+        val target = opacity.coerceIn(0f, 1f)
+        if (count <= 1) return target
+        val remainingSamples = (count - 1 - index).coerceAtLeast(0)
+        val denominator = (count - remainingSamples * target).coerceAtLeast(0.0001f)
+        return (target / denominator).coerceIn(0f, 1f)
+    }
 
     val byId = editor.previewLayers.associateBy { it.id }
     val renderLayers = ArrayList<GpuLayer>()
@@ -610,8 +617,8 @@ private fun GpuCompositionPreviewCanvas(
         if (layer.type == LayerType.VIDEO && layer.id in textureVideoIds) {
             val opacity = (layer.p(PropId.OPACITY).valueAt(editor.time) / 100f).coerceIn(0f, 1f)
             val sampleTimes = motionBlurSampleTimes(layer)
-            val sampleAlpha = sampleOpacity(opacity, sampleTimes.size)
-            sampleTimes.forEach { sampleTime ->
+            sampleTimes.forEachIndexed { sampleIndex, sampleTime ->
+                val sampleAlpha = sampleOpacity(opacity, sampleIndex, sampleTimes.size)
                 renderLayers += GpuLayer(
                     layer.id, frames[layer.id], Matrix(layerMatrix(layer, sampleTime, byId)),
                     layer.width, layer.height, sampleAlpha, layer.maskEnabled,
@@ -694,8 +701,8 @@ private fun GpuCompositionPreviewCanvas(
         val margin = if (effected != null || layer.type == LayerType.IMAGE || layer.type == LayerType.VIDEO)
             effectMargins[layer.id] else null
         val sampleTimes = motionBlurSampleTimes(layer)
-        val sampleAlpha = sampleOpacity(opacity, sampleTimes.size)
-        sampleTimes.forEach { sampleTime ->
+        sampleTimes.forEachIndexed { sampleIndex, sampleTime ->
+            val sampleAlpha = sampleOpacity(opacity, sampleIndex, sampleTimes.size)
             val quadMatrix = Matrix(layerMatrix(layer, sampleTime, byId))
             if (margin != null) quadMatrix.preTranslate(-margin[0], -margin[1])
             renderLayers += GpuLayer(
