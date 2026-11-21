@@ -49,6 +49,7 @@ internal object GlExportPath {
         if (visual.isEmpty()) return false
         return visual.all { l ->
             (l.type == LayerType.VIDEO || l.type == LayerType.IMAGE) && l.uri != null &&
+                !(l.type == LayerType.VIDEO && l.motionBlur) &&
                 !l.is3D && !(l.maskEnabled && l.maskPath != null) && l.blendMode == "Normal" &&
                 "Grayscale" !in l.effects && !EffectStackRunner.hasPictureEffects(l.effectStack)
         }
