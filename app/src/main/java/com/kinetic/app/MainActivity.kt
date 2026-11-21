@@ -68,6 +68,11 @@ class MainActivity : ComponentActivity() {
                             Toast.makeText(this@MainActivity, result.message, Toast.LENGTH_LONG).show()
                     }
                 }
+                var screen by remember { mutableStateOf(Screen.HOME) }
+                var settingsFrom by remember { mutableStateOf(Screen.HOME) }
+                var editor by remember { mutableStateOf<EditorState?>(null) }
+                var projects by remember { mutableStateOf(store.list()) }
+
                 val backupExport = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
                     if (uri != null) Thread {
                         val result = runCatching {
@@ -99,11 +104,6 @@ class MainActivity : ComponentActivity() {
                         }
                     }.apply { name = "KineticBackupImport"; start() }
                 }
-                var screen by remember { mutableStateOf(Screen.HOME) }
-                var settingsFrom by remember { mutableStateOf(Screen.HOME) }
-                var editor by remember { mutableStateOf<EditorState?>(null) }
-                var projects by remember { mutableStateOf(store.list()) }
-
                 when (screen) {
                     Screen.HOME -> HomeScreen(
                         newCompDefaults = settings.lastComp,
