@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
+import android.graphics.RectF
 import android.graphics.SurfaceTexture
 import android.media.MediaCodec
 import android.media.MediaExtractor
@@ -31,6 +32,7 @@ import com.kinetic.app.model.LayerType
 import com.kinetic.app.model.MotionBlur
 import com.kinetic.app.model.PropId
 import com.kinetic.app.model.layerMatrix
+import com.kinetic.app.ui.LayerRaster
 import com.kinetic.app.model.sourceElapsedAt
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -48,10 +50,11 @@ internal object GlExportPath {
         }
         if (visual.isEmpty()) return false
         return visual.all { l ->
-            (l.type == LayerType.VIDEO || l.type == LayerType.IMAGE) && l.uri != null &&
+            (l.type == LayerType.VIDEO || l.type == LayerType.IMAGE || l.type == LayerType.TEXT || l.type == LayerType.SHAPE) &&
+                (l.uri != null || l.type == LayerType.TEXT || l.type == LayerType.SHAPE) &&
                 !(l.type == LayerType.VIDEO && l.motionBlur) &&
                 !l.is3D && !(l.maskEnabled && l.maskPath != null) && l.blendMode == "Normal" &&
-                "Grayscale" !in l.effects && !EffectStackRunner.hasPictureEffects(l.effectStack)
+                "Grayscale" !in l.effects
         }
     }
 }
@@ -70,6 +73,12 @@ internal class GlSceneRenderer(private val surface: Surface, val width: Int, val
     }
     private val points = FloatArray(8)
     private var readBuffer: ByteBuffer? = null
+    private var captureBuffer: ByteBuffer? = null
+    private var fbo = 0
+    private var fboTex = 0
+    private var fboW = 0
+    private var fboH = 0
+    private val uploaded = HashMap<Int, Long>()
 
     init {
         display = EGL14.eglGetDisplay(EGL14.EGL_DEFAULT_DISPLAY)
@@ -115,7 +124,100 @@ internal class GlSceneRenderer(private val surface: Surface, val width: Int, val
         return ids[0]
     }
 
+    fun createEmptyTexture(): Int {
+        val ids = IntArray(1)
+        GLES20.glGenTextures(1, ids, 0)
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, ids[0])
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
+        return ids[0]
+    }
+
+    fun uploadBitmap(textureId: Int, bitmap: Bitmap) {
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureId)
+        val size = (bitmap.width.toLong() shl 32) or bitmap.height.toLong()
+        if (uploaded[textureId] == size) {
+            GLUtils.texSubImage2D(GLES20.GL_TEXTURE_2D, 0, 0, 0, bitmap)
+        } else {
+            GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, bitmap, 0)
+            uploaded[textureId] = size
+        }
+    }
+
+    private fun ensureFbo(w: Int, h: Int) {
+        if (fbo != 0 && fboW == w && fboH == h) return
+        if (fbo != 0) {
+            GLES20.glDeleteFramebuffers(1, intArrayOf(fbo), 0)
+            GLES20.glDeleteTextures(1, intArrayOf(fboTex), 0)
+        }
+        val tex = IntArray(1)
+        GLES20.glGenTextures(1, tex, 0)
+        fboTex = tex[0]
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, fboTex)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
+        GLES20.glTexImage2D(GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, w, h, 0, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, null)
+        val ids = IntArray(1)
+        GLES20.glGenFramebuffers(1, ids, 0)
+        fbo = ids[0]
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fbo)
+        GLES20.glFramebufferTexture2D(GLES20.GL_FRAMEBUFFER, GLES20.GL_COLOR_ATTACHMENT0, GLES20.GL_TEXTURE_2D, fboTex, 0)
+        check(GLES20.glCheckFramebufferStatus(GLES20.GL_FRAMEBUFFER) == GLES20.GL_FRAMEBUFFER_COMPLETE) { "FBO incomplete" }
+        fboW = w
+        fboH = h
+    }
+
+    fun captureVideo(textureId: Int, texMatrix: FloatArray, w: Int, h: Int): Bitmap {
+        ensureFbo(w, h)
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fbo)
+        GLES20.glViewport(0, 0, w, h)
+        GLES20.glDisable(GLES20.GL_BLEND)
+        GLES20.glClearColor(0f, 0f, 0f, 0f)
+        GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+        val v = vertices
+        v.position(0)
+        v.put(-1f); v.put(-1f); v.put(0f); v.put(1f)
+        v.put(-1f); v.put(1f); v.put(0f); v.put(0f)
+        v.put(1f); v.put(-1f); v.put(1f); v.put(1f)
+        v.put(1f); v.put(1f); v.put(1f); v.put(0f)
+        GLES20.glUseProgram(oesProgram)
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+        GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, textureId)
+        GLES20.glUniform1i(GLES20.glGetUniformLocation(oesProgram, "uTexture"), 0)
+        GLES20.glUniform1f(GLES20.glGetUniformLocation(oesProgram, "uAlpha"), 1f)
+        GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(oesProgram, "uTex"), 1, false, texMatrix, 0)
+        val position = GLES20.glGetAttribLocation(oesProgram, "aPos")
+        val coord = GLES20.glGetAttribLocation(oesProgram, "aUv")
+        v.position(0)
+        GLES20.glVertexAttribPointer(position, 2, GLES20.GL_FLOAT, false, 16, v)
+        GLES20.glEnableVertexAttribArray(position)
+        v.position(2)
+        GLES20.glVertexAttribPointer(coord, 2, GLES20.GL_FLOAT, false, 16, v)
+        GLES20.glEnableVertexAttribArray(coord)
+        GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
+        GLES20.glDisableVertexAttribArray(position)
+        GLES20.glDisableVertexAttribArray(coord)
+        val size = w * h * 4
+        val buffer = captureBuffer?.takeIf { it.capacity() == size }
+            ?: ByteBuffer.allocateDirect(size).order(ByteOrder.nativeOrder()).also { captureBuffer = it }
+        buffer.clear()
+        GLES20.glReadPixels(0, 0, w, h, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buffer)
+        buffer.rewind()
+        val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        bitmap.copyPixelsFromBuffer(buffer)
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
+        GLES20.glViewport(0, 0, width, height)
+        GLES20.glEnable(GLES20.GL_BLEND)
+        GLES20.glBlendFunc(GLES20.GL_ONE, GLES20.GL_ONE_MINUS_SRC_ALPHA)
+        return bitmap
+    }
+
     fun deleteTexture(id: Int) {
+        uploaded.remove(id)
         if (id != 0) GLES20.glDeleteTextures(1, intArrayOf(id), 0)
     }
 
@@ -347,7 +449,26 @@ internal class SurfaceVideoDecoder(
         return false
     }
 
+    var lastTargetUs = -1L
+        private set
+
+    fun needsSeek(targetUs: Long): Boolean =
+        lastTargetUs >= 0L && (targetUs < lastTargetUs - 100_000L || targetUs > lastTargetUs + 2_000_000L)
+
+    fun seek(targetUs: Long) {
+        if (heldIndex >= 0) {
+            runCatching { codec.releaseOutputBuffer(heldIndex, false) }
+            heldIndex = -1
+        }
+        extractor.seekTo(targetUs.coerceAtLeast(0L), MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
+        codec.flush()
+        inputDone = false
+        outputDone = false
+        hasFrame = false
+    }
+
     fun advance(targetUs: Long): Boolean {
+        lastTargetUs = targetUs
         val limit = targetUs + TOLERANCE_US
         var candidate = -1
         while (true) {
@@ -398,20 +519,28 @@ internal class GlFrameComposer(
     private val renderer = GlSceneRenderer(surface, width, height)
     private val ordered = layers.asReversed()
     private val byId = layers.associateBy { it.id }
+    private val sx = width / COMP_W
+    private val sy = height / COMP_H
     private val videos = HashMap<String, SurfaceVideoDecoder>()
+    private val idle = ArrayList<Pair<String, SurfaceVideoDecoder>>()
     private val images = HashMap<String, Pair<Int, Bitmap>>()
+    private val scratch = HashMap<String, Int>()
     private val signalThread = HandlerThread("KineticExportFrames").also { it.start() }
     private var lastThumbAt = 0L
 
     fun render(time: Float, presentationNs: Long, wantThumbnail: Boolean): Bitmap? {
         renderer.begin(comp.background.toInt())
         val finished = videos.keys.filter { id -> byId[id]?.let { time >= it.end || !it.visible } ?: true }
-        finished.forEach { videos.remove(it)?.release() }
+        finished.forEach { id ->
+            val decoder = videos.remove(id) ?: return@forEach
+            park(byId[id]?.uri, decoder)
+        }
         for (layer in ordered) {
             if (!layer.visible || !layer.activeAt(time)) continue
             when (layer.type) {
                 LayerType.VIDEO -> drawVideo(layer, time)
                 LayerType.IMAGE -> drawImage(layer, time)
+                LayerType.TEXT, LayerType.SHAPE -> drawVector(layer, time)
                 else -> Unit
             }
         }
@@ -425,23 +554,54 @@ internal class GlFrameComposer(
         return thumb
     }
 
+    private fun park(uri: String?, decoder: SurfaceVideoDecoder) {
+        if (uri == null) {
+            decoder.release()
+            return
+        }
+        idle.add(uri to decoder)
+        while (idle.size > 2) idle.removeAt(0).second.release()
+    }
+
+    private fun acquire(uri: String, targetUs: Long): SurfaceVideoDecoder {
+        val index = idle.indexOfFirst { it.first == uri }
+        if (index >= 0) return idle.removeAt(index).second
+        return SurfaceVideoDecoder(context, Uri.parse(uri), targetUs, renderer, signalThread)
+    }
+
     private fun sampleTimes(layer: Layer, time: Float): FloatArray =
         MotionBlur.sampleTimes(layer, time, comp.shutterAngle, fps, byId, MotionBlur.EXPORT_MAX_SAMPLES, 0.75f)
 
+    private fun effectStack(layer: Layer) = EffectStackRunner.pictureEffects(layer.effectStack).take(12)
+
+    private fun targetEdge(layer: Layer): Int =
+        max(layer.width * sx, layer.height * sy).toInt().coerceIn(64, MAX_EDGE)
+
     private fun drawVideo(layer: Layer, time: Float) {
-        val uri = Uri.parse(layer.uri ?: return)
+        val uri = layer.uri ?: return
         val sourceSeconds = (layer.sourceElapsedAt(time) + layer.srcOffset).coerceAtLeast(0f)
         val targetUs = (sourceSeconds * 1_000_000f).toLong()
-        val decoder = videos.getOrPut(layer.id) { SurfaceVideoDecoder(context, uri, targetUs, renderer, signalThread) }
+        val decoder = videos.getOrPut(layer.id) { acquire(uri, targetUs) }
+        if (decoder.needsSeek(targetUs)) decoder.seek(targetUs)
         if (!decoder.advance(targetUs)) return
         val scale = min(layer.width / decoder.displayWidth, layer.height / decoder.displayHeight)
         val w = decoder.displayWidth * scale
         val h = decoder.displayHeight * scale
         val left = (layer.width - w) / 2f
         val top = (layer.height - h) / 2f
-        drawSamples(layer, time) { matrix, alpha ->
-            renderer.drawQuad(decoder.textureId, true, decoder.texMatrix, matrix, left, top, left + w, top + h, alpha)
+        val stack = effectStack(layer)
+        if (stack.isEmpty()) {
+            drawSamples(layer, time) { matrix, alpha ->
+                renderer.drawQuad(decoder.textureId, true, decoder.texMatrix, matrix, left, top, left + w, top + h, alpha)
+            }
+            return
         }
+        val k = min(1f, targetEdge(layer).toFloat() / max(decoder.displayWidth, decoder.displayHeight))
+        val captured = renderer.captureVideo(
+            decoder.textureId, decoder.texMatrix,
+            (decoder.displayWidth * k).toInt().coerceAtLeast(2), (decoder.displayHeight * k).toInt().coerceAtLeast(2)
+        )
+        drawProcessed(layer, time, captured, RectF(left, top, left + w, top + h), stack, true)
     }
 
     private fun drawImage(layer: Layer, time: Float) {
@@ -458,9 +618,39 @@ internal class GlFrameComposer(
         val h = bitmap.height * scale
         val left = (layer.width - w) / 2f
         val top = (layer.height - h) / 2f
-        drawSamples(layer, time) { matrix, alpha ->
-            renderer.drawQuad(entry.first, false, null, matrix, left, top, left + w, top + h, alpha)
+        val stack = effectStack(layer)
+        if (stack.isEmpty()) {
+            drawSamples(layer, time) { matrix, alpha ->
+                renderer.drawQuad(entry.first, false, null, matrix, left, top, left + w, top + h, alpha)
+            }
+            return
         }
+        drawProcessed(layer, time, bitmap, RectF(left, top, left + w, top + h), stack, false)
+    }
+
+    private fun drawVector(layer: Layer, time: Float) {
+        val bitmap = LayerRaster.render(layer, time, targetEdge(layer), allowUpscale = true) ?: return
+        drawProcessed(layer, time, bitmap, RectF(0f, 0f, layer.width, layer.height), effectStack(layer), true)
+    }
+
+    private fun drawProcessed(
+        layer: Layer, time: Float, source: Bitmap, dest: RectF,
+        stack: List<com.kinetic.app.model.EffectInstance>, ownsSource: Boolean
+    ) {
+        val effected = if (stack.isEmpty()) null else EffectStackRunner.processBitmapGrown(
+            source, stack, time, time - layer.start, fps.toFloat(), layer.width, layer.height, MAX_EFFECT_PIXELS
+        )
+        val bitmap = effected?.bitmap ?: source
+        val rect = if (effected != null) {
+            RectF(dest.left - effected.left, dest.top - effected.top, dest.right + effected.right, dest.bottom + effected.bottom)
+        } else dest
+        val texture = scratch.getOrPut(layer.id) { renderer.createEmptyTexture() }
+        renderer.uploadBitmap(texture, bitmap)
+        drawSamples(layer, time) { matrix, alpha ->
+            renderer.drawQuad(texture, false, null, matrix, rect.left, rect.top, rect.right, rect.bottom, alpha)
+        }
+        if (effected != null && !effected.bitmap.isRecycled) effected.bitmap.recycle()
+        if (ownsSource && !source.isRecycled) source.recycle()
     }
 
     private inline fun drawSamples(layer: Layer, time: Float, draw: (Matrix, Float) -> Unit) {
@@ -476,7 +666,7 @@ internal class GlFrameComposer(
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
         var sample = 1
-        while (max(bounds.outWidth, bounds.outHeight) / (sample * 2) >= MAX_IMAGE_EDGE) sample *= 2
+        while (max(bounds.outWidth, bounds.outHeight) / (sample * 2) >= MAX_EDGE) sample *= 2
         val options = BitmapFactory.Options().apply { inSampleSize = sample; inPreferredConfig = Bitmap.Config.ARGB_8888 }
         context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, options) }
     }.getOrNull()
@@ -484,13 +674,18 @@ internal class GlFrameComposer(
     override fun close() {
         videos.values.forEach { runCatching { it.release() } }
         videos.clear()
+        idle.forEach { runCatching { it.second.release() } }
+        idle.clear()
         images.values.forEach { runCatching { renderer.deleteTexture(it.first) }; if (!it.second.isRecycled) it.second.recycle() }
         images.clear()
+        scratch.values.forEach { runCatching { renderer.deleteTexture(it) } }
+        scratch.clear()
         runCatching { renderer.release() }
         runCatching { signalThread.quitSafely() }
     }
 
     private companion object {
-        const val MAX_IMAGE_EDGE = 4096
+        const val MAX_EDGE = 4096
+        const val MAX_EFFECT_PIXELS = 12_000_000
     }
 }
