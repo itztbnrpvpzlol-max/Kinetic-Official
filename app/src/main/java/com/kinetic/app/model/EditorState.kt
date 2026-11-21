@@ -742,7 +742,14 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
                         var depth = 0
                         while (currentId != null && depth++ < 16) {
                             val ancestor = byId[currentId] ?: break
-                            ancestor.props.values.forEach { prop -> sampleTimes += prop.keys.map { it.t } }
+                            val transformIds = setOf(
+                                PropId.POS_X, PropId.POS_Y, PropId.POS_Z,
+                                PropId.ANCHOR_X, PropId.ANCHOR_Y,
+                                PropId.SCALE_X, PropId.SCALE_Y,
+                                PropId.ROTATION, PropId.ROTATION_X, PropId.ROTATION_Y
+                            )
+                            ancestor.props.filterKeys { it in transformIds }.values
+                                .forEach { prop -> sampleTimes += prop.keys.map { it.t } }
                             currentId = ancestor.parentId
                         }
                     }
