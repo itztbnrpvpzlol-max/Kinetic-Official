@@ -56,7 +56,7 @@ class ProjectStore(context: Context) {
 
     /** Restores only Kinetic project and media-cache entries; unrelated archive paths are ignored. */
     fun importBackup(input: InputStream): Int {
-        val staging = File(filesRoot.parentFile, "${filesRoot.name}-kinetic-restore-${UUID.randomUUID()}")
+        val staging = File(filesRoot, ".kinetic-restore-${UUID.randomUUID()}")
             .apply { mkdirs() }
         var restoredProjects = 0
         try {
@@ -64,7 +64,7 @@ class ProjectStore(context: Context) {
                 while (true) {
                     val entry = zip.nextEntry ?: break
                     if (!entry.isDirectory) {
-                        val normalized = entry.name.replace('\\\\', '/')
+                        val normalized = entry.name.replace('\\', '/')
                         val destinationRoot = when {
                             normalized.startsWith("projects/") -> File(staging, "projects")
                             normalized.startsWith("media-cache/") -> File(staging, "media-cache")
