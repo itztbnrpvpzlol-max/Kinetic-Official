@@ -608,9 +608,12 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
         val t = time
         if (t <= l.start + frame || t >= l.end - frame) return
         val a = l.copy(duration = t - l.start)
+        // Source time is not necessarily equal to timeline time: a clip may
+        // already be sped up, slowed down, or have animated speed keyframes.
+        // Advance the split segment by the actual integrated source elapsed time.
         val b = l.copy(
             id = UUID.randomUUID().toString(), start = t,
-            duration = l.end - t, srcOffset = l.srcOffset + (t - l.start)
+            duration = l.end - t, srcOffset = l.srcOffset + l.sourceElapsedAt(t)
         )
         commit { ls -> ls.flatMap { if (it.id == l.id) listOf(b, a) else listOf(it) } }
         select(b.id)
@@ -676,7 +679,12 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
         val lo = max(-l.srcOffset, -l.start)
         val hi = l.duration - 0.1f
         val d = dt.coerceIn(lo, max(lo, hi))
-        l.copy(start = l.start + d, duration = l.duration - d, srcOffset = l.srcOffset + d)
+        val sourceDelta = if (d >= 0f) l.sourceElapsedAt(l.start + d) else d * l.speedAt(l.start)
+        l.copy(
+            start = l.start + d,
+            duration = l.duration - d,
+            srcOffset = (l.srcOffset + sourceDelta).coerceAtLeast(0f)
+        )
     }
 
     /**
@@ -700,7 +708,14 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
         val delta = target - l.start
         val maxSource = if (l.srcLength.isFinite()) (l.srcLength - l.srcOffset).coerceAtLeast(frame) else Float.POSITIVE_INFINITY
         val nextDuration = minOf(l.duration - delta, maxSource).coerceAtLeast(frame)
-        updateLayer(id) { it.copy(start = target, duration = nextDuration, srcOffset = (it.srcOffset + delta).coerceAtLeast(0f)) }
+        updateLayer(id) {
+            val sourceDelta = if (delta >= 0f) it.sourceElapsedAt(target) else delta * it.speedAt(it.start)
+            it.copy(
+                start = target,
+                duration = nextDuration,
+                srcOffset = (it.srcOffset + sourceDelta).coerceAtLeast(0f)
+            )
+        }
     }
 
     fun moveLayerEndToPlayhead(id: String) {
