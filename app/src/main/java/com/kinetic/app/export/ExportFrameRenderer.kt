@@ -20,6 +20,7 @@ import com.kinetic.app.engine.EffectStackRunner
 import com.kinetic.app.model.COMP_H
 import com.kinetic.app.model.COMP_W
 import com.kinetic.app.model.Layer
+import com.kinetic.app.model.MotionBlur
 import com.kinetic.app.model.LayerType
 import com.kinetic.app.model.PropId
 import com.kinetic.app.model.layerMatrix
@@ -29,6 +30,7 @@ import com.kinetic.app.ui.LayerRaster
 import com.kinetic.app.ui.buildMaskContour
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.roundToInt
 
 /**
  * Draws one composition frame at export resolution: every layer with its transform, mask, blend
@@ -92,62 +94,75 @@ internal class ExportFrameRenderer(
 
     private class Piece(val bitmap: Bitmap, val dest: RectF, val recycle: Boolean)
 
+    private fun release(piece: Piece) {
+        if (piece.recycle && !piece.bitmap.isRecycled) piece.bitmap.recycle()
+    }
+
+    private fun applyEffects(layer: Layer, piece: Piece, time: Float): Piece {
+        val stack = EffectStackRunner.pictureEffects(layer.effectStack).take(12)
+        if (stack.isEmpty()) return piece
+        val effected = EffectStackRunner.processBitmapGrown(
+            piece.bitmap, stack, time, time - layer.start, fps.toFloat(),
+            layer.width, layer.height, MAX_EFFECT_PIXELS
+        ) ?: return piece
+        val d = piece.dest
+        return Piece(
+            effected.bitmap,
+            RectF(d.left - effected.left, d.top - effected.top, d.right + effected.right, d.bottom + effected.bottom),
+            recycle = true
+        )
+    }
+
     private fun drawMotionBlurLayer(layer: Layer, frameTime: Float) {
-        val samples = MOTION_BLUR_SAMPLES
-        val exposure = (comp.shutterAngle.coerceIn(0f, 360f) / 360f) / fps.coerceAtLeast(1)
-        if (exposure <= 0f) {
+        val times = MotionBlur.sampleTimes(layer, frameTime, comp.shutterAngle, fps, byId, MotionBlur.EXPORT_MAX_SAMPLES)
+        if (times.size <= 1) {
             drawLayer(layer, frameTime)
             return
         }
-        // Accumulate temporal samples into an isolated layer, then composite it once.
+        val raw = rasterFor(layer, frameTime) ?: return
+        val animatedEffects = MotionBlur.effectsAnimated(layer)
+        val fixed: Piece? = if (animatedEffects) null else applyEffects(layer, raw, frameTime)
+        val opacity = (layer.p(PropId.OPACITY).valueAt(frameTime) / 100f).coerceIn(0f, 1f)
         val compositePaint = Paint().apply { xfermode = CompositeSnapshot.blendMode(layer.blendMode) }
         val checkpoint = canvas.saveLayer(null, compositePaint)
-        for (index in 0 until samples) {
-            val offset = ((index + 0.5f) / samples - 0.5f) * exposure
-            // Clamp samples at the clip edges instead of dropping them; dropping
-            // out-of-range samples made motion-blurred clips fade at their in/out points.
-            val sampleTime = (frameTime + offset).coerceIn(layer.start, (layer.end - 0.0001f).coerceAtLeast(layer.start))
-            drawLayer(layer, sampleTime, 1f / samples, additive = true)
+        for (index in times.indices) {
+            val sampleTime = times[index]
+            val piece = fixed ?: applyEffects(layer, raw, sampleTime)
+            drawPiece(layer, piece, sampleTime, MotionBlur.sampleAlpha(opacity, index, times.size))
+            if (fixed == null && piece !== raw) release(piece)
         }
         canvas.restoreToCount(checkpoint)
         compositePaint.xfermode = null
+        if (fixed != null && fixed !== raw) release(fixed)
+        release(raw)
     }
 
-    private fun drawLayer(layer: Layer, time: Float, opacityMultiplier: Float = 1f, additive: Boolean = false) {
-        var piece = rasterFor(layer, time) ?: return
-        val stack = EffectStackRunner.pictureEffects(layer.effectStack).take(12)
-        if (stack.isNotEmpty()) {
-            val effected = EffectStackRunner.processBitmapGrown(
-                piece.bitmap, stack, time, time - layer.start, fps.toFloat(),
-                layer.width, layer.height, MAX_EFFECT_PIXELS
-            )
-            if (effected != null) {
-                val d = piece.dest
-                val grown = Piece(
-                    effected.bitmap,
-                    RectF(d.left - effected.left, d.top - effected.top, d.right + effected.right, d.bottom + effected.bottom),
-                    recycle = true
-                )
-                if (piece.recycle) piece.bitmap.recycle()
-                piece = grown
-            }
-        }
+    private fun drawLayer(layer: Layer, time: Float) {
+        val raw = rasterFor(layer, time) ?: return
+        val piece = applyEffects(layer, raw, time)
+        drawPiece(layer, piece, time, null)
+        if (piece !== raw) release(piece)
+        release(raw)
+    }
 
+    private fun drawPiece(layer: Layer, piece: Piece, time: Float, sampleAlpha: Float?) {
         val mask = layer.maskAt(time).takeIf { layer.maskEnabled }
         canvas.save()
         canvas.scale(sx, sy)
         canvas.concat(layerMatrix(layer, time, byId))
         if (mask != null) {
-            val maskComposite = if (additive) Paint().apply {
-                xfermode = PorterDuffXfermode(PorterDuff.Mode.ADD)
-            } else null
-            canvas.saveLayer(RectF(piece.dest).apply { union(0f, 0f, layer.width, layer.height) }, maskComposite)
+            canvas.saveLayer(RectF(piece.dest).apply { union(0f, 0f, layer.width, layer.height) }, null)
         }
         paint.reset()
         paint.isFilterBitmap = true
         paint.isAntiAlias = true
-        paint.alpha = (opacityOf(layer, time) * opacityMultiplier).toInt().coerceIn(0, 255)
-        paint.xfermode = if (additive) PorterDuffXfermode(PorterDuff.Mode.ADD) else CompositeSnapshot.blendMode(layer.blendMode)
+        if (sampleAlpha != null) {
+            paint.alpha = (sampleAlpha * 255f).roundToInt().coerceIn(0, 255)
+            paint.xfermode = null
+        } else {
+            paint.alpha = opacityOf(layer, time)
+            paint.xfermode = CompositeSnapshot.blendMode(layer.blendMode)
+        }
         paint.colorFilter = if ("Grayscale" in layer.effects) grayscale else null
         canvas.drawBitmap(piece.bitmap, null, piece.dest, paint)
         if (mask != null) {
@@ -157,7 +172,6 @@ internal class ExportFrameRenderer(
         canvas.restore()
         paint.xfermode = null
         paint.colorFilter = null
-        if (piece.recycle) piece.bitmap.recycle()
     }
 
     private fun applyMask(layer: Layer, mask: com.kinetic.app.model.LayerMask) {
@@ -273,7 +287,6 @@ internal class ExportFrameRenderer(
     }
 
     private companion object {
-        const val MOTION_BLUR_SAMPLES = 8
         const val MAX_EDGE = 4096
         /** Memory budget for one layer's effect result (RGBA float working copy is 16 bytes per pixel). */
         const val MAX_EFFECT_PIXELS = 12_000_000

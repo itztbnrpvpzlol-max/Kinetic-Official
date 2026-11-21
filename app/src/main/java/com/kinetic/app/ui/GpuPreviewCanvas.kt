@@ -190,10 +190,11 @@ fun PreviewCanvas(
     }
     val hasEffects = activeVisualLayers.any { layer -> EffectStackRunner.hasPictureEffects(layer.effectStack) }
     val hasComplexMasks = activeVisualLayers.any { it.maskEnabled && it.maskPath != null }
+    val hasMotionBlur = editor.compSettings.shutterAngle > 0f && activeVisualLayers.any { it.motionBlur }
     val directVideo = videoLayers.singleOrNull()
         ?.takeIf {
             activeVisualLayers.lastOrNull()?.id == it.id && !it.maskEnabled &&
-                !hasEffects && canUseDirectSurfaceVideo(it)
+                !hasEffects && !hasMotionBlur && canUseDirectSurfaceVideo(it)
         }
 
     if (hasAdjustmentFx) {
@@ -203,7 +204,7 @@ fun PreviewCanvas(
             DirectSurfaceVideoPreview(editor, directVideo, Modifier.fillMaxSize(), playback)
             CpuPreviewCanvas(editor, Modifier.fillMaxSize(), directVideoLayerId = directVideo.id)
         }
-    } else if ((videoLayers.isNotEmpty() || hasEffects) && supportsGles3(context) && !hasComplexMasks) {
+    } else if ((videoLayers.isNotEmpty() || hasEffects || hasMotionBlur) && supportsGles3(context) && !hasComplexMasks) {
         // The GLES compositor handles layer composition. Untouched clips stay
         // on external-OES textures; effect-bearing clips arrive as CPU-processed
         // bitmap textures before the final composition draw.
@@ -590,25 +591,15 @@ private fun GpuCompositionPreviewCanvas(
         }
     }
 
-    fun motionBlurSampleTimes(layer: com.kinetic.app.model.Layer): List<Float> {
-        if (!layer.motionBlur || editor.compSettings.shutterAngle <= 0f) return listOf(editor.time)
-        val exposure = editor.compSettings.shutterAngle.coerceIn(0f, 360f) / 360f / editor.compSettings.fps.coerceAtLeast(1)
-        val samples = 5
-        return (0 until samples).map { index ->
-            editor.time + ((index + 0.5f) / samples - 0.5f) * exposure
-        }.filter { it >= layer.start && it < layer.end }.ifEmpty { listOf(editor.time) }
-    }
-    // Draw temporal samples front-to-back with progressively smaller source-over
-    // alpha so every sample contributes equally to the final exposure.
-    fun sampleOpacity(opacity: Float, index: Int, count: Int): Float {
-        val target = opacity.coerceIn(0f, 1f)
-        if (count <= 1) return target
-        val remainingSamples = (count - 1 - index).coerceAtLeast(0)
-        val denominator = (count - remainingSamples * target).coerceAtLeast(0.0001f)
-        return (target / denominator).coerceIn(0f, 1f)
-    }
-
     val byId = editor.previewLayers.associateBy { it.id }
+    fun motionBlurSampleTimes(layer: com.kinetic.app.model.Layer): FloatArray =
+        com.kinetic.app.model.MotionBlur.sampleTimes(
+            layer, editor.time, editor.compSettings.shutterAngle, editor.compSettings.fps,
+            byId, com.kinetic.app.model.MotionBlur.PREVIEW_MAX_SAMPLES
+        )
+    fun sampleOpacity(opacity: Float, index: Int, count: Int): Float =
+        com.kinetic.app.model.MotionBlur.sampleAlpha(opacity, index, count)
+
     val renderLayers = ArrayList<GpuLayer>()
     val activeTextTextureIds = HashSet<String>()
     for (layer in editor.previewLayers.asReversed()) {

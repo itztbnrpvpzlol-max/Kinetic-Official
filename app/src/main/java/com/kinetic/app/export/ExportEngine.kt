@@ -56,7 +56,22 @@ object ExportEngine {
     ) {
         val executor = Executors.newSingleThreadExecutor { Thread(it, "KineticExport").apply { priority = Thread.NORM_PRIORITY } }
         try {
-            withContext(executor.asCoroutineDispatcher()) { render(context.applicationContext, layers, comp, settings, output, onProgress, onPreview) }
+            withContext(executor.asCoroutineDispatcher()) {
+                val appContext = context.applicationContext
+                if (GlExportPath.eligible(layers, settings.start, settings.end)) {
+                    try {
+                        render(appContext, layers, comp, settings, output, onProgress, onPreview, true)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Throwable) {
+                        android.util.Log.w("KineticExport", "GL export failed, using the compatibility renderer", e)
+                        output.delete()
+                        render(appContext, layers, comp, settings, output, onProgress, onPreview, false)
+                    }
+                } else {
+                    render(appContext, layers, comp, settings, output, onProgress, onPreview, false)
+                }
+            }
         } catch (e: CancellationException) {
             output.delete()
             throw e
@@ -73,7 +88,7 @@ object ExportEngine {
 
     private suspend fun render(
         context: Context, layers: List<Layer>, comp: CompSettings, settings: ExportSettings, output: File,
-        onProgress: (ExportProgress) -> Unit, onPreview: (Bitmap) -> Unit
+        onProgress: (ExportProgress) -> Unit, onPreview: (Bitmap) -> Unit, useGl: Boolean
     ) {
         val started = SystemClock.elapsedRealtime()
         val codec = settings.codec
@@ -114,26 +129,45 @@ object ExportEngine {
         }
         val encoder = MediaCodec.createEncoderByType(codec.mime)
         var gl: GlEncoderSurface? = null
+        var composer: GlFrameComposer? = null
         var renderer: ExportFrameRenderer? = null
         var muxer: MediaMuxer? = null
         var drain: Drain? = null
         try {
             encoder.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
-            gl = GlEncoderSurface(encoder.createInputSurface(), settings.width, settings.height)
+            val inputSurface = encoder.createInputSurface()
+            if (useGl) {
+                composer = GlFrameComposer(context, inputSurface, layers, comp, settings.width, settings.height, settings.fps)
+            } else {
+                gl = GlEncoderSurface(inputSurface, settings.width, settings.height)
+            }
             encoder.start()
             muxer = MediaMuxer(output.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
             drain = Drain(encoder, muxer, audio).also { it.start() }
-            renderer = ExportFrameRenderer(context, layers, comp, settings.width, settings.height, settings.fps)
+            if (!useGl) renderer = ExportFrameRenderer(context, layers, comp, settings.width, settings.height, settings.fps)
+            var lastPreviewAt = 0L
 
             val total = settings.frameCount
             for (i in 0 until total) {
                 coroutineContext.ensureActive()
                 drain.failure?.let { throw ExportFailure("The video encoder stopped: ${it.message}", it) }
                 val time = (settings.start + i.toFloat() / settings.fps).coerceAtMost(settings.end - 0.0001f)
-                val frame = renderer.render(time)
-                gl.draw(frame, i * 1_000_000_000L / settings.fps)
-                report(ExportPhase.VIDEO, videoStart + videoSpan * (i + 1) / total, i + 1)
-                if (i % 3 == 0 || i == total - 1) onPreview(thumbnail(frame))
+                val presentationNs = i * 1_000_000_000L / settings.fps
+                val now = SystemClock.elapsedRealtime()
+                val wantPreview = i == total - 1 || now - lastPreviewAt >= 400L
+                val activeComposer = composer
+                if (activeComposer != null) {
+                    activeComposer.render(time, presentationNs, wantPreview)?.let { onPreview(it) }
+                    if (wantPreview) lastPreviewAt = now
+                } else {
+                    val frame = renderer!!.render(time)
+                    gl!!.draw(frame, presentationNs)
+                    if (wantPreview) {
+                        onPreview(thumbnail(frame))
+                        lastPreviewAt = now
+                    }
+                }
+                if (i % 4 == 0 || i == total - 1) report(ExportPhase.VIDEO, videoStart + videoSpan * (i + 1) / total, i + 1)
             }
 
             report(ExportPhase.FINISHING, 1f - FINISH_SHARE, total)
@@ -148,6 +182,7 @@ object ExportEngine {
             drain?.abort = true
             runCatching { drain?.join(2_000) }
             runCatching { renderer?.close() }
+            runCatching { composer?.close() }
             runCatching { gl?.release() }
             runCatching { encoder.stop() }
             runCatching { encoder.release() }

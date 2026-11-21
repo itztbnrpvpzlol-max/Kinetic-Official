@@ -314,34 +314,59 @@ internal class SequentialVideoFrameDecoder {
         val yBuffer = yPlane.buffer.duplicate()
         val uBuffer = uPlane.buffer.duplicate()
         val vBuffer = vPlane.buffer.duplicate()
-        val yBase = yBuffer.position()
-        val uBase = uBuffer.position()
-        val vBase = vBuffer.position()
+        val yBytes = ByteArray(yBuffer.remaining())
+        val uBytes = ByteArray(uBuffer.remaining())
+        val vBytes = ByteArray(vBuffer.remaining())
+        yBuffer.get(yBytes)
+        uBuffer.get(uBytes)
+        vBuffer.get(vBytes)
+        val yStride = yPlane.rowStride
+        val yPixel = yPlane.pixelStride
+        val uStride = uPlane.rowStride
+        val uPixel = uPlane.pixelStride
+        val vStride = vPlane.rowStride
+        val vPixel = vPlane.pixelStride
+        val cropLeft = crop.left
+        val cropTop = crop.top
+        val cropRight = crop.right
+        val cropBottom = crop.bottom
         val pixels = IntArray(width * height)
 
-        for (row in 0 until height) {
-            val sourceY = (crop.top + row * scale).coerceAtMost(crop.bottom - 1)
-            val yRow = yBase + sourceY * yPlane.rowStride
-            val chromaY = sourceY / 2
-            val uRow = uBase + chromaY * uPlane.rowStride
-            val vRow = vBase + chromaY * vPlane.rowStride
-            for (column in 0 until width) {
-                val sourceX = (crop.left + column * scale).coerceAtMost(crop.right - 1)
-                val yIndex = yRow + sourceX * yPlane.pixelStride
-                val chromaX = sourceX / 2
-                val uIndex = uRow + chromaX * uPlane.pixelStride
-                val vIndex = vRow + chromaX * vPlane.pixelStride
-
-                val luminance = (yBuffer.get(yIndex).toInt() and 0xff) - 16
-                val u = (uBuffer.get(uIndex).toInt() and 0xff) - 128
-                val v = (vBuffer.get(vIndex).toInt() and 0xff) - 128
-                val y = luminance.coerceAtLeast(0)
-                val red = ((298 * y + 409 * v + 128) shr 8).coerceIn(0, 255)
-                val green = ((298 * y - 100 * u - 208 * v + 128) shr 8).coerceIn(0, 255)
-                val blue = ((298 * y + 516 * u + 128) shr 8).coerceIn(0, 255)
-                pixels[row * width + column] =
-                    (0xff shl 24) or (red shl 16) or (green shl 8) or blue
+        fun convertRows(from: Int, to: Int) {
+            for (row in from until to) {
+                val sourceY = (cropTop + row * scale).coerceAtMost(cropBottom - 1)
+                val yRow = sourceY * yStride
+                val chromaY = sourceY shr 1
+                val uRow = chromaY * uStride
+                val vRow = chromaY * vStride
+                val out = row * width
+                for (column in 0 until width) {
+                    val sourceX = (cropLeft + column * scale).coerceAtMost(cropRight - 1)
+                    val chromaX = sourceX shr 1
+                    val y = ((yBytes[yRow + sourceX * yPixel].toInt() and 0xff) - 16).coerceAtLeast(0) * 298
+                    val u = (uBytes[uRow + chromaX * uPixel].toInt() and 0xff) - 128
+                    val v = (vBytes[vRow + chromaX * vPixel].toInt() and 0xff) - 128
+                    var red = (y + 409 * v + 128) shr 8
+                    var green = (y - 100 * u - 208 * v + 128) shr 8
+                    var blue = (y + 516 * u + 128) shr 8
+                    if (red < 0) red = 0 else if (red > 255) red = 255
+                    if (green < 0) green = 0 else if (green > 255) green = 255
+                    if (blue < 0) blue = 0 else if (blue > 255) blue = 255
+                    pixels[out + column] = (0xff shl 24) or (red shl 16) or (green shl 8) or blue
+                }
             }
+        }
+
+        val workers = if (width * height >= 400_000) Runtime.getRuntime().availableProcessors().coerceIn(1, 4) else 1
+        if (workers <= 1) {
+            convertRows(0, height)
+        } else {
+            val chunk = (height + workers - 1) / workers
+            val threads = (1 until workers).map { index ->
+                Thread { convertRows(index * chunk, minOf(height, (index + 1) * chunk)) }.also { it.start() }
+            }
+            convertRows(0, minOf(height, chunk))
+            threads.forEach { it.join() }
         }
 
         var bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)

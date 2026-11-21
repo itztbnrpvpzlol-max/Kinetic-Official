@@ -23,6 +23,8 @@ internal class GlEncoderSurface(private val surface: Surface, private val width:
     private var eglSurface: EGLSurface = EGL14.EGL_NO_SURFACE
     private var program = 0
     private var texture = 0
+    private var allocatedWidth = 0
+    private var allocatedHeight = 0
     private val quad: java.nio.FloatBuffer = ByteBuffer.allocateDirect(16 * 4).order(ByteOrder.nativeOrder()).asFloatBuffer().apply {
         // x, y, u, v. The bitmap's top row is v = 0.
         put(floatArrayOf(-1f, -1f, 0f, 1f, 1f, -1f, 1f, 1f, -1f, 1f, 0f, 0f, 1f, 1f, 1f, 0f))
@@ -65,7 +67,13 @@ internal class GlEncoderSurface(private val surface: Surface, private val width:
         GLES20.glUseProgram(program)
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texture)
-        GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, bitmap, 0)
+        if (allocatedWidth == bitmap.width && allocatedHeight == bitmap.height) {
+            GLUtils.texSubImage2D(GLES20.GL_TEXTURE_2D, 0, 0, 0, bitmap)
+        } else {
+            GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, bitmap, 0)
+            allocatedWidth = bitmap.width
+            allocatedHeight = bitmap.height
+        }
         val position = GLES20.glGetAttribLocation(program, "aPosition")
         val coord = GLES20.glGetAttribLocation(program, "aCoord")
         GLES20.glUniform1i(GLES20.glGetUniformLocation(program, "uTexture"), 0)

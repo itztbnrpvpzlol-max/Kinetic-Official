@@ -421,8 +421,9 @@ fun CpuPreviewCanvas(
 
             for (l in layers.asReversed()) {
                 if (!l.visible || !l.activeAt(time) || l.type == LayerType.AUDIO || l.id == directVideoLayerId) continue
-                val alpha = (l.p(PropId.OPACITY).valueAt(time) * 2.55f).toInt().coerceIn(0, 255)
+                val baseAlpha = (l.p(PropId.OPACITY).valueAt(time) * 2.55f).toInt().coerceIn(0, 255)
                 if (l.type == LayerType.ADJUSTMENT) {
+                    val alpha = baseAlpha
                     // The processed snapshot already contains everything beneath this layer.
                     val flat = adjustmentFrames[l.id]?.takeIf { !it.isRecycled }
                     if (flat != null) {
@@ -434,9 +435,19 @@ fun CpuPreviewCanvas(
                     }
                     continue
                 }
+                val blurTimes = com.kinetic.app.model.MotionBlur.sampleTimes(
+                    l, time, editor.compSettings.shutterAngle, editor.compSettings.fps, byId,
+                    com.kinetic.app.model.MotionBlur.PREVIEW_MAX_SAMPLES
+                )
+                for (sampleIndex in blurTimes.indices) {
+                val sampleTime = blurTimes[sampleIndex]
+                val alpha = if (blurTimes.size > 1) {
+                    (com.kinetic.app.model.MotionBlur.sampleAlpha(baseAlpha / 255f, sampleIndex, blurTimes.size) * 255f)
+                        .toInt().coerceIn(0, 255)
+                } else baseAlpha
                 nc.save()
                 val layerMatrix = layerMatrices.getOrPut(l.id) { Matrix() }
-                layerMatrixInto(l, time, byId, layerMatrix, matrixScratch)
+                layerMatrixInto(l, sampleTime, byId, layerMatrix, matrixScratch)
                 nc.concat(layerMatrix)
                 val activeMask = l.maskAt(time).takeIf { l.maskEnabled }
                 if (activeMask != null) nc.saveLayer(RectF(0f, 0f, l.width, l.height), null)
@@ -541,6 +552,7 @@ fun CpuPreviewCanvas(
                 textPaint.xfermode = null
                 textPaint.colorFilter = null
                 nc.restore()
+                }
             }
             nc.restore()
 
