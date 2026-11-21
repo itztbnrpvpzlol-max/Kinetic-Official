@@ -17,11 +17,96 @@ import com.kinetic.app.model.VectorPoint
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.io.InputStream
+import java.io.OutputStream
 import java.util.UUID
+import java.util.zip.ZipEntry
+import java.util.zip.ZipInputStream
+import java.util.zip.ZipOutputStream
 
 /** Small, versioned project store. Project writes are atomic so a crash cannot leave half a JSON file. */
 class ProjectStore(context: Context) {
-    private val root = File(context.filesDir, "projects").apply { mkdirs() }
+    private val filesRoot = context.applicationContext.filesDir
+    private val root = File(filesRoot, "projects").apply { mkdirs() }
+
+    /** Exports project JSON and imported source media so a reinstall can restore the workspace. */
+    fun exportBackup(output: OutputStream): Int {
+        val projects = root.listFiles { file -> file.isFile && file.extension == "kinetic" }?.toList().orEmpty()
+        val mediaRoot = File(filesRoot, "media-cache")
+        ZipOutputStream(output.buffered()).use { zip ->
+            zip.putNextEntry(ZipEntry("backup-version.txt"))
+            zip.write("kinetic-backup-v1".toByteArray(Charsets.UTF_8))
+            zip.closeEntry()
+            projects.forEach { file ->
+                zip.putNextEntry(ZipEntry("projects/${file.name}"))
+                file.inputStream().use { it.copyTo(zip) }
+                zip.closeEntry()
+            }
+            if (mediaRoot.isDirectory) {
+                mediaRoot.walkTopDown().filter { it.isFile }.forEach { file ->
+                    val relative = file.relativeTo(mediaRoot).invariantSeparatorsPath
+                    zip.putNextEntry(ZipEntry("media-cache/$relative"))
+                    file.inputStream().use { it.copyTo(zip) }
+                    zip.closeEntry()
+                }
+            }
+        }
+        return projects.size
+    }
+
+    /** Restores only Kinetic project and media-cache entries; unrelated archive paths are ignored. */
+    fun importBackup(input: InputStream): Int {
+        val staging = File(filesRoot.parentFile, "${filesRoot.name}-kinetic-restore-${UUID.randomUUID()}")
+            .apply { mkdirs() }
+        var restoredProjects = 0
+        try {
+            ZipInputStream(input.buffered()).use { zip ->
+                while (true) {
+                    val entry = zip.nextEntry ?: break
+                    if (!entry.isDirectory) {
+                        val normalized = entry.name.replace('\\\\', '/')
+                        val destinationRoot = when {
+                            normalized.startsWith("projects/") -> File(staging, "projects")
+                            normalized.startsWith("media-cache/") -> File(staging, "media-cache")
+                            else -> null
+                        }
+                        if (destinationRoot != null) {
+                            val relative = normalized.substringAfter('/')
+                            if (relative.isNotBlank() && relative.split('/').none { it == ".." || it.isBlank() }) {
+                                val target = File(destinationRoot, relative)
+                                val canonicalRoot = destinationRoot.canonicalFile
+                                val canonicalTarget = target.canonicalFile
+                                if (canonicalTarget.path.startsWith(canonicalRoot.path + File.separator)) {
+                                    target.parentFile?.mkdirs()
+                                    target.outputStream().use { zip.copyTo(it) }
+                                    if (normalized.startsWith("projects/") && target.extension == "kinetic") restoredProjects++
+                                }
+                            }
+                        }
+                    }
+                    zip.closeEntry()
+                }
+            }
+            listOf("projects", "media-cache").forEach { folder ->
+                val source = File(staging, folder)
+                if (source.isDirectory) source.walkTopDown().filter { it.isFile }.forEach { staged ->
+                    val relative = staged.relativeTo(source)
+                    val destination = File(File(filesRoot, folder), relative.path)
+                    destination.parentFile?.mkdirs()
+                    val temporary = File(destination.parentFile, destination.name + ".restore-tmp")
+                    staged.copyTo(temporary, overwrite = true)
+                    if (destination.exists()) destination.delete()
+                    if (!temporary.renameTo(destination)) {
+                        temporary.copyTo(destination, overwrite = true)
+                        temporary.delete()
+                    }
+                }
+            }
+            return restoredProjects
+        } finally {
+            staging.deleteRecursively()
+        }
+    }
 
     data class ProjectInfo(val id: String, val name: String, val updatedAt: Long, val layerCount: Int)
     data class LoadedProject(val id: String, val name: String, val duration: Float, val resolution: Int, val time: Float, val layers: List<Layer>, val comp: CompSettings? = null, val beatMarkers: List<Float> = emptyList())
