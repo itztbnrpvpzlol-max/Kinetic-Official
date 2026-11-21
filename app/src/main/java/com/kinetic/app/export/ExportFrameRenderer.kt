@@ -119,22 +119,33 @@ internal class ExportFrameRenderer(
             drawLayer(layer, frameTime)
             return
         }
-        val raw = rasterFor(layer, frameTime) ?: return
+        // Video frames and vector/text artwork can change during the shutter interval.
+        // Rasterize those at every temporal sample instead of smearing one frozen frame.
+        val temporalContent = layer.type == LayerType.VIDEO ||
+            layer.type == LayerType.SHAPE || layer.type == LayerType.TEXT
+        val fixedRaw = if (temporalContent) null else rasterFor(layer, frameTime)
+        if (!temporalContent && fixedRaw == null) return
         val animatedEffects = MotionBlur.effectsAnimated(layer)
-        val fixed: Piece? = if (animatedEffects) null else applyEffects(layer, raw, frameTime)
+        val fixedEffects = if (fixedRaw != null && !animatedEffects) {
+            applyEffects(layer, fixedRaw, frameTime)
+        } else null
         val opacity = (layer.p(PropId.OPACITY).valueAt(frameTime) / 100f).coerceIn(0f, 1f)
         val compositePaint = Paint().apply { xfermode = CompositeSnapshot.blendMode(layer.blendMode) }
         val checkpoint = canvas.saveLayer(null, compositePaint)
         for (index in times.indices) {
             val sampleTime = times[index]
-            val piece = fixed ?: applyEffects(layer, raw, sampleTime)
+            val raw = fixedRaw ?: rasterFor(layer, sampleTime) ?: continue
+            val piece = fixedEffects ?: applyEffects(
+                layer, raw, if (fixedRaw == null || animatedEffects) sampleTime else frameTime
+            )
             drawPiece(layer, piece, sampleTime, MotionBlur.sampleAlpha(opacity, index, times.size))
-            if (fixed == null && piece !== raw) release(piece)
+            if (piece !== raw && piece !== fixedEffects) release(piece)
+            if (raw !== fixedRaw) release(raw)
         }
         canvas.restoreToCount(checkpoint)
         compositePaint.xfermode = null
-        if (fixed != null && fixed !== raw) release(fixed)
-        release(raw)
+        if (fixedEffects != null && fixedEffects !== fixedRaw) release(fixedEffects)
+        if (fixedRaw != null) release(fixedRaw)
     }
 
     private fun drawLayer(layer: Layer, time: Float) {
