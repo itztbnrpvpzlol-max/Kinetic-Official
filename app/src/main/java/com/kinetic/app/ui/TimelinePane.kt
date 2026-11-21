@@ -371,7 +371,7 @@ private fun LayerRow(
     val hasLinkedScaleKeyframes = layer.scaleLinked &&
         (layer.p(PropId.SCALE_X).keys.isNotEmpty() || layer.p(PropId.SCALE_Y).keys.isNotEmpty())
     val visibleKeyframeProps = layer.props.entries.filter { (id, prop) ->
-        id != PropId.POS_X && id != PropId.POS_Y &&
+        id !in setOf(PropId.POS_X, PropId.POS_Y, PropId.POS_Z) &&
             !(layer.scaleLinked && (id == PropId.SCALE_X || id == PropId.SCALE_Y)) &&
             prop.keys.isNotEmpty()
     }
