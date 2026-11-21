@@ -724,35 +724,70 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
         }
     }
 
-    /** Parenting keeps the child where it is on screen (position only, if position isn't keyframed). */
+    /** Reparent without changing the child's current world-space position or keyed motion. */
     fun setParent(childId: String, parentId: String?) {
         val byId = layers.associateBy { it.id }
+        if (parentId == childId || parentId?.let { byId[it]?.let { p -> isDescendantOf(p, childId, byId) } } == true) return
         commit { ls ->
-            ls.map { l ->
-                if (l.id != childId) l else {
-                    var nl = l.copy(parentId = parentId)
-                    val px = l.p(PropId.POS_X)
-                    val py = l.p(PropId.POS_Y)
-                    if (!px.animated && !py.animated) {
-                        val a = floatArrayOf(
-                            l.p(PropId.ANCHOR_X).valueAt(time), l.p(PropId.ANCHOR_Y).valueAt(time)
-                        )
-                        layerMatrix(l, time, byId).mapPoints(a)
-                        val pl = parentId?.let { byId[it] }
-                        if (pl != null) {
-                            val pm = layerMatrix(pl, time, byId)
-                            pm.preTranslate(pl.p(PropId.ANCHOR_X).valueAt(time), pl.p(PropId.ANCHOR_Y).valueAt(time))
-                            val inv = Matrix()
-                            if (pm.invert(inv)) inv.mapPoints(a)
+            ls.map { layer ->
+                if (layer.id != childId) layer else {
+                    val px = layer.p(PropId.POS_X)
+                    val py = layer.p(PropId.POS_Y)
+                    val sampleTimes = mutableListOf<Float>()
+                    sampleTimes += px.keys.map { it.t }
+                    sampleTimes += py.keys.map { it.t }
+
+                    fun collectAncestorTimes(firstId: String?) {
+                        var currentId = firstId
+                        var depth = 0
+                        while (currentId != null && depth++ < 16) {
+                            val ancestor = byId[currentId] ?: break
+                            ancestor.props.values.forEach { prop -> sampleTimes += prop.keys.map { it.t } }
+                            currentId = ancestor.parentId
                         }
-                        nl = nl.copy(
-                            props = l.props + mapOf(
-                                PropId.POS_X to px.copy(base = a[0]),
-                                PropId.POS_Y to py.copy(base = a[1])
-                            )
-                        )
                     }
-                    nl
+                    collectAncestorTimes(layer.parentId)
+                    collectAncestorTimes(parentId)
+                    val times = sampleTimes.filter { it.isFinite() && it >= 0f }.distinct().sorted()
+
+                    fun mappedPositionAt(sampleTime: Float): FloatArray {
+                        val point = floatArrayOf(
+                            layer.p(PropId.ANCHOR_X).valueAt(sampleTime),
+                            layer.p(PropId.ANCHOR_Y).valueAt(sampleTime)
+                        )
+                        layerMatrix(layer, sampleTime, byId).mapPoints(point)
+                        val targetParent = parentId?.let { byId[it] }
+                        if (targetParent != null) {
+                            val parentMatrix = layerMatrix(targetParent, sampleTime, byId)
+                            parentMatrix.preTranslate(
+                                targetParent.p(PropId.ANCHOR_X).valueAt(sampleTime),
+                                targetParent.p(PropId.ANCHOR_Y).valueAt(sampleTime)
+                            )
+                            val inverse = Matrix()
+                            if (parentMatrix.invert(inverse)) inverse.mapPoints(point)
+                        }
+                        return point
+                    }
+
+                    val basePoint = mappedPositionAt(if (times.isEmpty()) time else 0f)
+                    val xKeys = times.map { sampleTime ->
+                        val template = px.keys.minByOrNull { abs(it.t - sampleTime) }
+                            ?.takeIf { abs(it.t - sampleTime) <= frame / 2f }
+                        (template?.copy(t = sampleTime) ?: Keyframe(sampleTime, 0f))
+                            .copy(v = mappedPositionAt(sampleTime)[0])
+                    }
+                    val yKeys = times.map { sampleTime ->
+                        val template = py.keys.minByOrNull { abs(it.t - sampleTime) }
+                            ?.takeIf { abs(it.t - sampleTime) <= frame / 2f }
+                        (template?.copy(t = sampleTime) ?: Keyframe(sampleTime, 0f))
+                            .copy(v = mappedPositionAt(sampleTime)[1])
+                    }
+                    val props = layer.props + mapOf(
+                        PropId.POS_X to px.copy(base = basePoint[0], keys = xKeys),
+                        PropId.POS_Y to py.copy(base = basePoint[1], keys = yKeys)
+                    )
+                    val updated = layer.copy(parentId = parentId, props = props)
+                    syncPositionKeyframes(updated)
                 }
             }
         }
