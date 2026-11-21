@@ -29,16 +29,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Verify persistent signing secrets
-        shell: bash
-        env:
-          KINETIC_KEYSTORE_BASE64: ${{ secrets.KINETIC_KEYSTORE_BASE64 }}
-          KINETIC_KEYSTORE_PASSWORD: ${{ secrets.KINETIC_KEYSTORE_PASSWORD }}
-        run: |
-          set -euo pipefail
-          test -n "${KINETIC_KEYSTORE_BASE64}" || { echo "Configure KINETIC_KEYSTORE_BASE64 in repository Actions secrets."; exit 1; }
-          test -n "${KINETIC_KEYSTORE_PASSWORD}" || { echo "Configure KINETIC_KEYSTORE_PASSWORD in repository Actions secrets."; exit 1; }
-
       - name: Install Android NDK and build tools
         shell: bash
         run: |
@@ -178,24 +168,15 @@ jobs:
             test -s "../../app/src/main/jniLibs/${abi}/libkinetic_effectcraft.so"
           done
 
-      - name: Prepare persistent APK signing key
+      - name: Prepare repository APK signing key
         shell: bash
-        env:
-          KINETIC_KEYSTORE_BASE64: ${{ secrets.KINETIC_KEYSTORE_BASE64 }}
-          KINETIC_KEYSTORE_PASSWORD: ${{ secrets.KINETIC_KEYSTORE_PASSWORD }}
         run: |
           set -euo pipefail
-          if [ -z "${KINETIC_KEYSTORE_BASE64}" ] || [ -z "${KINETIC_KEYSTORE_PASSWORD}" ]; then
-            echo "Missing KINETIC_KEYSTORE_BASE64 or KINETIC_KEYSTORE_PASSWORD repository secrets."
-            echo "Configure both secrets before building APKs; a changing debug key prevents Android in-place updates."
-            exit 1
-          fi
-          printf '%s' "${KINETIC_KEYSTORE_BASE64}" | base64 --decode > app/kinetic-upload.jks
+          base64 --decode ci-signing/kinetic-upload.base64 > app/kinetic-upload.jks
           test -s app/kinetic-upload.jks
+          echo "KINETIC_KEYSTORE_PASSWORD=$(cat ci-signing/password.txt)" >> "$GITHUB_ENV"
 
       - name: Build debug APK
-        env:
-          KINETIC_KEYSTORE_PASSWORD: ${{ secrets.KINETIC_KEYSTORE_PASSWORD }}
         run: gradle assembleDebug --no-daemon -PKINETIC_VERSION_CODE="${KINETIC_VERSION_CODE}" -PKINETIC_VERSION_NAME="${KINETIC_VERSION_NAME}"
 
       - name: Upload APK
