@@ -288,14 +288,16 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
             // The playhead is the fixed center marker, aligned with PreviewToolsBar's centered transport.
             val x = size.width / 2f
             if (x >= leftPx - 1f && x <= size.width) {
-                drawLine(Color.White, Offset(x, 44.dp.toPx()), Offset(x, size.height), 2.dp.toPx())
+                val hasBeat = editor.beatMarkers.any { abs(it - editor.time) <= editor.frame / 2f }
+                val headColor = if (hasBeat) KColors.Accent else Color.White
+                drawLine(headColor, Offset(x, 44.dp.toPx()), Offset(x, size.height), 2.dp.toPx())
                 val tri = Path().apply {
                     moveTo(x - 7.dp.toPx(), 34.dp.toPx())
                     lineTo(x + 7.dp.toPx(), 34.dp.toPx())
                     lineTo(x, 47.dp.toPx())
                     close()
                 }
-                drawPath(tri, Color.White)
+                drawPath(tri, headColor)
             }
         }
         // Dedicated playhead grip: dragging this scrubs; dragging anywhere else
@@ -304,6 +306,9 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
             Modifier
                 .offset(x = (paneW / dens / 2f - 14f).dp, y = 30.dp)
                 .size(28.dp, 30.dp)
+                .pointerInput(editor, pps) {
+                    detectTapGestures { editor.toggleBeatMarkerAtPlayhead() }
+                }
                 .pointerInput(pps, dens) {
                     detectHorizontalDragGestures { change, drag ->
                         change.consume()
@@ -341,6 +346,19 @@ private fun Ruler(editor: EditorState, pps: Float, contentW: Dp, leadingPad: Dp)
         val originX = leadingPad.value * dens
         val endX = originX + editor.duration * pps * dens
         if (endX < size.width) drawRect(Color(0x55000000), Offset(endX, 0f), Size(size.width - endX, size.height))
+        editor.beatMarkers.forEach { marker ->
+            val x = originX + marker * pps * dens
+            if (x in 0f..size.width) {
+                drawLine(KColors.Accent.copy(alpha = 0.72f), Offset(x, 0f), Offset(x, size.height), 1.5.dp.toPx())
+                val head = Path().apply {
+                    moveTo(x - 4.dp.toPx(), 1.dp.toPx())
+                    lineTo(x + 4.dp.toPx(), 1.dp.toPx())
+                    lineTo(x, 7.dp.toPx())
+                    close()
+                }
+                drawPath(head, KColors.Accent)
+            }
+        }
         for (s in 0..secs) {
             val x = originX + s * pps * dens
             if (pps >= 80f) {
@@ -385,6 +403,7 @@ private fun LayerRow(
     val dens = LocalDensity.current.density
     var acc by remember { mutableFloatStateOf(0f) }
     var parentDrag by remember { mutableFloatStateOf(0f) }
+    var parentDragX by remember { mutableFloatStateOf(0f) }
     var isParentDragging by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth()) {
         Row(
@@ -424,20 +443,29 @@ private fun LayerRow(
                 Box(
                     Modifier.size(32.dp).pointerInput(layer.id, editor.layers) {
                         detectDragGesturesAfterLongPress(
-                            onDragStart = { parentDrag = 0f; isParentDragging = true },
+                            onDragStart = { parentDrag = 0f; parentDragX = 0f; isParentDragging = true },
                             onDragEnd = {
-                                val from = editor.layers.indexOfFirst { it.id == layer.id }
-                                val step = 40f * dens
-                                val targetIndex = (from + (parentDrag / step).roundToInt()).coerceIn(editor.layers.indices)
-                                val target = editor.layers.getOrNull(targetIndex)
-                                val byId = editor.layers.associateBy { it.id }
-                                if (target != null && target.id != layer.id && !isDescendantOf(target, layer.id, byId)) {
-                                    editor.setParent(layer.id, target.id)
+                                if (layer.parentId != null && parentDragX > 24f * dens) {
+                                    // Swipe the parent connector to the right to detach this layer.
+                                    editor.setParent(layer.id, null)
+                                } else {
+                                    val from = editor.layers.indexOfFirst { it.id == layer.id }
+                                    val step = 40f * dens
+                                    val targetIndex = (from + (parentDrag / step).roundToInt()).coerceIn(editor.layers.indices)
+                                    val target = editor.layers.getOrNull(targetIndex)
+                                    val byId = editor.layers.associateBy { it.id }
+                                    if (target != null && target.id != layer.id && !isDescendantOf(target, layer.id, byId)) {
+                                        editor.setParent(layer.id, target.id)
+                                    }
                                 }
-                                isParentDragging = false; parentDrag = 0f
+                                isParentDragging = false; parentDrag = 0f; parentDragX = 0f
                             },
-                            onDragCancel = { isParentDragging = false; parentDrag = 0f }
-                        ) { change, drag -> change.consume(); parentDrag += drag.y }
+                            onDragCancel = { isParentDragging = false; parentDrag = 0f; parentDragX = 0f }
+                        ) { change, drag ->
+                            change.consume()
+                            parentDrag += drag.y
+                            parentDragX += drag.x
+                        }
                     },
                     contentAlignment = Alignment.Center
                 ) {
