@@ -254,7 +254,7 @@ fun TimelinePane(editor: EditorState, modifier: Modifier = Modifier) {
                     (if (layer.p(PropId.POS_X).keys.isNotEmpty() || layer.p(PropId.POS_Y).keys.isNotEmpty()) 1 else 0) +
                     (if (layer.scaleLinked && (layer.p(PropId.SCALE_X).keys.isNotEmpty() || layer.p(PropId.SCALE_Y).keys.isNotEmpty())) 1 else 0) +
                     layer.props.entries.count { (id, prop) ->
-                        id != PropId.POS_X && id != PropId.POS_Y &&
+                        id !in setOf(PropId.POS_X, PropId.POS_Y, PropId.POS_Z) &&
                             !(layer.scaleLinked && (id == PropId.SCALE_X || id == PropId.SCALE_Y)) &&
                             prop.keys.isNotEmpty()
                     } +
@@ -360,8 +360,13 @@ private fun LayerRow(
     editor: EditorState, layer: Layer, pps: Float, hScroll: ScrollState, contentW: Dp, leftW: Dp, leadingPad: Dp
 ) {
     val selected = editor.selectedId == layer.id
-    val positionPropId = if (layer.p(PropId.POS_X).keys.isNotEmpty()) PropId.POS_X else PropId.POS_Y
-    val hasPositionKeyframes = layer.p(PropId.POS_X).keys.isNotEmpty() || layer.p(PropId.POS_Y).keys.isNotEmpty()
+    val positionPropId = when {
+        layer.p(PropId.POS_X).keys.isNotEmpty() -> PropId.POS_X
+        layer.p(PropId.POS_Y).keys.isNotEmpty() -> PropId.POS_Y
+        else -> PropId.POS_Z
+    }
+    val hasPositionKeyframes = listOf(PropId.POS_X, PropId.POS_Y, PropId.POS_Z)
+        .any { layer.p(it).keys.isNotEmpty() }
     val scalePropId = if (layer.p(PropId.SCALE_X).keys.isNotEmpty()) PropId.SCALE_X else PropId.SCALE_Y
     val hasLinkedScaleKeyframes = layer.scaleLinked &&
         (layer.p(PropId.SCALE_X).keys.isNotEmpty() || layer.p(PropId.SCALE_Y).keys.isNotEmpty())
