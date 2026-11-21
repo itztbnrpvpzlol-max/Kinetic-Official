@@ -29,6 +29,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Verify persistent signing secrets
+        shell: bash
+        env:
+          KINETIC_KEYSTORE_BASE64: ${{ secrets.KINETIC_KEYSTORE_BASE64 }}
+          KINETIC_KEYSTORE_PASSWORD: ${{ secrets.KINETIC_KEYSTORE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "${KINETIC_KEYSTORE_BASE64}" || { echo "Configure KINETIC_KEYSTORE_BASE64 in repository Actions secrets."; exit 1; }
+          test -n "${KINETIC_KEYSTORE_PASSWORD}" || { echo "Configure KINETIC_KEYSTORE_PASSWORD in repository Actions secrets."; exit 1; }
+
       - name: Install Android NDK and build tools
         shell: bash
         run: |
