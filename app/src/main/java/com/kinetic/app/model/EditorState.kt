@@ -64,6 +64,8 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
         }
     var time by mutableFloatStateOf(0f)
     var playing by mutableStateOf(false)
+    var beatMarkers by mutableStateOf<List<Float>>(emptyList())
+        private set
     var selectedId by mutableStateOf<String?>(null)
     var selectedProp by mutableStateOf<PropId?>(null)
     var selectedKey by mutableIntStateOf(-1)
@@ -94,7 +96,14 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
         time = time.coerceIn(0f, duration)
     }
 
-    fun restoreProject(savedDuration: Float, savedResolution: Int, savedLayers: List<Layer>, savedTime: Float = 0f, savedComp: CompSettings? = null) {
+    fun restoreProject(
+        savedDuration: Float,
+        savedResolution: Int,
+        savedLayers: List<Layer>,
+        savedTime: Float = 0f,
+        savedComp: CompSettings? = null,
+        savedBeatMarkers: List<Float> = emptyList()
+    ) {
         if (savedComp != null) {
             val c = savedComp.sanitized()
             compSettings = c
@@ -107,6 +116,7 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
         timelineFrames.clear()
         timelinePath = emptyList()
         layers = savedLayers.map(::syncPositionKeyframes)
+        beatMarkers = savedBeatMarkers.filter { it.isFinite() && it >= 0f }.distinct().sorted()
         selectedId = null; selectedProp = null; selectedKey = -1
         selectedEffectId = null; selectedEffectParameter = null; selectedEffectKey = -1
         undoStack.clear(); redoStack.clear(); sync()
@@ -313,6 +323,18 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
     }
 
     fun seek(t: Float) { val target = t.coerceAtLeast(0f); if (target > duration) baseDuration = target; time = target }
+
+    /** Add or remove a beat marker at the current frame-quantized playhead position. */
+    fun toggleBeatMarkerAtPlayhead(): Float {
+        val marker = (time / frame).roundToInt() * frame
+        val existing = beatMarkers.indexOfFirst { abs(it - marker) <= frame / 2f }
+        beatMarkers = if (existing >= 0) beatMarkers.filterIndexed { index, _ -> index != existing }
+            else (beatMarkers + marker).distinct().sorted()
+        return marker
+    }
+
+    fun previousBeatMarker(): Float? = beatMarkers.lastOrNull { it < time - frame / 2f }
+    fun nextBeatMarker(): Float? = beatMarkers.firstOrNull { it > time + frame / 2f }
 
 
 
