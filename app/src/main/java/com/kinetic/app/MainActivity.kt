@@ -90,7 +90,8 @@ class MainActivity : ComponentActivity() {
                                 val e = EditorState(settings, saved.id, saved.name)
                                 e.restoreProject(
                                     saved.duration, saved.resolution, saved.layers, saved.time,
-                                    saved.comp ?: com.kinetic.app.model.CompSettings(name = saved.name, duration = saved.duration, fps = settings.lastComp.fps)
+                                    saved.comp ?: com.kinetic.app.model.CompSettings(name = saved.name, duration = saved.duration, fps = settings.lastComp.fps),
+                                    saved.beatMarkers
                                 )
                                 editor = e
                                 screen = Screen.EDITOR
