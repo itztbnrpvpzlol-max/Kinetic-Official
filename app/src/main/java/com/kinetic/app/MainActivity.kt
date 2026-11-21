@@ -15,6 +15,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
 import com.kinetic.app.data.AppSettings
 import com.kinetic.app.data.MediaLoader
 import com.kinetic.app.data.ProjectStore
@@ -47,6 +50,13 @@ class MainActivity : ComponentActivity() {
         val store = ProjectStore(applicationContext)
         setContent {
             KineticTheme {
+                val deviceDensity = LocalDensity.current
+                CompositionLocalProvider(
+                    LocalDensity provides Density(
+                        density = deviceDensity.density * settings.interfaceScale,
+                        fontScale = deviceDensity.fontScale * settings.interfaceScale
+                    )
+                ) {
                 val pluginManager = remember { EffectPluginManager(applicationContext) }
                 val pluginPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
                     if (uri != null) when (val result = pluginManager.install(uri)) {
@@ -106,6 +116,7 @@ class MainActivity : ComponentActivity() {
                         BackHandler { screen = settingsFrom }
                         SettingsScreen(settings, pluginManager, onImportPlugin = { pluginPicker.launch(arrayOf("*/*")) }, onBack = { screen = settingsFrom })
                     }
+                }
                 }
             }
         }
