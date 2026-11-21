@@ -8,6 +8,8 @@ plugins {
 
 val manropeGeneratedRes = layout.buildDirectory.dir("generated/res/manrope")
 val manropeGeneratedAssets = layout.buildDirectory.dir("generated/assets/manrope")
+// CI injects the same private upload key for every APK so Android accepts in-place updates.
+val kineticCiKeystore = rootProject.file("app/kinetic-upload.jks")
 
 android {
     namespace = "com.kinetic.app"
@@ -46,7 +48,20 @@ android {
     }
     kotlinOptions { jvmTarget = "17" }
 
+    signingConfigs {
+        create("ci") {
+            storeFile = kineticCiKeystore
+            storePassword = System.getenv("KINETIC_KEYSTORE_PASSWORD") ?: ""
+            keyAlias = "kinetic-upload"
+            keyPassword = System.getenv("KINETIC_KEYSTORE_PASSWORD") ?: ""
+        }
+    }
+
     buildTypes {
+        debug {
+            // Local builds keep Android's normal local debug key; CI uses the persistent key.
+            if (kineticCiKeystore.exists()) signingConfig = signingConfigs.getByName("ci")
+        }
         release {
             isMinifyEnabled = true
             isShrinkResources = true
