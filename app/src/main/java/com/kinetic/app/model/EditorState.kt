@@ -1044,7 +1044,8 @@ private fun flattenPrecomps(
     parentStart: Float = 0f,
     parentEnd: Float = Float.POSITIVE_INFINITY,
     parentId: String? = null,
-    inheritedOpacity: Prop = Prop(100f)
+    inheritedOpacity: Prop = Prop(100f),
+    inheritedMotionBlur: Boolean = false
 ): List<Layer> = items.flatMap { layer ->
     val start = maxOf(layer.start, parentStart)
     val end = minOf(layer.end, parentEnd)
@@ -1067,7 +1068,8 @@ private fun flattenPrecomps(
             start,
             end,
             layer.id,
-            opacity
+            opacity,
+            inheritedMotionBlur || layer.motionBlur
         )
     } else {
         val clippedElapsed = layer.sourceElapsedAt(start)
@@ -1078,6 +1080,7 @@ private fun flattenPrecomps(
             srcOffset = layer.srcOffset + clippedElapsed,
             visible = layer.visible && parentVisible,
             parentId = layer.parentId ?: parentId,
+            motionBlur = layer.motionBlur || inheritedMotionBlur,
             props = layer.props + (PropId.OPACITY to opacity)
         ))
     }
