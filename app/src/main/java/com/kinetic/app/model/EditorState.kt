@@ -160,25 +160,53 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
     private fun commit(f: (List<Layer>) -> List<Layer>) { beginEdit(); layers = f(layers) }
     private fun live(f: (List<Layer>) -> List<Layer>) { layers = f(layers) }
 
-    /** Position X and Y keep independent values, but share one set of keyframe times. */
-    private fun syncPositionKeyframes(layer: Layer): Layer {
-        val x = layer.p(PropId.POS_X)
-        val y = layer.p(PropId.POS_Y)
-        val times = (x.keys.map { it.t } + y.keys.map { it.t }).sorted()
+    /** Position X/Y/Z retain independent values and easing but share keyframe times. */
+    private val positionAxes = listOf(PropId.POS_X, PropId.POS_Y, PropId.POS_Z)
+    private fun isPositionAxis(id: PropId): Boolean = id in positionAxes
+
+    private fun syncPositionKeyframes(layer: Layer, template: Keyframe? = null): Layer {
+        val axes = positionAxes.associateWith { layer.p(it) }
+        val times = axes.values.flatMap { it.keys }.map { it.t }.sorted()
             .fold(mutableListOf<Float>()) { acc, t ->
                 if (acc.none { abs(it - t) <= frame / 2f }) acc.add(t)
                 acc
             }
         if (times.isEmpty()) return layer
-        fun align(prop: Prop): Prop = prop.copy(keys = times.map { t ->
-            prop.keys.minByOrNull { abs(it.t - t) }?.takeIf { abs(it.t - t) <= frame / 2f }
-                ?: Keyframe(t, prop.valueAt(t))
-        })
-        return layer.copy(props = layer.props + mapOf(
-            PropId.POS_X to align(x),
-            PropId.POS_Y to align(y)
-        ))
+        val aligned = axes.mapValues { (_, prop) ->
+            prop.copy(keys = times.map { t ->
+                prop.keys.minByOrNull { abs(it.t - t) }?.takeIf { abs(it.t - t) <= frame / 2f }
+                    ?: template?.copy(t = t, v = prop.valueAt(t))
+                    ?: Keyframe(t, prop.valueAt(t))
+            })
+        }
+        return layer.copy(props = layer.props + aligned)
     }
+
+    private fun updatePositionKeyGroup(
+        layer: Layer,
+        oldTime: Float,
+        replacement: Keyframe? = null,
+        activeAxis: PropId = PropId.POS_X
+    ): Layer {
+        val eps = frame / 2f
+        val next = positionAxes.associateWith { id ->
+            val prop = layer.p(id)
+            val index = prop.keys.indexOfFirst { abs(it.t - oldTime) <= eps }
+            val keys = prop.keys.toMutableList()
+            if (replacement == null) {
+                if (index >= 0) keys.removeAt(index)
+            } else {
+                val current = if (index >= 0) keys.removeAt(index) else null
+                val value = if (id == PropId.POS_X || id == PropId.POS_Y || id == PropId.POS_Z) {
+                    if (current != null) current.v else prop.valueAt(replacement.t)
+                } else prop.valueAt(replacement.t)
+                keys.add(replacement.copy(v = if (id == activeAxis) replacement.v else value))
+            }
+            id to prop.copy(keys = keys.sortedBy { it.t })
+        }
+        return syncPositionKeyframes(layer.copy(props = layer.props + next), replacement)
+    }
+
 
     fun updateLayer(id: String, push: Boolean = true, f: (Layer) -> Layer) {
         val fn: (List<Layer>) -> List<Layer> = { ls -> ls.map { if (it.id == id) f(it) else it } }
@@ -726,31 +754,22 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
                 next = next + (other to l.p(other).withValueAt(t, v, eps))
             }
             val result = l.copy(props = next)
-            if (id == PropId.POS_X || id == PropId.POS_Y) syncPositionKeyframes(result) else result
+            if (isPositionAxis(id)) syncPositionKeyframes(result) else result
         }
     }
 
     fun toggleStopwatch(layerId: String, id: PropId) {
         val t = time
         updateLayer(layerId) { l ->
-            if (id == PropId.POS_X || id == PropId.POS_Y) {
-                val x = l.p(PropId.POS_X)
-                val y = l.p(PropId.POS_Y)
-                if (l.p(id).animated) {
-                    l.copy(props = l.props + mapOf(
-                        PropId.POS_X to Prop(x.valueAt(t)),
-                        PropId.POS_Y to Prop(y.valueAt(t))
-                    ))
-                } else {
-                    fun addKey(prop: Prop): Prop {
-                        if (prop.keys.any { abs(it.t - t) <= frame / 2f }) return prop
-                        return prop.copy(keys = (prop.keys + Keyframe(t, prop.valueAt(t))).sortedBy { it.t })
-                    }
-                    syncPositionKeyframes(l.copy(props = l.props + mapOf(
-                        PropId.POS_X to addKey(x),
-                        PropId.POS_Y to addKey(y)
-                    )))
+            if (isPositionAxis(id)) {
+                val axes = positionAxes.associateWith { l.p(it) }
+                val disable = axes.values.any { it.animated }
+                val next = axes.mapValues { (_, prop) ->
+                    if (disable) Prop(prop.valueAt(t))
+                    else if (prop.keys.any { abs(it.t - t) <= frame / 2f }) prop
+                    else prop.copy(keys = (prop.keys + Keyframe(t, prop.valueAt(t))).sortedBy { it.t })
                 }
+                syncPositionKeyframes(l.copy(props = l.props + next))
             } else {
                 val p = l.p(id)
                 val np = if (p.animated) Prop(p.valueAt(t)) else Prop(p.base, listOf(Keyframe(t, p.base)))
@@ -776,26 +795,17 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
                     if (remaining.isEmpty()) Prop(prop.keys[idx].v) else prop.copy(keys = remaining)
                 } else prop.copy(keys = (prop.keys + Keyframe(t, prop.valueAt(t))).sortedBy { it.t })
             }
-            if (id == PropId.POS_X || id == PropId.POS_Y) {
-                val x = l.p(PropId.POS_X)
-                val y = l.p(PropId.POS_Y)
-                val exists = x.keys.any { abs(it.t - t) <= eps } || y.keys.any { abs(it.t - t) <= eps }
-                if (exists) {
-                    fun removeAt(prop: Prop): Prop {
+            if (isPositionAxis(id)) {
+                val axes = positionAxes.associateWith { l.p(it) }
+                val exists = axes.values.any { prop -> prop.keys.any { abs(it.t - t) <= eps } }
+                val next = axes.mapValues { (_, prop) ->
+                    if (exists) {
                         val remaining = prop.keys.filterNot { abs(it.t - t) <= eps }
-                        return if (remaining.isEmpty()) Prop(prop.keys.firstOrNull()?.v ?: prop.base)
-                            else prop.copy(keys = remaining)
-                    }
-                    l.copy(props = l.props + mapOf(
-                        PropId.POS_X to removeAt(x),
-                        PropId.POS_Y to removeAt(y)
-                    ))
-                } else {
-                    syncPositionKeyframes(l.copy(props = l.props + mapOf(
-                        PropId.POS_X to toggleAt(x),
-                        PropId.POS_Y to toggleAt(y)
-                    )))
+                        if (remaining.isEmpty()) Prop(prop.keys.firstOrNull()?.v ?: prop.base)
+                        else prop.copy(keys = remaining)
+                    } else toggleAt(prop)
                 }
+                syncPositionKeyframes(l.copy(props = l.props + next))
             } else {
                 val np = toggleAt(l.p(id))
                 var next = l.props + (id to np)
@@ -829,16 +839,9 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
                     val other = if (id == PropId.SCALE_X) PropId.SCALE_Y else PropId.SCALE_X
                     next = next + (other to updated)
                 }
-                if (id == PropId.POS_X || id == PropId.POS_Y) {
-                    val other = if (id == PropId.POS_X) PropId.POS_Y else PropId.POS_X
-                    val otherProp = l.p(other)
-                    val pairedIndex = otherProp.keys.indexOfFirst { abs(it.t - oldKey.t) <= frame / 2f }
-                    val otherKeys = otherProp.keys.toMutableList()
-                    val paired = if (pairedIndex >= 0) otherKeys.removeAt(pairedIndex)
-                        else Keyframe(oldKey.t, otherProp.valueAt(oldKey.t))
-                    otherKeys.add(paired.copy(t = key.t, type = key.type,
-                        x1 = key.x1, y1 = key.y1, x2 = key.x2, y2 = key.y2))
-                    next = next + (other to otherProp.copy(keys = otherKeys.sortedBy { it.t }))
+                if (isPositionAxis(id)) {
+                    val grouped = updatePositionKeyGroup(l.copy(props = next), oldKey.t, key, id)
+                    return@updateLayer grouped
                 }
                 val result = l.copy(props = next)
                 if (id == PropId.POS_X || id == PropId.POS_Y) syncPositionKeyframes(result) else result
@@ -864,17 +867,8 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
                 val other = if (id == PropId.SCALE_X) PropId.SCALE_Y else PropId.SCALE_X
                 next = next + (other to updated)
             }
-            if (id == PropId.POS_X || id == PropId.POS_Y) {
-                val other = if (id == PropId.POS_X) PropId.POS_Y else PropId.POS_X
-                val otherProp = layer.p(other)
-                val pairedIndex = otherProp.keys.indexOfFirst { abs(it.t - original.t) <= frame / 2f }
-                if (pairedIndex >= 0) {
-                    val pairedKeys = otherProp.keys.toMutableList()
-                    val paired = pairedKeys.removeAt(pairedIndex)
-                    pairedKeys.add(paired.copy(t = moved.t, type = moved.type,
-                        x1 = moved.x1, y1 = moved.y1, x2 = moved.x2, y2 = moved.y2))
-                    next = next + (other to otherProp.copy(keys = pairedKeys.sortedBy { it.t }))
-                }
+            if (isPositionAxis(id)) {
+                return@updateLayer updatePositionKeyGroup(layer, original.t, moved, id)
             }
             val result = layer.copy(props = next)
             if (id == PropId.POS_X || id == PropId.POS_Y) syncPositionKeyframes(result) else result
@@ -1001,13 +995,8 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
                     val other = if (id == PropId.SCALE_X) PropId.SCALE_Y else PropId.SCALE_X
                     next = next + (other to np)
                 }
-                if (id == PropId.POS_X || id == PropId.POS_Y) {
-                    val other = if (id == PropId.POS_X) PropId.POS_Y else PropId.POS_X
-                    val otherProp = l.p(other)
-                    val otherKeys = otherProp.keys.filterNot { abs(it.t - removed.t) <= frame / 2f }
-                    val otherUpdated = if (otherKeys.isEmpty() && otherProp.keys.isNotEmpty())
-                        Prop(otherProp.valueAt(removed.t)) else otherProp.copy(keys = otherKeys)
-                    next = next + (other to otherUpdated)
+                if (isPositionAxis(id)) {
+                    return@updateLayer updatePositionKeyGroup(l.copy(props = next), removed.t, null)
                 }
                 val result = l.copy(props = next)
                 if (id == PropId.POS_X || id == PropId.POS_Y) syncPositionKeyframes(result) else result
