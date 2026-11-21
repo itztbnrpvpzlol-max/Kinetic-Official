@@ -142,7 +142,7 @@ fun ExportScreen(editor: EditorState, onClose: () -> Unit) {
                 onSettings = { settings = it },
                 onRange = { r ->
                     range = r
-                    val end = comp.duration
+                    val end = editor.duration
                     settings = when (r) {
                         ExportRange.FULL -> settings.copy(start = 0f, end = end)
                         ExportRange.FROM_PLAYHEAD -> settings.copy(start = min(editor.time, end - 0.1f).coerceAtLeast(0f), end = end)
@@ -178,7 +178,7 @@ private fun defaultExportSettings(editor: EditorState): ExportSettings {
     val (w, h) = ExportSettings.sizeFor(comp.width, comp.height, height)
     val fps = ExportSettings.frameRates.filter { ExportCapabilities.supports(ExportCodec.H264, w, h, it) }
         .minByOrNull { kotlin.math.abs(it - comp.fps) } ?: 30
-    return ExportSettings(width = w, height = h, fps = fps, start = 0f, end = comp.duration, fileName = editor.projectName)
+    return ExportSettings(width = w, height = h, fps = fps, start = 0f, end = editor.duration, fileName = editor.projectName)
 }
 
 // ---------------------------------------------------------------------------------------------
