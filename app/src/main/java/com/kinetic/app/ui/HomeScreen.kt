@@ -37,6 +37,8 @@ fun HomeScreen(
     onNewComposition: (CompSettings) -> Unit,
     onImportProject: () -> Unit,
     onImportPlugin: () -> Unit,
+    onBackupProjects: () -> Unit,
+    onRestoreBackup: () -> Unit,
     onOpenSettings: () -> Unit,
     projects: List<ProjectStore.ProjectInfo>,
     onOpenProject: (ProjectStore.ProjectInfo) -> Unit,
@@ -57,6 +59,11 @@ fun HomeScreen(
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 ActionButton("Import Project", onImportProject, Modifier.weight(1f))
                 ActionButton("Import Plugin", onImportPlugin, Modifier.weight(1f))
+            }
+            Spacer(Modifier.height(10.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                ActionButton("Backup Projects", onBackupProjects, Modifier.weight(1f))
+                ActionButton("Restore Backup", onRestoreBackup, Modifier.weight(1f))
             }
             Spacer(Modifier.height(24.dp))
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
