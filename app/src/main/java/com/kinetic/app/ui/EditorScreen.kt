@@ -200,7 +200,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
 
     // Preview frames are prepared once during media import and read from disk.
 
-    LaunchedEffect(editor.projectLayers, editor.duration, editor.compSettings, editor.projectName) {
+    LaunchedEffect(editor.projectLayers, editor.duration, editor.compSettings, editor.projectName, editor.beatMarkers) {
         delay(400)
         withContext(Dispatchers.IO) { runCatching { projectStore.save(editor) } }
     }
