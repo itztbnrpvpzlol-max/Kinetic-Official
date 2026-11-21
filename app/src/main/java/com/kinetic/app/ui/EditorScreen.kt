@@ -964,9 +964,11 @@ private fun PreviewToolsBar(
         else layer.props.flatMap { (id, prop) -> prop.keys.map { id to it } }
     }.orEmpty().sortedBy { it.second.t }
     val tolerance = editor.frame / 2f
-    val canSkipPrevious = selectedKeyframes.any { it.second.t < editor.time - tolerance } ||
+    val canSkipPrevious = editor.previousBeatMarker() != null ||
+        selectedKeyframes.any { it.second.t < editor.time - tolerance } ||
         (selectedLayer != null && editor.time > selectedLayer.start + tolerance) || editor.time > tolerance
-    val canSkipNext = selectedKeyframes.any { it.second.t > editor.time + tolerance } ||
+    val canSkipNext = editor.nextBeatMarker() != null ||
+        selectedKeyframes.any { it.second.t > editor.time + tolerance } ||
         (selectedLayer != null && editor.time < selectedLayer.end - tolerance) || editor.time < editor.duration - tolerance
     val canStepBack = editor.time > tolerance
     val canStepForward = editor.time < editor.duration - tolerance
@@ -987,8 +989,10 @@ private fun PreviewToolsBar(
         ) {
             PreviewTool(IconKind.SKIP_START, canSkipPrevious) {
                 editor.playing = false
+                val previousBeat = editor.previousBeatMarker()
                 val previous = selectedKeyframes.lastOrNull { it.second.t < editor.time - tolerance }
                 when {
+                    previousBeat != null -> editor.seek(previousBeat)
                     previous != null && selectedLayer != null -> {
                         val (id, key) = previous
                         editor.selectProp(id)
@@ -1009,8 +1013,10 @@ private fun PreviewToolsBar(
             }
             PreviewTool(IconKind.SKIP_END, canSkipNext) {
                 editor.playing = false
+                val nextBeat = editor.nextBeatMarker()
                 val next = selectedKeyframes.firstOrNull { it.second.t > editor.time + tolerance }
                 when {
+                    nextBeat != null -> editor.seek(nextBeat)
                     next != null && selectedLayer != null -> {
                         val (id, key) = next
                         editor.selectProp(id)
