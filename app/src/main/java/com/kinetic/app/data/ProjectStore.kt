@@ -32,7 +32,7 @@ class ProjectStore(context: Context) {
     /** Exports project JSON and imported source media so a reinstall can restore the workspace. */
     fun exportBackup(output: OutputStream): Int {
         val projects = root.listFiles { file -> file.isFile && file.extension == "kinetic" }?.toList().orEmpty()
-        val mediaRoot = File(filesRoot, "media-cache")
+        val backupFolders = listOf("media-cache", "effect-plugins")
         ZipOutputStream(output.buffered()).use { zip ->
             zip.putNextEntry(ZipEntry("backup-version.txt"))
             zip.write("kinetic-backup-v1".toByteArray(Charsets.UTF_8))
@@ -42,12 +42,15 @@ class ProjectStore(context: Context) {
                 file.inputStream().use { it.copyTo(zip) }
                 zip.closeEntry()
             }
-            if (mediaRoot.isDirectory) {
-                mediaRoot.walkTopDown().filter { it.isFile }.forEach { file ->
-                    val relative = file.relativeTo(mediaRoot).invariantSeparatorsPath
-                    zip.putNextEntry(ZipEntry("media-cache/$relative"))
-                    file.inputStream().use { it.copyTo(zip) }
-                    zip.closeEntry()
+            backupFolders.forEach { folder ->
+                val folderRoot = File(filesRoot, folder)
+                if (folderRoot.isDirectory) {
+                    folderRoot.walkTopDown().filter { it.isFile }.forEach { file ->
+                        val relative = file.relativeTo(folderRoot).invariantSeparatorsPath
+                        zip.putNextEntry(ZipEntry("$folder/$relative"))
+                        file.inputStream().use { it.copyTo(zip) }
+                        zip.closeEntry()
+                    }
                 }
             }
         }
@@ -68,6 +71,7 @@ class ProjectStore(context: Context) {
                         val destinationRoot = when {
                             normalized.startsWith("projects/") -> File(staging, "projects")
                             normalized.startsWith("media-cache/") -> File(staging, "media-cache")
+                            normalized.startsWith("effect-plugins/") -> File(staging, "effect-plugins")
                             else -> null
                         }
                         if (destinationRoot != null) {
@@ -87,7 +91,7 @@ class ProjectStore(context: Context) {
                     zip.closeEntry()
                 }
             }
-            listOf("projects", "media-cache").forEach { folder ->
+            listOf("projects", "media-cache", "effect-plugins").forEach { folder ->
                 val source = File(staging, folder)
                 if (source.isDirectory) source.walkTopDown().filter { it.isFile }.forEach { staged ->
                     val relative = staged.relativeTo(source)
