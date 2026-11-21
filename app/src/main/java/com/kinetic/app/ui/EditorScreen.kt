@@ -196,7 +196,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
             if (MediaWorkers.isConstrainedDevice) 512 * 1024 else 2 * 1024 * 1024
         )
     }
-    LaunchedEffect(editor.previewLayers.map { it.id to it.uri }) { audio.prepare(editor.previewLayers) }
+    LaunchedEffect(editor.projectPreviewLayers.map { it.id to it.uri }) { audio.prepare(editor.projectPreviewLayers) }
 
     // Preview frames are prepared once during media import and read from disk.
 
@@ -221,7 +221,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
             var publishedFrame = (editor.time * uiFps).toInt()
             var publishedGeneration = playback.clockSnapshot().generation
             var lastAudioSyncMs = 0L
-            audio.sync(editor.previewLayers, editor.time, true)
+            audio.sync(editor.projectPreviewLayers, editor.time, true)
 
             while (editor.playing) {
                 delay(16L)
@@ -247,7 +247,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
 
                 val now = SystemClock.elapsedRealtime()
                 if (now - lastAudioSyncMs >= 33L) {
-                    audio.sync(editor.previewLayers, transportTime, playback.isPlaying())
+                    audio.sync(editor.projectPreviewLayers, transportTime, playback.isPlaying())
                     lastAudioSyncMs = now
                 }
             }
@@ -257,7 +257,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                 editor.time = editor.duration
                 editor.playing = false
             }
-            audio.sync(editor.previewLayers, editor.time, false)
+            audio.sync(editor.projectPreviewLayers, editor.time, false)
         } else {
             playback.pause()
             audio.pauseAll()
