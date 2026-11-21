@@ -189,7 +189,7 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
         activeAxis: PropId = PropId.POS_X
     ): Layer {
         val eps = frame / 2f
-        val next = positionAxes.associateWith { id ->
+        val next = positionAxes.associate { id ->
             val prop = layer.p(id)
             val index = prop.keys.indexOfFirst { abs(it.t - oldTime) <= eps }
             val keys = prop.keys.toMutableList()
@@ -197,9 +197,7 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
                 if (index >= 0) keys.removeAt(index)
             } else {
                 val current = if (index >= 0) keys.removeAt(index) else null
-                val value = if (id == PropId.POS_X || id == PropId.POS_Y || id == PropId.POS_Z) {
-                    if (current != null) current.v else prop.valueAt(replacement.t)
-                } else prop.valueAt(replacement.t)
+                val value = current?.v ?: prop.valueAt(replacement.t)
                 keys.add(replacement.copy(v = if (id == activeAxis) replacement.v else value))
             }
             id to prop.copy(keys = keys.sortedBy { it.t })
