@@ -426,7 +426,7 @@ internal class GlFrameComposer(
     }
 
     private fun sampleTimes(layer: Layer, time: Float): FloatArray =
-        MotionBlur.sampleTimes(layer, time, comp.shutterAngle, fps, byId, MotionBlur.EXPORT_MAX_SAMPLES, 1f)
+        MotionBlur.sampleTimes(layer, time, comp.shutterAngle, fps, byId, MotionBlur.EXPORT_MAX_SAMPLES, 0.75f)
 
     private fun drawVideo(layer: Layer, time: Float) {
         val uri = Uri.parse(layer.uri ?: return)
