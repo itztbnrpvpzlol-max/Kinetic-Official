@@ -1087,7 +1087,9 @@ private fun flattenPrecomps(
     parentEnd: Float = Float.POSITIVE_INFINITY,
     parentId: String? = null,
     inheritedOpacity: Prop = Prop(100f),
-    inheritedMotionBlur: Boolean = false
+    inheritedMotionBlur: Boolean = false,
+    inheritedEffects: List<EffectInstance> = emptyList(),
+    inheritedBlendMode: String? = null
 ): List<Layer> = items.flatMap { layer ->
     val start = maxOf(layer.start, parentStart)
     val end = minOf(layer.end, parentEnd)
@@ -1104,6 +1106,8 @@ private fun flattenPrecomps(
             precompLayers = emptyList()
         )
         val opacity = multiplyOpacity(inheritedOpacity, layer.p(PropId.OPACITY))
+        val effects = inheritedEffects + layer.effectStack
+        val blendMode = layer.blendMode.takeIf { it != "Normal" } ?: inheritedBlendMode
         listOf(container) + flattenPrecomps(
             layer.precompLayers,
             parentVisible && layer.visible,
@@ -1111,7 +1115,9 @@ private fun flattenPrecomps(
             end,
             layer.id,
             opacity,
-            inheritedMotionBlur || layer.motionBlur
+            inheritedMotionBlur || layer.motionBlur,
+            effects,
+            blendMode
         )
     } else {
         val clippedElapsed = layer.sourceElapsedAt(start)
@@ -1123,6 +1129,8 @@ private fun flattenPrecomps(
             visible = layer.visible && parentVisible,
             parentId = layer.parentId ?: parentId,
             motionBlur = layer.motionBlur || inheritedMotionBlur,
+            blendMode = layer.blendMode.takeIf { it != "Normal" } ?: inheritedBlendMode ?: layer.blendMode,
+            effectStack = layer.effectStack + inheritedEffects.asReversed(),
             props = layer.props + (PropId.OPACITY to opacity)
         ))
     }
