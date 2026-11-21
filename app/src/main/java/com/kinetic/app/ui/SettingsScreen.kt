@@ -80,9 +80,11 @@ fun SettingsScreen(
         runCatching { context.packageManager.getPackageInfo(context.packageName, 0) }.getOrNull()
     }
     val versionName = packageInfo?.versionName ?: "Unknown"
-    val versionCode = packageInfo?.let {
-        if (Build.VERSION.SDK_INT >= 28) it.longVersionCode else @Suppress("DEPRECATION") it.versionCode.toLong()
-    } ?: 0L
+    val versionCode = if (Build.VERSION.SDK_INT >= 28) {
+        packageInfo?.longVersionCode ?: 0L
+    } else {
+        (packageInfo?.versionCode ?: 0).toLong()
+    }
     val lastUpdated = packageInfo?.lastUpdateTime?.let {
         SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(it))
     } ?: "Unknown"
