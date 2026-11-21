@@ -1,3 +1,6 @@
 
 # Built from native/effectcraft-android by CI
 app/src/main/jniLibs/
+
+# Private APK signing key (provided through GitHub Actions secrets)
+app/kinetic-upload.jks
