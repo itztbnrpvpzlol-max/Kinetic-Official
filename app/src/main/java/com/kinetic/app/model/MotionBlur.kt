@@ -6,10 +6,10 @@ import kotlin.math.max
 import kotlin.math.sqrt
 
 object MotionBlur {
-    const val PREVIEW_MAX_SAMPLES = 16
-    const val EXPORT_MAX_SAMPLES = 32
-    private const val STILL_TRAVEL_PX = 0.6f
-    private const val EFFECT_MIN_SAMPLES = 6
+    const val PREVIEW_MAX_SAMPLES = 24
+    const val EXPORT_MAX_SAMPLES = 48
+    private const val STILL_TRAVEL_PX = 0.2f
+    private const val EFFECT_MIN_SAMPLES = 8
 
     fun exposure(shutterAngle: Float, fps: Int): Float =
         shutterAngle.coerceIn(0f, 360f) / 360f / fps.coerceAtLeast(1)
@@ -53,7 +53,7 @@ object MotionBlur {
         fps: Int,
         byId: Map<String, Layer>,
         maxSamples: Int,
-        pxPerStep: Float = 1.5f
+        pxPerStep: Float = 0.75f
     ): FloatArray {
         val exposure = exposure(shutterAngle, fps)
         if (!layer.motionBlur || exposure <= 0f) return floatArrayOf(time)
