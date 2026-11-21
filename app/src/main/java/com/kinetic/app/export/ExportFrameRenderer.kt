@@ -104,10 +104,10 @@ internal class ExportFrameRenderer(
         val checkpoint = canvas.saveLayer(null, compositePaint)
         for (index in 0 until samples) {
             val offset = ((index + 0.5f) / samples - 0.5f) * exposure
-            val sampleTime = frameTime + offset
-            if (sampleTime >= layer.start && sampleTime < layer.end) {
-                drawLayer(layer, sampleTime, 1f / samples, additive = true)
-            }
+            // Clamp samples at the clip edges instead of dropping them; dropping
+            // out-of-range samples made motion-blurred clips fade at their in/out points.
+            val sampleTime = (frameTime + offset).coerceIn(layer.start, (layer.end - 0.0001f).coerceAtLeast(layer.start))
+            drawLayer(layer, sampleTime, 1f / samples, additive = true)
         }
         canvas.restoreToCount(checkpoint)
         compositePaint.xfermode = null
