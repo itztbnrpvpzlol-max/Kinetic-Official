@@ -1096,6 +1096,16 @@ private fun multiplyOpacity(parent: Prop, child: Prop): Prop {
     })
 }
 
+/** Multiplies nested pre-comp playback rates while preserving animated speed keyframes. */
+private fun multiplySpeed(parent: Prop, child: Prop): Prop {
+    val base = (parent.base * child.base).coerceIn(0.1f, 4f)
+    val times = (parent.keys.map { it.t } + child.keys.map { it.t }).distinct().sorted()
+    if (times.isEmpty()) return Prop(base)
+    return Prop(base, times.map { t ->
+        Keyframe(t, (parent.valueAt(t) * child.valueAt(t)).coerceIn(0.1f, 4f))
+    })
+}
+
 private fun flattenPrecomps(
     items: List<Layer>,
     parentVisible: Boolean = true,
@@ -1105,7 +1115,8 @@ private fun flattenPrecomps(
     inheritedOpacity: Prop = Prop(100f),
     inheritedMotionBlur: Boolean = false,
     inheritedEffects: List<EffectInstance> = emptyList(),
-    inheritedBlendMode: String? = null
+    inheritedBlendMode: String? = null,
+    inheritedSpeed: Prop = Prop(1f)
 ): List<Layer> = items.flatMap { layer ->
     val start = maxOf(layer.start, parentStart)
     val end = minOf(layer.end, parentEnd)
@@ -1122,6 +1133,7 @@ private fun flattenPrecomps(
             precompLayers = emptyList()
         )
         val opacity = multiplyOpacity(inheritedOpacity, layer.p(PropId.OPACITY))
+        val speed = multiplySpeed(inheritedSpeed, layer.p(PropId.SPEED))
         val effects = inheritedEffects + layer.effectStack
         val blendMode = layer.blendMode.takeIf { it != "Normal" } ?: inheritedBlendMode
         listOf(container) + flattenPrecomps(
@@ -1133,11 +1145,13 @@ private fun flattenPrecomps(
             opacity,
             inheritedMotionBlur || layer.motionBlur,
             effects,
-            blendMode
+            blendMode,
+            speed
         )
     } else {
         val clippedElapsed = layer.sourceElapsedAt(start)
         val opacity = multiplyOpacity(inheritedOpacity, layer.p(PropId.OPACITY))
+        val speed = multiplySpeed(inheritedSpeed, layer.p(PropId.SPEED))
         listOf(layer.copy(
             start = start,
             duration = end - start,
@@ -1147,7 +1161,7 @@ private fun flattenPrecomps(
             motionBlur = layer.motionBlur || inheritedMotionBlur,
             blendMode = layer.blendMode.takeIf { it != "Normal" } ?: inheritedBlendMode ?: layer.blendMode,
             effectStack = layer.effectStack + inheritedEffects.asReversed(),
-            props = layer.props + (PropId.OPACITY to opacity)
+            props = layer.props + (PropId.OPACITY to opacity) + (PropId.SPEED to speed)
         ))
     }
 }
