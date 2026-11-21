@@ -137,7 +137,12 @@ internal class ExportFrameRenderer(
         canvas.save()
         canvas.scale(sx, sy)
         canvas.concat(layerMatrix(layer, time, byId))
-        if (mask != null) canvas.saveLayer(RectF(piece.dest).apply { union(0f, 0f, layer.width, layer.height) }, null)
+        if (mask != null) {
+            val maskComposite = if (additive) Paint().apply {
+                xfermode = PorterDuffXfermode(PorterDuff.Mode.ADD)
+            } else null
+            canvas.saveLayer(RectF(piece.dest).apply { union(0f, 0f, layer.width, layer.height) }, maskComposite)
+        }
         paint.reset()
         paint.isFilterBitmap = true
         paint.isAntiAlias = true
