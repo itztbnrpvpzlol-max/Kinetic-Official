@@ -68,6 +68,37 @@ class MainActivity : ComponentActivity() {
                             Toast.makeText(this@MainActivity, result.message, Toast.LENGTH_LONG).show()
                     }
                 }
+                val backupExport = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
+                    if (uri != null) Thread {
+                        val result = runCatching {
+                            contentResolver.openOutputStream(uri)?.use { store.exportBackup(it) }
+                                ?: error("Unable to create backup file")
+                        }
+                        runOnUiThread {
+                            val message = result.fold(
+                                { "Backed up ${it} projects and their imported media." },
+                                { "Backup failed: ${it.message ?: "unknown error"}" }
+                            )
+                            Toast.makeText(this@MainActivity, message, Toast.LENGTH_LONG).show()
+                        }
+                    }.apply { name = "KineticBackupExport"; start() }
+                }
+                val backupImport = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+                    if (uri != null) Thread {
+                        val result = runCatching {
+                            contentResolver.openInputStream(uri)?.use { store.importBackup(it) }
+                                ?: error("Unable to open backup file")
+                        }
+                        runOnUiThread {
+                            projects = store.list()
+                            val message = result.fold(
+                                { "Restored ${it} projects and their imported media." },
+                                { "Restore failed: ${it.message ?: "unknown error"}" }
+                            )
+                            Toast.makeText(this@MainActivity, message, Toast.LENGTH_LONG).show()
+                        }
+                    }.apply { name = "KineticBackupImport"; start() }
+                }
                 var screen by remember { mutableStateOf(Screen.HOME) }
                 var settingsFrom by remember { mutableStateOf(Screen.HOME) }
                 var editor by remember { mutableStateOf<EditorState?>(null) }
@@ -82,6 +113,8 @@ class MainActivity : ComponentActivity() {
                             screen = Screen.EDITOR
                         },
                         onImportProject = { }, onImportPlugin = { pluginPicker.launch(arrayOf("*/*")) },
+                        onBackupProjects = { backupExport.launch("Kinetic-Projects-Backup.zip") },
+                        onRestoreBackup = { backupImport.launch(arrayOf("application/zip", "application/octet-stream", "*/*")) },
                         onOpenSettings = { settingsFrom = Screen.HOME; screen = Screen.SETTINGS },
                         projects = projects,
                         onOpenProject = { info ->
