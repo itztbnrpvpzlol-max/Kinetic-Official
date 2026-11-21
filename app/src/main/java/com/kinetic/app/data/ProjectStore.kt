@@ -24,7 +24,7 @@ class ProjectStore(context: Context) {
     private val root = File(context.filesDir, "projects").apply { mkdirs() }
 
     data class ProjectInfo(val id: String, val name: String, val updatedAt: Long, val layerCount: Int)
-    data class LoadedProject(val id: String, val name: String, val duration: Float, val resolution: Int, val time: Float, val layers: List<Layer>, val comp: CompSettings? = null)
+    data class LoadedProject(val id: String, val name: String, val duration: Float, val resolution: Int, val time: Float, val layers: List<Layer>, val comp: CompSettings? = null, val beatMarkers: List<Float> = emptyList())
 
     fun list(): List<ProjectInfo> = root.listFiles { f -> f.isFile && f.extension == "kinetic" }
         ?.mapNotNull { file ->
@@ -49,6 +49,7 @@ class ProjectStore(context: Context) {
                 .put("fps", editor.compSettings.fps).put("bg", editor.compSettings.background)
                 .put("shutterAngle", editor.compSettings.shutterAngle))
             .put("time", editor.time.toDouble())
+            .put("beatMarkers", JSONArray().also { markers -> editor.beatMarkers.forEach { markers.put(it.toDouble()) } })
             .put("layers", layers)
         val target = File(root, "${editor.projectId}.kinetic")
         val temp = File(root, "${editor.projectId}.tmp")
@@ -74,8 +75,13 @@ class ProjectStore(context: Context) {
             CompSettings(savedName, it.optInt("w", 1920), it.optInt("h", 1080), it.optInt("fps", 30),
                 savedDuration, it.optLong("bg", 0xFF000000L), it.optDouble("shutterAngle", 180.0).toFloat()).sanitized()
         }
+        val beatMarkers = (json.optJSONArray("beatMarkers") ?: JSONArray()).let { markers ->
+            (0 until markers.length()).mapNotNull { index ->
+                markers.optDouble(index).toFloat().takeIf { it.isFinite() && it >= 0f }
+            }.distinct().sorted()
+        }
         LoadedProject(json.optString("id", id), savedName, savedDuration,
-            json.optInt("resolution", 1), json.optDouble("time", 0.0).toFloat(), layers, comp)
+            json.optInt("resolution", 1), json.optDouble("time", 0.0).toFloat(), layers, comp, beatMarkers)
     } catch (_: Exception) { null }
 
     fun delete(id: String) { File(root, "$id.kinetic").delete() }
