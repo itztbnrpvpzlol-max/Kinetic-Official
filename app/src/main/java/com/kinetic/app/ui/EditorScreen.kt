@@ -11,7 +11,9 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -102,6 +104,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
     var showImport by remember { mutableStateOf(false) }
     var showCompSettings by remember { mutableStateOf(false) }
     var showExport by remember { mutableStateOf(false) }
+    var showRenderMenu by remember { mutableStateOf(false) }
     var editVectorId by remember { mutableStateOf<String?>(null) }
     val vecState = remember(editVectorId) { VectorEditState() }
     var showLayers by remember { mutableStateOf(false) }
@@ -338,7 +341,8 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
             isExpanded = previewExpanded,
             onAddLayer = { showLayers = true },
             onTogglePreview = { previewExpanded = !previewExpanded },
-            onPlay = { togglePlayback() }
+            onPlay = { togglePlayback() },
+            onPlayLongPress = { editor.playing = false; showRenderMenu = true }
         )
         if (!previewExpanded) {
             TimelinePane(editor, Modifier.weight(1f))
@@ -527,6 +531,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
             }
         }
     }
+    if (showRenderMenu) PreRenderDialog(editor) { showRenderMenu = false }
     if (showExport) {
         androidx.compose.ui.window.Dialog(
             onDismissRequest = {},
@@ -954,7 +959,8 @@ private fun PreviewToolsBar(
     isExpanded: Boolean,
     onAddLayer: () -> Unit,
     onTogglePreview: () -> Unit,
-    onPlay: () -> Unit
+    onPlay: () -> Unit,
+    onPlayLongPress: () -> Unit = {}
 ) {
     // Outer transport buttons jump between keyframes / clip edges / composition ends.
     val selectedLayer = editor.selected
@@ -1006,7 +1012,7 @@ private fun PreviewToolsBar(
                 editor.playing = false
                 editor.seek((editor.time - editor.frame).coerceAtLeast(0f))
             }
-            PreviewTool(if (editor.playing) IconKind.PAUSE else IconKind.PLAY, onClick = onPlay)
+            PreviewTool(if (editor.playing) IconKind.PAUSE else IconKind.PLAY, onLongClick = onPlayLongPress, onClick = onPlay)
             PreviewTool(IconKind.FRAME_FORWARD, canStepForward) {
                 editor.playing = false
                 editor.seek((editor.time + editor.frame).coerceAtMost(editor.duration))
@@ -1105,8 +1111,9 @@ private fun PreviewQualityControl(editor: EditorState, modifier: Modifier = Modi
 }
 
 @Composable
-private fun PreviewTool(icon: IconKind, enabled: Boolean = true, onClick: () -> Unit) {
-    Box(Modifier.size(42.dp).alpha(if (enabled) 1f else 0.35f).clip(RoundedCornerShape(10.dp)).clickable(enabled = enabled, onClick = onClick), contentAlignment = Alignment.Center) {
+@OptIn(ExperimentalFoundationApi::class)
+private fun PreviewTool(icon: IconKind, enabled: Boolean = true, onLongClick: (() -> Unit)? = null, onClick: () -> Unit) {
+    Box(Modifier.size(42.dp).alpha(if (enabled) 1f else 0.35f).clip(RoundedCornerShape(10.dp)).combinedClickable(enabled = enabled, onLongClick = onLongClick, onClick = onClick), contentAlignment = Alignment.Center) {
         KIcon(icon, KColors.Text, Modifier.size(23.dp))
     }
 }

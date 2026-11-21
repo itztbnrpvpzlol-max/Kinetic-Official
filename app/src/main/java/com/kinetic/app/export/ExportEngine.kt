@@ -52,7 +52,7 @@ object ExportEngine {
      */
     suspend fun run(
         context: Context, layers: List<Layer>, comp: CompSettings, settings: ExportSettings, output: File,
-        onProgress: (ExportProgress) -> Unit, onPreview: (Bitmap) -> Unit
+        onProgress: (ExportProgress) -> Unit, onPreview: (Bitmap) -> Unit, wantPreviews: Boolean = true
     ) {
         val executor = Executors.newSingleThreadExecutor { Thread(it, "KineticExport").apply { priority = Thread.NORM_PRIORITY } }
         try {
@@ -60,16 +60,16 @@ object ExportEngine {
                 val appContext = context.applicationContext
                 if (GlExportPath.eligible(layers, settings.start, settings.end)) {
                     try {
-                        render(appContext, layers, comp, settings, output, onProgress, onPreview, true)
+                        render(appContext, layers, comp, settings, output, onProgress, onPreview, true, wantPreviews)
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Throwable) {
                         android.util.Log.w("KineticExport", "GL export failed, using the compatibility renderer", e)
                         output.delete()
-                        render(appContext, layers, comp, settings, output, onProgress, onPreview, false)
+                        render(appContext, layers, comp, settings, output, onProgress, onPreview, false, wantPreviews)
                     }
                 } else {
-                    render(appContext, layers, comp, settings, output, onProgress, onPreview, false)
+                    render(appContext, layers, comp, settings, output, onProgress, onPreview, false, wantPreviews)
                 }
             }
         } catch (e: CancellationException) {
@@ -88,7 +88,7 @@ object ExportEngine {
 
     private suspend fun render(
         context: Context, layers: List<Layer>, comp: CompSettings, settings: ExportSettings, output: File,
-        onProgress: (ExportProgress) -> Unit, onPreview: (Bitmap) -> Unit, useGl: Boolean
+        onProgress: (ExportProgress) -> Unit, onPreview: (Bitmap) -> Unit, useGl: Boolean, wantPreviews: Boolean
     ) {
         val started = SystemClock.elapsedRealtime()
         val codec = settings.codec
@@ -154,7 +154,7 @@ object ExportEngine {
                 val time = (settings.start + i.toFloat() / settings.fps).coerceAtMost(settings.end - 0.0001f)
                 val presentationNs = i * 1_000_000_000L / settings.fps
                 val now = SystemClock.elapsedRealtime()
-                val wantPreview = i == total - 1 || now - lastPreviewAt >= 400L
+                val wantPreview = wantPreviews && (i == total - 1 || now - lastPreviewAt >= 400L)
                 val activeComposer = composer
                 if (activeComposer != null) {
                     activeComposer.render(time, presentationNs, wantPreview)?.let { onPreview(it) }

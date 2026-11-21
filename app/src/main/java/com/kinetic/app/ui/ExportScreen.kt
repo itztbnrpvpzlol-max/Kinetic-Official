@@ -117,7 +117,12 @@ fun ExportScreen(editor: EditorState, onClose: () -> Unit) {
         job = scope.launch {
             val work = ExportStorage.workFile(ctx, s.safeFileName)
             try {
-                ExportEngine.run(ctx, layers, compSnapshot, s, work, onProgress = { progress = it }, onPreview = { live = it })
+                val prepared = PreRender.cachedExport(layers, compSnapshot, s)
+                if (prepared != null) {
+                    withContext(Dispatchers.IO) { prepared.copyTo(work, overwrite = true) }
+                } else {
+                    ExportEngine.run(ctx, layers, compSnapshot, s, work, onProgress = { progress = it }, onPreview = { live = it })
+                }
                 resultBytes = work.length()
                 resultUri = withContext(Dispatchers.IO) { ExportStorage.saveToGallery(ctx, work, s.safeFileName) }
                 stage = ExportStage.DONE
@@ -167,7 +172,7 @@ fun ExportScreen(editor: EditorState, onClose: () -> Unit) {
     }
 }
 
-private fun defaultExportSettings(editor: EditorState): ExportSettings {
+internal fun defaultExportSettings(editor: EditorState): ExportSettings {
     val comp = editor.compSettings
     val heights = ExportSettings.heightPresets.filter { h ->
         val (w, hh) = ExportSettings.sizeFor(comp.width, comp.height, h)
