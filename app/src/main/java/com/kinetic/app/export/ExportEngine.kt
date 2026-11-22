@@ -120,7 +120,11 @@ object ExportEngine {
         val videoSpan = 1f - videoStart - FINISH_SHARE
 
         // 2. Video encoder fed through a GL surface.
-        val format = MediaFormat.createVideoFormat(codec.mime, settings.width, settings.height).apply {
+        fun buildFormat(fast: Boolean) = MediaFormat.createVideoFormat(codec.mime, settings.width, settings.height).apply {
+            if (fast) {
+                setInteger(MediaFormat.KEY_PRIORITY, 1)
+                setInteger(MediaFormat.KEY_OPERATING_RATE, 480)
+            }
             setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
             setInteger(MediaFormat.KEY_BIT_RATE, ExportCapabilities.clampBitrate(codec, settings.videoBitrate))
             setInteger(MediaFormat.KEY_FRAME_RATE, settings.fps)
@@ -134,7 +138,11 @@ object ExportEngine {
         var muxer: MediaMuxer? = null
         var drain: Drain? = null
         try {
-            encoder.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+            try {
+                encoder.configure(buildFormat(true), null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+            } catch (e: Exception) {
+                encoder.configure(buildFormat(false), null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+            }
             val inputSurface = encoder.createInputSurface()
             if (useGl) {
                 composer = GlFrameComposer(context, inputSurface, layers, comp, settings.width, settings.height, settings.fps)
