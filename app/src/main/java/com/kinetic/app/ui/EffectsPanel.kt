@@ -104,7 +104,7 @@ fun EffectControlsPanel(editor: EditorState, layer: Layer, onBrowseEffects: () -
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
         layer.effectStack.forEachIndexed { index, effect ->
-            key(effect.id) {
+            if (expandedEffectId == null || expandedEffectId == effect.id) key(effect.id) {
                 val expanded = expandedEffectId == effect.id
                 val toggleExpanded = {
                     if (!expanded && editor.selectedEffectId != effect.id) editor.clearEffectParameterSelection()
@@ -165,7 +165,7 @@ fun EffectControlsPanel(editor: EditorState, layer: Layer, onBrowseEffects: () -
             }
         }
 
-        Box(
+        if (expandedEffectId == null) Box(
             Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
                 .background(KColors.Accent.copy(alpha = 0.55f)).padding(bottom = 2.dp)
         ) {
