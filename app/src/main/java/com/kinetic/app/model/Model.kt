@@ -388,6 +388,8 @@ data class Layer(
     val scaleLinked: Boolean = true,
     val positionLinked: Boolean = true,
     val text: String = "Text",
+    val textStyle: TextStyle = TextStyle(),
+    val textAnimators: List<TextAnimator> = emptyList(),
     val color: Int = 0xFF8D8BA3.toInt(),
     val props: Map<PropId, Prop>,
     /** Legacy simple layer flags (for example Grayscale). */

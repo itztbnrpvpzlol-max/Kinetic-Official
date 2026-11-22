@@ -20,6 +20,8 @@ import com.kinetic.app.engine.EffectStackRunner
 import com.kinetic.app.model.COMP_H
 import com.kinetic.app.model.COMP_W
 import com.kinetic.app.model.Layer
+import com.kinetic.app.model.maskClips
+import com.kinetic.app.model.textIsAnimated
 import com.kinetic.app.model.MotionBlur
 import com.kinetic.app.model.LayerType
 import com.kinetic.app.model.PropId
@@ -176,7 +178,7 @@ internal class ExportFrameRenderer(
     }
 
     private fun drawPiece(layer: Layer, piece: Piece, time: Float, sampleAlpha: Float?) {
-        val mask = layer.maskAt(time).takeIf { layer.maskEnabled }
+        val mask = layer.maskAt(time).takeIf { layer.maskClips }
         canvas.save()
         canvas.scale(sx, sy)
         canvas.concat(layerMatrix(layer, time, byId))

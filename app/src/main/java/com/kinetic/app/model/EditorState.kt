@@ -406,9 +406,11 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
     }
     fun addAdjustment() =
         addLayer(newLayer(LayerType.ADJUSTMENT, nextName("Adjustment Layer"), time, remaining(), COMP_W, COMP_H))
-    fun addText() = addLayer(
-        newLayer(LayerType.TEXT, "Text", time, remaining(), 800f, 200f, text = "Text", color = 0xFFFFFFFF.toInt())
-    )
+    fun addText() {
+        val base = newLayer(LayerType.TEXT, "Text", time, remaining(), 800f, 200f, text = "Text", color = 0xFFFFFFFF.toInt())
+        val (w, h) = com.kinetic.app.ui.TextEngine.autoFit(base)
+        addLayer(base.withBox(w, h))
+    }
     fun addShape(
         shapeName: String = "Rectangle",
         points: List<VectorPoint> = listOf(VectorPoint(0f, 0f), VectorPoint(1f, 0f), VectorPoint(1f, 1f), VectorPoint(0f, 1f))

@@ -33,6 +33,8 @@ import com.kinetic.app.data.SmartFrameCache
 import com.kinetic.app.data.MediaWorkers
 import com.kinetic.app.data.PreviewDiagnostics
 import com.kinetic.app.model.COMP_H
+import com.kinetic.app.model.maskClips
+import com.kinetic.app.model.textIsAnimated
 import com.kinetic.app.model.COMP_W
 import com.kinetic.app.model.EditorState
 import com.kinetic.app.model.LayerType
@@ -271,7 +273,7 @@ fun CpuPreviewCanvas(
     // of the plain vector drawing. Old results are left to the GC rather than recycled, because
     // the draw pass may still hold them.
     val vectorSignature = editor.previewLayers.filter { it.type == LayerType.TEXT || it.type == LayerType.SHAPE }.map {
-        "${it.id}|${it.text}|${it.color}|${it.width}|${it.height}|${it.shapeKind}|${it.vectorClosed}|${it.vectorPoints.hashCode()}|${it.visible}|${it.start}|${it.duration}|${it.effectStack.hashCode()}"
+        "${it.id}|${it.text}|${it.textStyle.hashCode()}|${it.textAnimators.hashCode()}|${it.color}|${it.width}|${it.height}|${it.shapeKind}|${it.vectorClosed}|${it.vectorPoints.hashCode()}|${it.visible}|${it.start}|${it.duration}|${it.effectStack.hashCode()}"
     }
     LaunchedEffect(vectorSignature) {
         while (true) {
@@ -286,8 +288,9 @@ fun CpuPreviewCanvas(
                     continue
                 }
                 val timeDependent = playing || EffectStackRunner.isTimeDependent(stack)
-                val bucket = if (timeDependent) (time * 12).toInt() else 0
-                var key = layer.text.hashCode().toLong()
+                val bucket = if (timeDependent || layer.textIsAnimated) (time * 24).toInt() else 0
+                var key = layer.text.hashCode().toLong() * 31L + layer.textStyle.hashCode() * 17L + layer.textAnimators.hashCode()
+                if (layer.textStyle.pathOnMask) key = key * 31L + layer.maskPath.hashCode()
                 key = key * 31L + layer.color + layer.width.hashCode() + layer.height.hashCode() + layer.shapeKind.hashCode()
                 key = key * 31L + layer.vectorPointsAt(time).hashCode() + layer.vectorClosed.hashCode()
                 key = key * 31L + stack.hashCode() + bucket
@@ -449,7 +452,7 @@ fun CpuPreviewCanvas(
                 val layerMatrix = layerMatrices.getOrPut(l.id) { Matrix() }
                 layerMatrixInto(l, sampleTime, byId, layerMatrix, matrixScratch)
                 nc.concat(layerMatrix)
-                val activeMask = l.maskAt(time).takeIf { l.maskEnabled }
+                val activeMask = l.maskAt(time).takeIf { l.maskClips }
                 if (activeMask != null) nc.saveLayer(RectF(0f, 0f, l.width, l.height), null)
                 paint.xfermode = blendModes[l.blendMode]
                 paint.colorFilter = if ("Grayscale" in l.effects) grayscaleFilter else null
@@ -475,10 +478,10 @@ fun CpuPreviewCanvas(
                             paint.color = android.graphics.Color.WHITE; paint.alpha = alpha
                             nc.drawBitmap(fx.bitmap, null, RectF(-fx.left, -fx.top, l.width + fx.right, l.height + fx.bottom), paint)
                         } else if (l.type == LayerType.TEXT) {
-                            textPaint.color = l.color; textPaint.alpha = alpha
-                            textPaint.xfermode = blendModes[l.blendMode]
-                            textPaint.colorFilter = if ("Grayscale" in l.effects) grayscaleFilter else null
-                            nc.drawText(l.text, l.width / 2f, l.height / 2f + 40f, textPaint)
+                            com.kinetic.app.ui.TextEngine.draw(
+                                nc, l, time, l.width, l.height, alpha,
+                                blendModes[l.blendMode], if ("Grayscale" in l.effects) grayscaleFilter else null
+                            )
                         } else {
                         paint.color = l.color; paint.alpha = alpha
                         val points = if (l.vectorPoints.isEmpty() && !l.isVector) listOf(VectorPoint(0f, 0f), VectorPoint(1f, 0f), VectorPoint(1f, 1f), VectorPoint(0f, 1f)) else l.vectorPointsAt(time)

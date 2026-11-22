@@ -28,6 +28,8 @@ import com.kinetic.app.model.CompSettings
 import com.kinetic.app.model.COMP_H
 import com.kinetic.app.model.COMP_W
 import com.kinetic.app.model.Layer
+import com.kinetic.app.model.maskClips
+import com.kinetic.app.model.textIsAnimated
 import com.kinetic.app.model.LayerType
 import com.kinetic.app.model.MotionBlur
 import com.kinetic.app.model.PropId
@@ -52,7 +54,7 @@ internal object GlExportPath {
         return visual.all { l ->
             (l.type == LayerType.VIDEO || l.type == LayerType.IMAGE || l.type == LayerType.TEXT || l.type == LayerType.SHAPE) &&
                 (l.uri != null || l.type == LayerType.TEXT || l.type == LayerType.SHAPE) &&
-                !l.is3D && !(l.maskEnabled && l.maskPath != null) && l.blendMode == "Normal" &&
+                !l.is3D && !(l.maskClips && l.maskPath != null) && l.blendMode == "Normal" &&
                 "Grayscale" !in l.effects
         }
     }

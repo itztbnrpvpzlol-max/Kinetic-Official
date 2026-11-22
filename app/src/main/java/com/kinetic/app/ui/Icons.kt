@@ -29,7 +29,7 @@ enum class IconKind {
     LOCK, UNLOCK, SETTINGS, EXPORT, IMPORT, DELETE, CUT, SPLIT, CROP, ROTATE, FLIP,
     COPY, DUPLICATE, TRIM_START, TRIM_END, BRING_TO_PLAYHEAD, EXTEND_TO_PLAYHEAD, MORE, ZOOM_IN, ZOOM_OUT, EFFECTS, FILTER, MASK, BLEND, WAVEFORM, SEARCH,
     BACK, FRAME_BACK, FRAME_FORWARD, SKIP_START, SKIP_END, CLOSE, CHECK, SHARE, FOLDER, HOME, MIC, MUTE, VOLUME, GRID, ALIGN, FIT,
-    FULLSCREEN, DOWNLOAD, UPLOAD, INFO, GRAPH, MOTION, MORE_V, PASTE, SOLID, CAMERA, VECTOR
+    FULLSCREEN, DOWNLOAD, UPLOAD, INFO, GRAPH, MOTION, MORE_V, PASTE, SOLID, CAMERA, VECTOR, EDIT, ALIGN_L, ALIGN_C, ALIGN_R
 }
 
 @Composable
@@ -105,6 +105,10 @@ fun KIcon(kind: IconKind, tint: Color, modifier: Modifier = Modifier.size(22.dp)
             IconKind.NULL -> { drawRect(tint,pt(.18f,.18f),Size(w*.64f,h*.64f),style=st); line(pt(.5f,.06f),pt(.5f,.94f)); line(pt(.06f,.5f),pt(.94f,.5f)) }
             IconKind.ADJ -> { outlinedCircle(.5f,.5f,.36f); drawArc(tint,-90f,180f,true,pt(.14f,.14f),Size(w*.72f,h*.72f)) }
             IconKind.TEXT -> { line(pt(.2f,.2f),pt(.8f,.2f)); line(pt(.5f,.2f),pt(.5f,.82f)) }
+            IconKind.EDIT -> { line(pt(.2f,.82f),pt(.28f,.56f)); line(pt(.28f,.56f),pt(.66f,.18f)); line(pt(.66f,.18f),pt(.82f,.34f)); line(pt(.82f,.34f),pt(.44f,.72f)); line(pt(.44f,.72f),pt(.2f,.82f)) }
+            IconKind.ALIGN_L -> { line(pt(.18f,.24f),pt(.82f,.24f)); line(pt(.18f,.42f),pt(.6f,.42f)); line(pt(.18f,.6f),pt(.82f,.6f)); line(pt(.18f,.78f),pt(.55f,.78f)) }
+            IconKind.ALIGN_C -> { line(pt(.18f,.24f),pt(.82f,.24f)); line(pt(.28f,.42f),pt(.72f,.42f)); line(pt(.18f,.6f),pt(.82f,.6f)); line(pt(.3f,.78f),pt(.7f,.78f)) }
+            IconKind.ALIGN_R -> { line(pt(.18f,.24f),pt(.82f,.24f)); line(pt(.4f,.42f),pt(.82f,.42f)); line(pt(.18f,.6f),pt(.82f,.6f)); line(pt(.45f,.78f),pt(.82f,.78f)) }
             IconKind.SOLID -> drawRect(tint, pt(.16f,.2f), Size(w*.68f,h*.6f))
             IconKind.CAMERA -> { rect(.08f,.28f,.56f,.44f,.06f); drawPath(poly(true,pt(.66f,.5f),pt(.92f,.3f),pt(.92f,.7f)),tint,style=st) }
             IconKind.VECTOR -> { drawPath(poly(true,pt(.5f,.1f),pt(.74f,.36f),pt(.5f,.62f),pt(.26f,.36f)),tint,style=st); line(pt(.5f,.62f),pt(.5f,.9f)); outlinedCircle(.5f,.36f,.06f) }

@@ -123,6 +123,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
     var dockTool by remember { mutableStateOf("Select") }
     var showToolPanel by remember { mutableStateOf(false) }
     var showCameraDialog by remember { mutableStateOf(false) }
+    var pendingTextTool by remember { mutableStateOf<String?>(null) }
     var openCameraPanelOnSelect by remember { mutableStateOf(false) }
     var showShapePanel by remember { mutableStateOf(false) }
     var maskTool by remember { mutableStateOf("Pen") }
@@ -146,6 +147,14 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
         } else {
             // Selection and panel visibility are deliberately independent.
             dockTool = if (editVectorId != null && editVectorId == editor.selectedId) "Masking" else "Properties"
+            if (editor.selected?.type == LayerType.TEXT) {
+                dockTool = "Edit"
+                pendingTextTool?.let { t ->
+                    pendingTextTool = null
+                    dockTool = t
+                    showToolPanel = true
+                }
+            }
             if (openCameraPanelOnSelect && editor.selected?.type == LayerType.CAMERA) {
                 openCameraPanelOnSelect = false
                 dockTool = "Camera"
@@ -369,7 +378,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                     )
                 } else if (!compactHeight && (showPropertiesPanel || showToolPanel)) {
                     // Every dock tool shares the Properties panel shell and workspace footprint.
-                    val adaptivePanelHeight = if (dockTool == "Masking") (windowMaxHeight.value * 0.43f).coerceIn(280f, 390f) else (windowMaxHeight.value * 0.27f).coerceIn(180f, 228f)
+                    val adaptivePanelHeight = if (dockTool == "Masking" || dockTool == "Edit" || dockTool == "Animate") (windowMaxHeight.value * 0.43f).coerceIn(280f, 390f) else (windowMaxHeight.value * 0.27f).coerceIn(180f, 228f)
                     if (showPropertiesPanel) {
                         EditPanel(editor, activeLayer, panelTab, { panelTab = it }, { showPropertiesPanel = false },
                             onRename = { renameTarget = activeLayer }, onParent = { parentPicker = true },
@@ -381,6 +390,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                             maskTool = maskTool, onMaskToolChange = { maskTool = it },
                             rotoForeground = rotoForeground, onRotoForegroundChange = { rotoForeground = it },
                             onOpenEffects = { showEffectsScreen = true },
+                            onOpenMasking = { editor.playing = false; dockTool = "Masking"; showToolPanel = true },
                             modifier = Modifier.fillMaxWidth().height(adaptivePanelHeight.dp))
                     }
                 }
@@ -407,7 +417,8 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
             FloatingEditingDock(
                 dockTool,
                 activeLayer != null,
-                activeLayer?.type == LayerType.CAMERA
+                activeLayer?.type == LayerType.CAMERA,
+                activeLayer?.type == LayerType.TEXT
             ) { tool ->
                 dockTool = tool
                 when (tool) {
@@ -434,7 +445,18 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                     "Solid" -> { dockTool = "Select"; editor.addSolid() }
                     "Null" -> { dockTool = "Select"; editor.addNull() }
                     "Adjustment" -> { dockTool = "Select"; editor.addAdjustment() }
-                    "Masking", "Vector" -> {
+                    "Edit", "Animate" -> {
+                        showPropertiesPanel = false
+                        showShapePanel = false
+                        showToolPanel = true
+                    }
+                    "Masking", "Vector" -> if (activeLayer?.type == LayerType.TEXT) {
+                        showPropertiesPanel = false
+                        showShapePanel = false
+                        editor.playing = false
+                        dockTool = "Masking"
+                        showToolPanel = true
+                    } else {
                         showPropertiesPanel = false
                         showToolPanel = false
                         showShapePanel = false
@@ -455,7 +477,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                             }
                         } else Toast.makeText(ctx, "Select a layer first", Toast.LENGTH_SHORT).show()
                     }
-                    "Text" -> { dockTool = "Select"; editor.addText() }
+                    "Text" -> { dockTool = "Select"; pendingTextTool = "Edit"; editor.addText() }
                     "Shapes" -> {
                         showToolPanel = false
                         showPropertiesPanel = false
@@ -637,9 +659,15 @@ private fun TopBar(
 
 
 @Composable
-private fun FloatingEditingDock(active: String, hasSelection: Boolean, cameraSelected: Boolean, onSelect: (String) -> Unit) {
+private fun FloatingEditingDock(active: String, hasSelection: Boolean, cameraSelected: Boolean, textSelected: Boolean, onSelect: (String) -> Unit) {
     // Keep Import inside the capsule, but visually separate it from the tools.
-    val tools = if (cameraSelected) {
+    val tools = if (textSelected) {
+        listOf(
+            "Edit" to IconKind.EDIT,
+            "Animate" to IconKind.MOTION,
+            "Masking" to IconKind.MASK
+        )
+    } else if (cameraSelected) {
         listOf(
             "Camera" to IconKind.CAMERA,
             "Properties" to IconKind.SLIDERS
@@ -736,6 +764,7 @@ private fun ToolEditPanel(
     rotoForeground: Boolean,
     onRotoForegroundChange: (Boolean) -> Unit,
     onOpenEffects: () -> Unit,
+    onOpenMasking: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val displayTime = rememberEditorDisplayTime(editor)
@@ -810,7 +839,7 @@ private fun ToolEditPanel(
                     else GraphPanel(editor, layer)
                 } else {
                     ToolPanelControls(tool, editor, layer, displayTime, onExtractAudio, maskTool,
-                        onMaskToolChange, rotoForeground, onRotoForegroundChange, onOpenEffects)
+                        onMaskToolChange, rotoForeground, onRotoForegroundChange, onOpenEffects, onOpenMasking)
                 }
             }
         }
@@ -818,12 +847,13 @@ private fun ToolEditPanel(
 }
 
 @Composable
-private fun ToolPanelControls(tool: String, editor: EditorState, layer: Layer, displayTime: Float, onExtractAudio: () -> Unit, maskTool: String, onMaskToolChange: (String) -> Unit, rotoForeground: Boolean, onRotoForegroundChange: (Boolean) -> Unit, onOpenEffects: () -> Unit) {
+private fun ToolPanelControls(tool: String, editor: EditorState, layer: Layer, displayTime: Float, onExtractAudio: () -> Unit, maskTool: String, onMaskToolChange: (String) -> Unit, rotoForeground: Boolean, onRotoForegroundChange: (Boolean) -> Unit, onOpenEffects: () -> Unit, onOpenMasking: () -> Unit) {
+    val textTool = tool == "Edit" || tool == "Animate"
     Column(
         Modifier.fillMaxSize().background(KColors.Surface).then(
-            if (tool == "Effects") Modifier else Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
+            if (tool == "Effects" || textTool) Modifier else Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
         ),
-        verticalArrangement = if (tool == "Effects") Arrangement.spacedBy(0.dp)
+        verticalArrangement = if (tool == "Effects" || textTool) Arrangement.spacedBy(0.dp)
             else Arrangement.spacedBy(5.dp)
     ) {
         when (tool) {
@@ -851,6 +881,7 @@ private fun ToolPanelControls(tool: String, editor: EditorState, layer: Layer, d
                 EffectControlsPanel(editor, layer, onOpenEffects)
             }
             "Camera" -> CameraControls(editor, layer)
+            "Edit", "Animate" -> TextEditorPanel(editor, layer, if (tool == "Animate") "Animator" else "Text", onOpenMasking)
             "Blend modes" -> {
                 Text("BLEND MODE", color = KColors.Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold)
                 ChoiceStringUnitRow(listOf("Normal" to "Normal", "Multiply" to "Multiply", "Screen" to "Screen", "Add" to "Add"),

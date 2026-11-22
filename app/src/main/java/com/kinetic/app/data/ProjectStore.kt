@@ -1,6 +1,7 @@
 package com.kinetic.app.data
 
 import android.content.Context
+import com.kinetic.app.model.toJson
 import com.kinetic.app.model.CompSettings
 import com.kinetic.app.model.EditorState
 import com.kinetic.app.model.EffectInstance
@@ -210,6 +211,7 @@ class ProjectStore(context: Context) {
             .put("width", l.width.toDouble()).put("height", l.height.toDouble()).put("visible", l.visible)
             .put("cameraTwoNode", l.cameraTwoNode).put("is3D", l.is3D).put("motionBlur", l.motionBlur)
             .put("parentId", l.parentId).put("scaleLinked", l.scaleLinked).put("text", l.text)
+            .put("textStyle", l.textStyle.toJson()).put("textAnimators", l.textAnimators.toJson())
             .put("color", l.color).put("label", l.label).put("props", props)
             .put("effects", JSONArray(l.effects))
             .put("effectStack", JSONArray().also { array ->
@@ -314,6 +316,8 @@ class ProjectStore(context: Context) {
             is3D = j.optBoolean("is3D", false), cameraTwoNode = j.optBoolean("cameraTwoNode", true), motionBlur = j.optBoolean("motionBlur", false),
             parentId = j.optString("parentId").takeIf { it.isNotBlank() && it != "null" },
             scaleLinked = j.optBoolean("scaleLinked", false), text = j.optString("text", "Text"),
+            textStyle = com.kinetic.app.model.textStyleFromJson(j.optJSONObject("textStyle")),
+            textAnimators = com.kinetic.app.model.textAnimatorsFromJson(j.optJSONArray("textAnimators")),
             color = j.optInt("color", 0xFF8D8BA3.toInt()), props = props,
             effects = (j.optJSONArray("effects") ?: JSONArray()).let { a -> (0 until a.length()).map { a.optString(it) } },
             effectStack = (j.optJSONArray("effectStack") ?: JSONArray()).let { array ->

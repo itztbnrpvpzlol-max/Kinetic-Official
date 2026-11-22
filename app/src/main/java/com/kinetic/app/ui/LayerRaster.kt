@@ -27,10 +27,7 @@ internal object LayerRaster {
         canvas.scale(scale, scale)
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = layer.color }
         if (layer.type == LayerType.TEXT) {
-            paint.textAlign = Paint.Align.CENTER
-            paint.textSize = 120f
-            paint.typeface = Typeface.DEFAULT_BOLD
-            canvas.drawText(layer.text, logicalWidth / 2f, logicalHeight / 2f + 40f, paint)
+            TextEngine.draw(canvas, layer, time, logicalWidth.toFloat(), logicalHeight.toFloat())
         } else {
             val points = if (layer.vectorPoints.isEmpty() && !layer.isVector) {
                 listOf(VectorPoint(0f, 0f), VectorPoint(1f, 0f), VectorPoint(1f, 1f), VectorPoint(0f, 1f))

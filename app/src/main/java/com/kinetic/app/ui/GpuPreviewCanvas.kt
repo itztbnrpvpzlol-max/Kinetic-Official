@@ -57,6 +57,8 @@ import com.kinetic.app.engine.NativePlaybackEngine
 import com.kinetic.app.data.MediaWorkers
 import com.kinetic.app.data.PreviewDiagnostics
 import com.kinetic.app.model.COMP_H
+import com.kinetic.app.model.maskClips
+import com.kinetic.app.model.textIsAnimated
 import com.kinetic.app.model.COMP_W
 import com.kinetic.app.model.EditorState
 import com.kinetic.app.model.LayerType
@@ -189,11 +191,11 @@ fun PreviewCanvas(
         }
     }
     val hasEffects = activeVisualLayers.any { layer -> EffectStackRunner.hasPictureEffects(layer.effectStack) }
-    val hasComplexMasks = activeVisualLayers.any { it.maskEnabled && it.maskPath != null }
+    val hasComplexMasks = activeVisualLayers.any { it.maskClips && it.maskPath != null }
     val hasMotionBlur = editor.compSettings.shutterAngle > 0f && activeVisualLayers.any { it.motionBlur }
     val directVideo = videoLayers.singleOrNull()
         ?.takeIf {
-            activeVisualLayers.lastOrNull()?.id == it.id && !it.maskEnabled &&
+            activeVisualLayers.lastOrNull()?.id == it.id && !it.maskClips &&
                 !hasEffects && !hasMotionBlur && canUseDirectSurfaceVideo(it)
         }
 
@@ -612,7 +614,7 @@ private fun GpuCompositionPreviewCanvas(
                 val sampleAlpha = sampleOpacity(opacity, sampleIndex, sampleTimes.size)
                 renderLayers += GpuLayer(
                     layer.id, frames[layer.id], Matrix(layerMatrix(layer, sampleTime, byId)),
-                    layer.width, layer.height, sampleAlpha, layer.maskEnabled,
+                    layer.width, layer.height, sampleAlpha, layer.maskClips,
                     "Grayscale" in layer.effects, layer.blendMode, true, layer.effectStack
                 )
             }
@@ -629,8 +631,11 @@ private fun GpuCompositionPreviewCanvas(
                 val logicalWidth = layer.width.toInt().coerceIn(1, 4096)
                 val logicalHeight = layer.height.toInt().coerceIn(1, 4096)
                 val signature = if (layer.type == LayerType.TEXT)
-                    ((layer.text.hashCode() * 31 + layer.color) * 31 +
-                        logicalWidth * 7 + logicalHeight)
+                    ((((layer.text.hashCode() * 31 + layer.color) * 31 +
+                        logicalWidth * 7 + logicalHeight) * 31 + layer.textStyle.hashCode()) * 31 +
+                        layer.textAnimators.hashCode()) * 31 +
+                        (if (layer.textStyle.pathOnMask) layer.maskPath.hashCode() else 0) * 7 +
+                        (if (layer.textIsAnimated) (editor.time * 30f).toInt() else 0)
                 else (((layer.color * 31 + logicalWidth * 7 + logicalHeight) * 31 +
                     layer.shapeKind.hashCode()) * 31 + layer.vectorPointsAt(editor.time).hashCode() * 31 +
                     layer.vectorSmooth.hashCode() * 7 + layer.vectorClosed.hashCode())
@@ -650,10 +655,7 @@ private fun GpuCompositionPreviewCanvas(
                     canvas.scale(bitmapScale, bitmapScale)
                     val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = layer.color }
                     if (layer.type == LayerType.TEXT) {
-                        paint.textAlign = Paint.Align.CENTER
-                        paint.textSize = 120f
-                        paint.typeface = Typeface.DEFAULT_BOLD
-                        canvas.drawText(layer.text, logicalWidth / 2f, logicalHeight / 2f + 40f, paint)
+                        com.kinetic.app.ui.TextEngine.draw(canvas, layer, editor.time, logicalWidth.toFloat(), logicalHeight.toFloat())
                     } else {
                         val points = if (layer.vectorPoints.isEmpty() && !layer.isVector) {
                             listOf(
@@ -699,7 +701,7 @@ private fun GpuCompositionPreviewCanvas(
             renderLayers += GpuLayer(
                 layer.id, drawBitmap, quadMatrix,
                 layer.width + (margin?.let { it[0] + it[2] } ?: 0f), layer.height + (margin?.let { it[1] + it[3] } ?: 0f),
-                sampleAlpha, layer.maskEnabled,
+                sampleAlpha, layer.maskClips,
                 "Grayscale" in layer.effects, layer.blendMode, false, emptyList()
             )
         }
