@@ -208,7 +208,7 @@ class ProjectStore(context: Context) {
             .put("uri", l.uri).put("start", l.start.toDouble()).put("duration", l.duration.toDouble())
             .put("srcOffset", l.srcOffset.toDouble()).put("srcLength", if (l.srcLength.isFinite()) l.srcLength.toDouble() else -1.0)
             .put("width", l.width.toDouble()).put("height", l.height.toDouble()).put("visible", l.visible)
-            .put("is3D", l.is3D).put("motionBlur", l.motionBlur)
+            .put("cameraTwoNode", l.cameraTwoNode).put("is3D", l.is3D).put("motionBlur", l.motionBlur)
             .put("parentId", l.parentId).put("scaleLinked", l.scaleLinked).put("text", l.text)
             .put("color", l.color).put("label", l.label).put("props", props)
             .put("effects", JSONArray(l.effects))
@@ -251,6 +251,9 @@ class ProjectStore(context: Context) {
                 PropId.ANCHOR_X, PropId.ANCHOR_Y -> 0.0
                 PropId.POS_X -> 960.0; PropId.POS_Y -> 540.0
                 PropId.SCALE_X, PropId.SCALE_Y, PropId.OPACITY -> 100.0
+                PropId.CAM_ZOOM, PropId.CAM_FOCUS -> com.kinetic.app.model.CAMERA_DEFAULT_ZOOM.toDouble()
+                PropId.CAM_POI_X -> 960.0; PropId.CAM_POI_Y -> 540.0
+                PropId.CAM_BLUR -> 100.0
                 PropId.SPEED -> j.optDouble("speed", 1.0)
                 PropId.VOLUME -> j.optDouble("volume", 1.0)
                 else -> if (id.isVectorPoint) {
@@ -308,7 +311,7 @@ class ProjectStore(context: Context) {
             srcOffset = j.optDouble("srcOffset", 0.0).toFloat(), srcLength = srcLength,
             width = j.optDouble("width", 100.0).toFloat(), height = j.optDouble("height", 100.0).toFloat(),
             visible = j.optBoolean("visible", true),
-            is3D = j.optBoolean("is3D", false), motionBlur = j.optBoolean("motionBlur", false),
+            is3D = j.optBoolean("is3D", false), cameraTwoNode = j.optBoolean("cameraTwoNode", true), motionBlur = j.optBoolean("motionBlur", false),
             parentId = j.optString("parentId").takeIf { it.isNotBlank() && it != "null" },
             scaleLinked = j.optBoolean("scaleLinked", false), text = j.optString("text", "Text"),
             color = j.optInt("color", 0xFF8D8BA3.toInt()), props = props,

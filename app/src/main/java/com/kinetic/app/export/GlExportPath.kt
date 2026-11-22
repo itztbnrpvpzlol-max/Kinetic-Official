@@ -45,7 +45,7 @@ import kotlin.math.min
 internal object GlExportPath {
     fun eligible(layers: List<Layer>, start: Float, end: Float): Boolean {
         val visual = layers.filter {
-            it.visible && it.type != LayerType.AUDIO && it.type != LayerType.NULL &&
+            it.visible && it.type != LayerType.AUDIO && it.type != LayerType.NULL && it.type != LayerType.CAMERA &&
                 it.start < end && it.end > start
         }
         if (visual.isEmpty()) return false

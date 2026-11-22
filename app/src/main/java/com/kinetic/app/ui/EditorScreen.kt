@@ -83,6 +83,9 @@ import com.kinetic.app.data.MediaWorkers
 import com.kinetic.app.data.PreviewDiagnostics
 import com.kinetic.app.data.ProjectStore
 import com.kinetic.app.model.COMP_H
+import androidx.compose.foundation.verticalScroll
+import com.kinetic.app.model.fmt
+import com.kinetic.app.model.cameraZoomForLens
 import com.kinetic.app.model.COMP_W
 import com.kinetic.app.model.EditorState
 import com.kinetic.app.model.Layer
@@ -119,6 +122,8 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
     var previewHeight by remember { mutableFloatStateOf(210f) }
     var dockTool by remember { mutableStateOf("Select") }
     var showToolPanel by remember { mutableStateOf(false) }
+    var showCameraDialog by remember { mutableStateOf(false) }
+    var openCameraPanelOnSelect by remember { mutableStateOf(false) }
     var showShapePanel by remember { mutableStateOf(false) }
     var maskTool by remember { mutableStateOf("Pen") }
     var rotoForeground by remember { mutableStateOf(true) }
@@ -141,6 +146,11 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
         } else {
             // Selection and panel visibility are deliberately independent.
             dockTool = if (editVectorId != null && editVectorId == editor.selectedId) "Masking" else "Properties"
+            if (openCameraPanelOnSelect && editor.selected?.type == LayerType.CAMERA) {
+                openCameraPanelOnSelect = false
+                dockTool = "Camera"
+                showToolPanel = true
+            }
         }
     }
 
@@ -396,7 +406,8 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
             }
             FloatingEditingDock(
                 dockTool,
-                activeLayer != null
+                activeLayer != null,
+                activeLayer?.type == LayerType.CAMERA
             ) { tool ->
                 dockTool = tool
                 when (tool) {
@@ -410,7 +421,20 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                             editor.extractAudio(activeLayer.id)
                         } else Toast.makeText(ctx, "Select a video layer first", Toast.LENGTH_SHORT).show()
                     }
-                    "Masking" -> {
+                    "Camera" -> {
+                        if (activeLayer?.type == LayerType.CAMERA) {
+                            showPropertiesPanel = false
+                            showShapePanel = false
+                            showToolPanel = true
+                        } else {
+                            dockTool = "Select"
+                            showCameraDialog = true
+                        }
+                    }
+                    "Solid" -> { dockTool = "Select"; editor.addSolid() }
+                    "Null" -> { dockTool = "Select"; editor.addNull() }
+                    "Adjustment" -> { dockTool = "Select"; editor.addAdjustment() }
+                    "Masking", "Vector" -> {
                         showPropertiesPanel = false
                         showToolPanel = false
                         showShapePanel = false
@@ -431,14 +455,13 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                             }
                         } else Toast.makeText(ctx, "Select a layer first", Toast.LENGTH_SHORT).show()
                     }
-                    "Text" -> editor.addText()
+                    "Text" -> { dockTool = "Select"; editor.addText() }
                     "Shapes" -> {
                         showToolPanel = false
                         showPropertiesPanel = false
                         showShapePanel = activeLayer == null
                     }
                     "Layers" -> showLayers = true
-                    "Adjust" -> editor.addAdjustment()
                     "Import" -> showImport = true
                 }
             }
@@ -515,6 +538,17 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                 DialogItem("Shape") { showLayers = false; editor.addShape() }
             }
         }
+    }
+    if (showCameraDialog) {
+        CameraSettingsDialog(
+            onDismiss = { showCameraDialog = false },
+            onCreate = { twoNode, zoom ->
+                showCameraDialog = false
+                editor.playing = false
+                openCameraPanelOnSelect = true
+                editor.addCamera(twoNode, zoom)
+            }
+        )
     }
     if (renameTarget != null) {
         val target = renameTarget!!
@@ -603,9 +637,14 @@ private fun TopBar(
 
 
 @Composable
-private fun FloatingEditingDock(active: String, hasSelection: Boolean, onSelect: (String) -> Unit) {
+private fun FloatingEditingDock(active: String, hasSelection: Boolean, cameraSelected: Boolean, onSelect: (String) -> Unit) {
     // Keep Import inside the capsule, but visually separate it from the tools.
-    val tools = if (hasSelection) {
+    val tools = if (cameraSelected) {
+        listOf(
+            "Camera" to IconKind.CAMERA,
+            "Properties" to IconKind.SLIDERS
+        )
+    } else if (hasSelection) {
         listOf(
             "Properties" to IconKind.SLIDERS,
             "Speed" to IconKind.STOPWATCH,
@@ -618,12 +657,13 @@ private fun FloatingEditingDock(active: String, hasSelection: Boolean, onSelect:
         )
     } else {
         listOf(
-            "Select" to IconKind.SELECT,
             "Text" to IconKind.TEXT,
+            "Solid" to IconKind.SOLID,
+            "Adjustment" to IconKind.ADJ,
+            "Null" to IconKind.NULL,
             "Shapes" to IconKind.SHAPES,
-            "Masking" to IconKind.MASK,
-            "Layers" to IconKind.LAYERS,
-            "Adjust" to IconKind.ADJ
+            "Vector" to IconKind.VECTOR,
+            "Camera" to IconKind.CAMERA
         )
     }
     val shape = RoundedCornerShape(32.dp)
@@ -654,7 +694,7 @@ private fun FloatingEditingDock(active: String, hasSelection: Boolean, onSelect:
                         verticalArrangement = Arrangement.Center
                     ) {
                         val itemColor = if (label == "Extract audio") Color(0xFF438BFF)
-                            else if (active == label) KColors.Accent else KColors.Muted
+                            else if (active == label || (label == "Vector" && active == "Masking")) KColors.Accent else KColors.Muted
                         KIcon(icon, itemColor, Modifier.size(22.dp))
                         Text(
                             label,
@@ -704,6 +744,7 @@ private fun ToolEditPanel(
         "Speed" -> PropId.SPEED
         "Volume" -> PropId.VOLUME
         "Blending" -> PropId.OPACITY
+        "Camera" -> editor.selectedProp
         else -> null
     }
     val selectedEffect = layer.effectStack.firstOrNull { it.id == editor.selectedEffectId }
@@ -809,6 +850,7 @@ private fun ToolPanelControls(tool: String, editor: EditorState, layer: Layer, d
             "Effects" -> {
                 EffectControlsPanel(editor, layer, onOpenEffects)
             }
+            "Camera" -> CameraControls(editor, layer)
             "Blend modes" -> {
                 Text("BLEND MODE", color = KColors.Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold)
                 ChoiceStringUnitRow(listOf("Normal" to "Normal", "Multiply" to "Multiply", "Screen" to "Screen", "Add" to "Add"),
@@ -1290,5 +1332,79 @@ private fun LayerMenuRow(icon: IconKind, label: String, rotation: Float = 0f, on
         KIcon(icon, KColors.Muted, Modifier.size(18.dp).rotate(rotation))
         Spacer(Modifier.width(16.dp))
         Text(label, color = KColors.Text, fontSize = 14.sp)
+    }
+}
+
+
+private val CAMERA_LENSES = listOf(15f, 20f, 24f, 35f, 50f, 80f, 135f, 200f)
+
+@Composable
+private fun CameraSettingsDialog(onDismiss: () -> Unit, onCreate: (Boolean, Float) -> Unit) {
+    var twoNode by remember { mutableStateOf(true) }
+    var lens by remember { mutableFloatStateOf(50f) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = KColors.Surface,
+        title = { Text("Camera Settings", color = KColors.Text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("TYPE", color = KColors.Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                ChoiceStringUnitRow(listOf("Two-Node" to "2", "One-Node" to "1"), if (twoNode) "2" else "1") { twoNode = it == "2" }
+                Text("PRESET (LENS)", color = KColors.Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                    CAMERA_LENSES.forEach { mm ->
+                        val selected = lens == mm
+                        Box(Modifier.height(32.dp).widthIn(min = 52.dp).clip(RoundedCornerShape(6.dp))
+                            .background(if (selected) KColors.Accent.copy(alpha = .12f) else KColors.Bg)
+                            .border(1.dp, if (selected) KColors.Accent.copy(alpha = .55f) else KColors.Line, RoundedCornerShape(6.dp))
+                            .clickable { lens = mm }, contentAlignment = Alignment.Center) {
+                            Text("${mm.toInt()}mm", color = if (selected) KColors.Accent else KColors.Text, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                }
+                val angle = Math.toDegrees(2.0 * Math.atan(18.0 / lens)).toFloat()
+                Text(fmt("Zoom %.1f px  ·  Angle of view %.1f\u00B0", cameraZoomForLens(lens), angle), color = KColors.Muted, fontSize = 10.sp)
+            }
+        },
+        confirmButton = { TextButton(onClick = { onCreate(twoNode, cameraZoomForLens(lens)) }) { Text("OK", color = KColors.Accent) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel", color = KColors.Muted) } }
+    )
+}
+
+@Composable
+private fun CameraControls(editor: EditorState, layer: Layer) {
+    val time = rememberEditorDisplayTime(editor)
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+        Text("CAMERA TYPE", color = KColors.Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+        ChoiceStringUnitRow(listOf("Two-Node" to "2", "One-Node" to "1"), if (layer.cameraTwoNode) "2" else "1") {
+            editor.setCameraType(layer.id, it == "2")
+        }
+        Text("LENS PRESET", color = KColors.Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+            val zoom = layer.p(PropId.CAM_ZOOM).valueAt(time)
+            CAMERA_LENSES.forEach { mm ->
+                val z = cameraZoomForLens(mm)
+                val selected = kotlin.math.abs(zoom - z) < 0.5f
+                Box(Modifier.height(30.dp).widthIn(min = 50.dp).clip(RoundedCornerShape(6.dp))
+                    .background(if (selected) KColors.Accent.copy(alpha = .12f) else KColors.Bg)
+                    .border(1.dp, if (selected) KColors.Accent.copy(alpha = .55f) else KColors.Line, RoundedCornerShape(6.dp))
+                    .clickable { editor.setCameraLens(layer.id, z) }, contentAlignment = Alignment.Center) {
+                    Text("${mm.toInt()}mm", color = if (selected) KColors.Accent else KColors.Text, fontSize = 9.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
+        }
+        val angle = Math.toDegrees(2.0 * Math.atan((COMP_W / 2.0) / layer.p(PropId.CAM_ZOOM).valueAt(time).coerceAtLeast(1f))).toFloat()
+        Text(fmt("Angle of view %.1f\u00B0", angle), color = KColors.Muted, fontSize = 9.sp)
+        Text("CAMERA OPTIONS", color = KColors.Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+        PropertyLine("Zoom", editor, layer, listOf(PropId.CAM_ZOOM))
+        Text("TRANSFORM", color = KColors.Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+        if (layer.cameraTwoNode) PropertyLine("Point of Interest", editor, layer, listOf(PropId.CAM_POI_X, PropId.CAM_POI_Y, PropId.CAM_POI_Z))
+        PropertyLine("Position", editor, layer, listOf(PropId.POS_X, PropId.POS_Y, PropId.POS_Z))
+        if (layer.cameraTwoNode) PropertyLine("Roll", editor, layer, listOf(PropId.ROTATION))
+        else PropertyLine("Rotation", editor, layer, listOf(PropId.ROTATION_X, PropId.ROTATION_Y, PropId.ROTATION))
+        Text("DEPTH OF FIELD (stored, not rendered yet)", color = KColors.Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+        PropertyLine("Focus Distance", editor, layer, listOf(PropId.CAM_FOCUS))
+        PropertyLine("Aperture", editor, layer, listOf(PropId.CAM_APERTURE))
+        PropertyLine("Blur Level", editor, layer, listOf(PropId.CAM_BLUR))
     }
 }

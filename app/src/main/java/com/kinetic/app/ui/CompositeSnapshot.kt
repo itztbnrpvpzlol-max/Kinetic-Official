@@ -44,7 +44,7 @@ internal object CompositeSnapshot {
         val paint = Paint(Paint.FILTER_BITMAP_FLAG)
         for (layer in below) {
             if (!layer.visible || !layer.activeAt(time)) continue
-            if (layer.type == LayerType.AUDIO || layer.type == LayerType.NULL || layer.type == LayerType.ADJUSTMENT) continue
+            if (layer.type == LayerType.AUDIO || layer.type == LayerType.NULL || layer.type == LayerType.CAMERA || layer.type == LayerType.ADJUSTMENT) continue
             val piece = piece(layer) ?: continue
             if (piece.bitmap.isRecycled) continue
             paint.alpha = (layer.p(PropId.OPACITY).valueAt(time) * 2.55f).toInt().coerceIn(0, 255)

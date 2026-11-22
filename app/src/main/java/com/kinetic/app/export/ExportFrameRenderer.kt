@@ -64,7 +64,7 @@ internal class ExportFrameRenderer(
         for (layer in ordered) {
             if (!layer.visible || !layer.activeAt(time)) continue
             when (layer.type) {
-                LayerType.AUDIO, LayerType.NULL -> Unit
+                LayerType.AUDIO, LayerType.NULL, LayerType.CAMERA -> Unit
                 LayerType.ADJUSTMENT -> drawAdjustment(layer, time)
                 else -> if (layer.motionBlur && comp.shutterAngle > 0f) {
                     drawMotionBlurLayer(layer, time)

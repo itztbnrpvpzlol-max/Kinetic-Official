@@ -390,6 +390,20 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
     }
 
     fun addNull() = addLayer(newLayer(LayerType.NULL, nextName("Null"), time, remaining(), 100f, 100f))
+    fun addSolid(color: Int = 0xFFFFFFFF.toInt()) {
+        val base = newLayer(LayerType.SHAPE, nextName("Solid"), time, remaining(), COMP_W, COMP_H, color = color)
+        addLayer(base.copy(shapeKind = "Solid"))
+    }
+    fun addCamera(twoNode: Boolean, zoom: Float = CAMERA_DEFAULT_ZOOM): String {
+        val cam = newCamera(nextName("Camera"), time, remaining(), twoNode, zoom)
+        addLayer(cam)
+        return cam.id
+    }
+    fun setCameraType(layerId: String, twoNode: Boolean) = updateLayer(layerId) { it.copy(cameraTwoNode = twoNode) }
+    fun setCameraLens(layerId: String, zoom: Float) {
+        beginEdit()
+        setPropValue(layerId, PropId.CAM_ZOOM, zoom)
+    }
     fun addAdjustment() =
         addLayer(newLayer(LayerType.ADJUSTMENT, nextName("Adjustment Layer"), time, remaining(), COMP_W, COMP_H))
     fun addText() = addLayer(
@@ -868,6 +882,10 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
         val v = when {
             id == PropId.OPACITY -> value.coerceIn(0f, 100f)
             id.isVectorPoint -> value.coerceIn(0f, 1f)
+            id == PropId.CAM_ZOOM -> value.coerceAtLeast(1f)
+            id == PropId.CAM_FOCUS -> value.coerceAtLeast(0f)
+            id == PropId.CAM_APERTURE -> value.coerceAtLeast(0f)
+            id == PropId.CAM_BLUR -> value.coerceIn(0f, 1000f)
             else -> value
         }
         val t = time

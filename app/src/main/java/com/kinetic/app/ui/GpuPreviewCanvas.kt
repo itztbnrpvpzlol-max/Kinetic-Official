@@ -169,7 +169,7 @@ fun PreviewCanvas(
             editor.previewLayers.filter {
                 it.visible && it.activeAt(editor.time) &&
                     it.type != LayerType.AUDIO && it.type != LayerType.NULL &&
-                    it.type != LayerType.ADJUSTMENT
+                    it.type != LayerType.CAMERA && it.type != LayerType.ADJUSTMENT
             }.map { it.id }
         }
     }
@@ -604,7 +604,7 @@ private fun GpuCompositionPreviewCanvas(
     val activeTextTextureIds = HashSet<String>()
     for (layer in editor.previewLayers.asReversed()) {
         if (!layer.visible || !layer.activeAt(editor.time) || layer.type == LayerType.AUDIO ||
-            layer.type == LayerType.NULL || layer.type == LayerType.ADJUSTMENT) continue
+            layer.type == LayerType.NULL || layer.type == LayerType.CAMERA || layer.type == LayerType.ADJUSTMENT) continue
         if (layer.type == LayerType.VIDEO && layer.id in textureVideoIds) {
             val opacity = (layer.p(PropId.OPACITY).valueAt(editor.time) / 100f).coerceIn(0f, 1f)
             val sampleTimes = motionBlurSampleTimes(layer)

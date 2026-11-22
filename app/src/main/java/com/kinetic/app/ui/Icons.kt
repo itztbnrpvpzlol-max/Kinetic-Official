@@ -29,7 +29,7 @@ enum class IconKind {
     LOCK, UNLOCK, SETTINGS, EXPORT, IMPORT, DELETE, CUT, SPLIT, CROP, ROTATE, FLIP,
     COPY, DUPLICATE, TRIM_START, TRIM_END, BRING_TO_PLAYHEAD, EXTEND_TO_PLAYHEAD, MORE, ZOOM_IN, ZOOM_OUT, EFFECTS, FILTER, MASK, BLEND, WAVEFORM, SEARCH,
     BACK, FRAME_BACK, FRAME_FORWARD, SKIP_START, SKIP_END, CLOSE, CHECK, SHARE, FOLDER, HOME, MIC, MUTE, VOLUME, GRID, ALIGN, FIT,
-    FULLSCREEN, DOWNLOAD, UPLOAD, INFO, GRAPH, MOTION, MORE_V, PASTE
+    FULLSCREEN, DOWNLOAD, UPLOAD, INFO, GRAPH, MOTION, MORE_V, PASTE, SOLID, CAMERA, VECTOR
 }
 
 @Composable
@@ -105,6 +105,9 @@ fun KIcon(kind: IconKind, tint: Color, modifier: Modifier = Modifier.size(22.dp)
             IconKind.NULL -> { drawRect(tint,pt(.18f,.18f),Size(w*.64f,h*.64f),style=st); line(pt(.5f,.06f),pt(.5f,.94f)); line(pt(.06f,.5f),pt(.94f,.5f)) }
             IconKind.ADJ -> { outlinedCircle(.5f,.5f,.36f); drawArc(tint,-90f,180f,true,pt(.14f,.14f),Size(w*.72f,h*.72f)) }
             IconKind.TEXT -> { line(pt(.2f,.2f),pt(.8f,.2f)); line(pt(.5f,.2f),pt(.5f,.82f)) }
+            IconKind.SOLID -> drawRect(tint, pt(.16f,.2f), Size(w*.68f,h*.6f))
+            IconKind.CAMERA -> { rect(.08f,.28f,.56f,.44f,.06f); drawPath(poly(true,pt(.66f,.5f),pt(.92f,.3f),pt(.92f,.7f)),tint,style=st) }
+            IconKind.VECTOR -> { drawPath(poly(true,pt(.5f,.1f),pt(.74f,.36f),pt(.5f,.62f),pt(.26f,.36f)),tint,style=st); line(pt(.5f,.62f),pt(.5f,.9f)); outlinedCircle(.5f,.36f,.06f) }
             IconKind.LOCK, IconKind.UNLOCK -> {
                 rect(.2f,.43f,.6f,.46f,.08f)
                 val shackle=Path().apply { moveTo(w*.32f,h*.44f); lineTo(w*.32f,h*.32f); cubicTo(w*.32f,h*.08f,w*.68f,h*.08f,w*.68f,h*.32f); if(kind==IconKind.LOCK) lineTo(w*.68f,h*.44f) else lineTo(w*.58f,h*.44f) }

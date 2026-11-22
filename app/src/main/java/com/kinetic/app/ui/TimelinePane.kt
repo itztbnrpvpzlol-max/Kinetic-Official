@@ -100,6 +100,7 @@ fun clipColor(t: LayerType): Color = when (t) {
     LayerType.ADJUSTMENT -> Color(0xFF7D6CA8)
     LayerType.NULL -> Color(0xFF8C3E3E)
     LayerType.PRECOMP -> Color(0xFF7563B7)
+    LayerType.CAMERA -> Color(0xFF3F7DB5)
 }
 
 fun typeIcon(t: LayerType): IconKind = when (t) {
@@ -111,6 +112,7 @@ fun typeIcon(t: LayerType): IconKind = when (t) {
     LayerType.ADJUSTMENT -> IconKind.ADJ
     LayerType.NULL -> IconKind.NULL
     LayerType.PRECOMP -> IconKind.LAYERS
+    LayerType.CAMERA -> IconKind.CAMERA
 }
 
 @OptIn(kotlinx.coroutines.FlowPreview::class)
@@ -801,7 +803,7 @@ private fun Clip(editor: EditorState, layer: Layer, pps: Float, selected: Boolea
             }
         }
     }
-    val dashed = layer.type == LayerType.ADJUSTMENT || layer.type == LayerType.NULL
+    val dashed = layer.type == LayerType.ADJUSTMENT || layer.type == LayerType.NULL || layer.type == LayerType.CAMERA
     Box(
         Modifier
              .offset(x = leadingPad + (previewStart * pps).dp)
@@ -869,7 +871,7 @@ private fun Clip(editor: EditorState, layer: Layer, pps: Float, selected: Boolea
             Modifier.align(Alignment.CenterStart).padding(start = 12.dp, end = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            KIcon(typeIcon(layer.type), KColors.ClipText, Modifier.size(16.dp))
+            KIcon(if (layer.type == LayerType.SHAPE && layer.shapeKind == "Solid") IconKind.SOLID else typeIcon(layer.type), KColors.ClipText, Modifier.size(16.dp))
             Spacer(Modifier.width(6.dp))
             Text(layer.name, color = KColors.ClipText, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Clip)
         }

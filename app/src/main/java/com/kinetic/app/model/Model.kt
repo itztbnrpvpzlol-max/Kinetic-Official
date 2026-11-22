@@ -25,7 +25,7 @@ fun fmt(f: String, vararg a: Any): String = String.format(Locale.US, f, *a)
 
 enum class LayerType(val label: String) {
     VIDEO("Video"), IMAGE("Image"), AUDIO("Audio"), TEXT("Text"),
-    SHAPE("Shape"), ADJUSTMENT("Adjustment"), NULL("Null"), PRECOMP("Pre-comp")
+    SHAPE("Shape"), ADJUSTMENT("Adjustment"), NULL("Null"), PRECOMP("Pre-comp"), CAMERA("Camera")
 }
 
 /** Transform properties, in After Effects order. scrubStep = value change per dp dragged. */
@@ -48,6 +48,13 @@ enum class PropId(
     OPACITY("Opacity", 0.12f),
     SPEED("Speed", 0.003f),
     VOLUME("Volume", 0.003f),
+    CAM_ZOOM("Zoom", 1f),
+    CAM_POI_X("Point of Interest X", 0.15f),
+    CAM_POI_Y("Point of Interest Y", 0.15f),
+    CAM_POI_Z("Point of Interest Z", 0.15f),
+    CAM_FOCUS("Focus Distance", 1f),
+    CAM_APERTURE("Aperture", 0.1f),
+    CAM_BLUR("Blur Level", 0.12f),
     MASK_OPACITY("Mask Opacity", 0.12f),
     MASK_FEATHER("Mask Feather", 0.08f),
     MASK_EXPANSION("Mask Expansion", 0.08f),
@@ -164,7 +171,8 @@ enum class PropId(
     val isVectorPoint: Boolean get() = vectorPointIndex >= 0
 
     fun format(v: Float): String = when (this) {
-        ANCHOR_X, ANCHOR_Y, POS_X, POS_Y, POS_Z -> fmt("%.1f px", v)
+        ANCHOR_X, ANCHOR_Y, POS_X, POS_Y, POS_Z, CAM_ZOOM, CAM_POI_X, CAM_POI_Y, CAM_POI_Z, CAM_FOCUS, CAM_APERTURE -> fmt("%.1f px", v)
+        CAM_BLUR -> fmt("%.0f%%", v)
         SCALE_X, SCALE_Y -> fmt("%.1f%%", v)
         ROTATION, ROTATION_X, ROTATION_Y -> fmt("%.1f\u00B0", v)
         OPACITY -> fmt("%.0f%%", v)
@@ -373,6 +381,8 @@ data class Layer(
     val height: Float,
     val visible: Boolean = true,
     val is3D: Boolean = false,
+    /** CAMERA layers: two-node cameras look at a point of interest, one-node cameras use orientation only. */
+    val cameraTwoNode: Boolean = true,
     val motionBlur: Boolean = false,
     val parentId: String? = null,
     val scaleLinked: Boolean = true,
@@ -408,6 +418,10 @@ data class Layer(
             PropId.SCALE_X, PropId.SCALE_Y -> 100f
             PropId.OPACITY, PropId.MASK_OPACITY -> 100f
             PropId.SPEED, PropId.VOLUME -> 1f
+            PropId.CAM_ZOOM, PropId.CAM_FOCUS -> CAMERA_DEFAULT_ZOOM
+            PropId.CAM_POI_X -> COMP_W / 2f
+            PropId.CAM_POI_Y -> COMP_H / 2f
+            PropId.CAM_BLUR -> 100f
             else -> if (id.isVectorPoint) 0.5f else 0f
         }
     )
@@ -422,6 +436,12 @@ data class Layer(
 }
 
 const val VECTOR_STROKE = 10f
+
+/** After Effects' default 50mm camera: 39.6 degree angle of view on a 1920px wide comp. */
+val CAMERA_DEFAULT_ZOOM: Float get() = 50f * COMP_W / 36f
+
+/** Zoom (px) for a lens focal length in mm, using AE's 36mm film size. */
+fun cameraZoomForLens(mm: Float): Float = mm * COMP_W / 36f
 
 fun buildVectorPath(
     points: List<VectorPoint>, smooth: List<Boolean>, closed: Boolean, w: Float, h: Float,
@@ -482,6 +502,113 @@ fun newLayer(
     )
 }
 
+fun newCamera(name: String, start: Float, duration: Float, twoNode: Boolean, zoom: Float = CAMERA_DEFAULT_ZOOM): Layer {
+    val base = newLayer(LayerType.CAMERA, name, start, duration, COMP_W, COMP_H)
+    val props = base.props + mapOf(
+        PropId.POS_Z to Prop(-zoom),
+        PropId.CAM_ZOOM to Prop(zoom),
+        PropId.CAM_POI_X to Prop(COMP_W / 2f),
+        PropId.CAM_POI_Y to Prop(COMP_H / 2f),
+        PropId.CAM_POI_Z to Prop(0f),
+        PropId.CAM_FOCUS to Prop(zoom),
+        PropId.CAM_APERTURE to Prop(0f),
+        PropId.CAM_BLUR to Prop(100f)
+    )
+    return base.copy(props = props, cameraTwoNode = twoNode, is3D = true)
+}
+
+// ---------- 3D camera (After Effects style) ----------
+private fun mulM(a: FloatArray, b: FloatArray): FloatArray {
+    val r = FloatArray(16)
+    for (i in 0 until 4) for (j in 0 until 4) {
+        var sum = 0f
+        for (k in 0 until 4) sum += a[i * 4 + k] * b[k * 4 + j]
+        r[i * 4 + j] = sum
+    }
+    return r
+}
+private fun identM() = floatArrayOf(1f,0f,0f,0f, 0f,1f,0f,0f, 0f,0f,1f,0f, 0f,0f,0f,1f)
+private fun transM(x: Float, y: Float, z: Float) = identM().also { it[3] = x; it[7] = y; it[11] = z }
+private fun scaleM(x: Float, y: Float) = identM().also { it[0] = x; it[5] = y }
+private fun rotXM(deg: Float): FloatArray {
+    val r = Math.toRadians(deg.toDouble()); val c = Math.cos(r).toFloat(); val s = Math.sin(r).toFloat()
+    return identM().also { it[5] = c; it[6] = -s; it[9] = s; it[10] = c }
+}
+private fun rotYM(deg: Float): FloatArray {
+    val r = Math.toRadians(deg.toDouble()); val c = Math.cos(r).toFloat(); val s = Math.sin(r).toFloat()
+    return identM().also { it[0] = c; it[2] = s; it[8] = -s; it[10] = c }
+}
+private fun rotZM(deg: Float): FloatArray {
+    val r = Math.toRadians(deg.toDouble()); val c = Math.cos(r).toFloat(); val s = Math.sin(r).toFloat()
+    return identM().also { it[0] = c; it[1] = -s; it[4] = s; it[5] = c }
+}
+
+/** Topmost visible camera layer active at [t], like AE's active camera. */
+fun activeCamera(byId: Map<String, Layer>, t: Float): Layer? =
+    byId.values.firstOrNull { it.type == LayerType.CAMERA && it.visible && it.activeAt(t) }
+
+/** Camera-to-world rotation (columns are the camera's x/y/z axes in world space). */
+private fun cameraRotation(cam: Layer, t: Float): FloatArray {
+    val rx = cam.p(PropId.ROTATION_X).valueAt(t)
+    val ry = cam.p(PropId.ROTATION_Y).valueAt(t)
+    val rz = cam.p(PropId.ROTATION).valueAt(t)
+    if (!cam.cameraTwoNode) return mulM(rotZM(rz), mulM(rotYM(ry), rotXM(rx)))
+    val cx = cam.p(PropId.POS_X).valueAt(t); val cy = cam.p(PropId.POS_Y).valueAt(t); val cz = cam.p(PropId.POS_Z).valueAt(t)
+    var fx = cam.p(PropId.CAM_POI_X).valueAt(t) - cx
+    var fy = cam.p(PropId.CAM_POI_Y).valueAt(t) - cy
+    var fz = cam.p(PropId.CAM_POI_Z).valueAt(t) - cz
+    val fl = Math.sqrt((fx * fx + fy * fy + fz * fz).toDouble()).toFloat()
+    if (fl < 1e-4f) { fx = 0f; fy = 0f; fz = 1f } else { fx /= fl; fy /= fl; fz /= fl }
+    // x = normalize(down x forward); falls back when looking straight up/down
+    var ax = fz; var ay = 0f; var az = -fx
+    var al = Math.sqrt((ax * ax + az * az).toDouble()).toFloat()
+    if (al < 1e-4f) { ax = 1f; ay = 0f; az = 0f; al = 1f }
+    ax /= al; ay /= al; az /= al
+    // y = forward x x
+    val bx = fy * az - fz * ay; val by = fz * ax - fx * az; val bz = fx * ay - fy * ax
+    val base = floatArrayOf(ax, bx, fx, 0f,  ay, by, fy, 0f,  az, bz, fz, 0f,  0f, 0f, 0f, 1f)
+    return mulM(base, rotZM(rz))
+}
+
+/**
+ * Writes into [out] the layer-plane -> screen homography for a 3D layer seen through [cam].
+ * Position/rotation/orientation of the layer and its parent chain are composed in world space.
+ */
+private fun cameraLayerMatrix(layer: Layer, cam: Layer, t: Float, byId: Map<String, Layer>, depth: Int, out: Matrix) {
+    var world = transM(-layer.transformValue(PropId.ANCHOR_X, t, layer.width / 2f),
+        -layer.transformValue(PropId.ANCHOR_Y, t, layer.height / 2f), 0f)
+    world = mulM(scaleM(layer.transformValue(PropId.SCALE_X, t, 100f) / 100f,
+        layer.transformValue(PropId.SCALE_Y, t, 100f) / 100f), world)
+    world = mulM(rotXM(layer.transformValue(PropId.ROTATION_X, t, 0f)), world)
+    world = mulM(rotYM(layer.transformValue(PropId.ROTATION_Y, t, 0f)), world)
+    world = mulM(rotZM(layer.transformValue(PropId.ROTATION, t, 0f)), world)
+    world = mulM(transM(layer.transformValue(PropId.POS_X, t, COMP_W / 2f),
+        layer.transformValue(PropId.POS_Y, t, COMP_H / 2f),
+        layer.transformValue(PropId.POS_Z, t, 0f)), world)
+    val parent = layer.parentId?.let { byId[it] }
+    if (parent != null && parent.id != layer.id && depth < 16) {
+        val pm = Matrix()
+        layerMatrixInto(parent, t, byId.filterValues { it.type != LayerType.CAMERA }, pm, mutableMapOf(), depth + 1)
+        val v = FloatArray(9); pm.getValues(v)
+        val pe = floatArrayOf(v[0], v[1], 0f, v[2],  v[3], v[4], 0f, v[5],  0f, 0f, 1f, 0f,  0f, 0f, 0f, 1f)
+        world = mulM(pe, mulM(transM(parent.transformValue(PropId.ANCHOR_X, t, parent.width / 2f),
+            parent.transformValue(PropId.ANCHOR_Y, t, parent.height / 2f), 0f), world))
+    }
+    val r = cameraRotation(cam, t)
+    val cx = cam.p(PropId.POS_X).valueAt(t); val cy = cam.p(PropId.POS_Y).valueAt(t); val cz = cam.p(PropId.POS_Z).valueAt(t)
+    // view = R^T * T(-C)
+    val rt = floatArrayOf(r[0], r[4], r[8], 0f,  r[1], r[5], r[9], 0f,  r[2], r[6], r[10], 0f,  0f, 0f, 0f, 1f)
+    val view = mulM(rt, transM(-cx, -cy, -cz))
+    val zoom = cam.p(PropId.CAM_ZOOM).valueAt(t).coerceAtLeast(1f)
+    val proj = floatArrayOf(zoom, 0f, COMP_W / 2f, 0f,  0f, zoom, COMP_H / 2f, 0f,  0f, 0f, 0f, 1f,  0f, 0f, 1f, 0f)
+    val m = mulM(proj, mulM(view, world))
+    // layer plane has z = 0: use columns x, y and translation; rows x', y', w
+    out.setValues(floatArrayOf(
+        m[0], m[1], m[3],
+        m[4], m[5], m[7],
+        m[12], m[13], m[15]
+    ))
+}
 
 /**
  * Reuses caller-owned Matrix instances for the CPU preview draw loop.
@@ -498,6 +625,10 @@ fun layerMatrixInto(
     scratch: MutableMap<Int, Matrix>,
     depth: Int = 0
 ) {
+    if (layer.is3D && layer.type != LayerType.CAMERA) {
+        val cam = activeCamera(byId, t)
+        if (cam != null) { cameraLayerMatrix(layer, cam, t, byId, depth, out); return }
+    }
     out.reset()
     out.postTranslate(-layer.transformValue(PropId.ANCHOR_X, t, layer.width / 2f),
         -layer.transformValue(PropId.ANCHOR_Y, t, layer.height / 2f))
@@ -532,6 +663,10 @@ fun layerMatrixInto(
 /** Layer-space -> composition-space matrix at time t, including the parent chain. */
 fun layerMatrix(layer: Layer, t: Float, byId: Map<String, Layer>, depth: Int = 0): Matrix {
     val m = Matrix()
+    if (layer.is3D && layer.type != LayerType.CAMERA) {
+        val cam = activeCamera(byId, t)
+        if (cam != null) { cameraLayerMatrix(layer, cam, t, byId, depth, m); return m }
+    }
     m.postTranslate(-layer.transformValue(PropId.ANCHOR_X, t, layer.width / 2f),
         -layer.transformValue(PropId.ANCHOR_Y, t, layer.height / 2f))
     if (layer.is3D) {
