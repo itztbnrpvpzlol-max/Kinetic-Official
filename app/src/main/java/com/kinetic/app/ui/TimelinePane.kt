@@ -810,7 +810,7 @@ private fun Clip(editor: EditorState, layer: Layer, pps: Float, selected: Boolea
             .padding(vertical = 3.dp)
             .alpha(if (layer.visible) 1f else 0.4f)
             .clip(shape)
-            .background(clipColor(layer.type))
+            .background(if (layer.label != 0) Color(layer.label) else clipColor(layer.type))
             .then(
                 if (dashed) Modifier.drawBehind {
                     drawRoundRect(

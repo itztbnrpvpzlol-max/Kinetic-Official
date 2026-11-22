@@ -222,6 +222,36 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
         if (push) commit(fn) else live(fn)
     }
 
+    fun setLayerLabel(id: String, color: Int) {
+        updateLayer(id) { it.copy(label = color) }
+    }
+
+    fun flipLayer(id: String, horizontal: Boolean) {
+        val prop = if (horizontal) PropId.SCALE_X else PropId.SCALE_Y
+        updateLayer(id) { l ->
+            val p = l.p(prop)
+            l.copy(props = l.props + (prop to p.copy(base = -p.base, keys = p.keys.map { it.copy(v = -it.v) })))
+        }
+    }
+
+    fun fitLayerToCanvas(id: String, fill: Boolean) {
+        val t = time
+        val eps = frame / 2f
+        updateLayer(id) { l ->
+            if (l.width <= 0f || l.height <= 0f) return@updateLayer l
+            val sw = COMP_W / l.width
+            val sh = COMP_H / l.height
+            val k = (if (fill) max(sw, sh) else min(sw, sh)) * 100f
+            fun signed(prop: PropId) = if (l.p(prop).valueAt(t) < 0f) -k else k
+            l.copy(props = l.props + mapOf(
+                PropId.SCALE_X to l.p(PropId.SCALE_X).withValueAt(t, signed(PropId.SCALE_X), eps),
+                PropId.SCALE_Y to l.p(PropId.SCALE_Y).withValueAt(t, signed(PropId.SCALE_Y), eps),
+                PropId.POS_X to l.p(PropId.POS_X).withValueAt(t, COMP_W / 2f, eps),
+                PropId.POS_Y to l.p(PropId.POS_Y).withValueAt(t, COMP_H / 2f, eps)
+            ))
+        }
+    }
+
     fun toggleLayer3D(id: String) {
         updateLayer(id) { it.copy(is3D = !it.is3D) }
     }

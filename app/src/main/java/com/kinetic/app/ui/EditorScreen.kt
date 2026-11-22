@@ -39,6 +39,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.draw.rotate
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalBottomSheet
@@ -573,6 +575,7 @@ private fun TopBar(
             IconButton(onClick = onPrecompose, modifier = Modifier.size(width = 56.dp, height = 56.dp)) {
                 KIcon(IconKind.LAYERS, KColors.Text, Modifier.size(23.dp))
             }
+            editor.selected?.let { LayerOverflowMenu(editor, it) }
         }
         return
     }
@@ -1219,5 +1222,67 @@ private fun ToolItem(label: String, icon: IconKind, modifier: Modifier, onClick:
         KIcon(icon, KColors.ClipText, Modifier.size(24.dp))
         Spacer(Modifier.height(2.dp))
         Text(label, color = KColors.Muted, fontSize = 10.sp, maxLines = 1)
+    }
+}
+
+private val LABEL_COLORS = listOf(
+    0xFFE5483D, 0xFFF39C12, 0xFFA38A00, 0xFF22B14C, 0xFF3C7F99, 0xFF1E88FF, 0xFF6C63E6, 0xFFFF2D55, 0xFF666666
+).map { it.toInt() }
+
+@Composable
+private fun LayerOverflowMenu(editor: EditorState, layer: Layer) {
+    var open by remember { mutableStateOf(false) }
+    val visual = layer.type != LayerType.AUDIO
+    Box {
+        IconButton(onClick = { open = true }, modifier = Modifier.size(width = 56.dp, height = 56.dp)) {
+            KIcon(IconKind.MORE_V, KColors.Text, Modifier.size(23.dp))
+        }
+        DropdownMenu(
+            expanded = open, onDismissRequest = { open = false },
+            modifier = Modifier.width(300.dp).background(KColors.Surface)
+        ) {
+            Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                Text("Label color", color = KColors.Muted, fontSize = 13.sp)
+                Spacer(Modifier.height(10.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    LabelSwatch(null, layer.label == 0) { editor.setLayerLabel(layer.id, 0) }
+                    LABEL_COLORS.forEach { value ->
+                        LabelSwatch(Color(value), layer.label == value) { editor.setLayerLabel(layer.id, value) }
+                    }
+                }
+            }
+            if (visual) {
+                Box(Modifier.fillMaxWidth().height(1.dp).background(KColors.Line))
+                LayerMenuRow(IconKind.FULLSCREEN, "Fill Canvas") { open = false; editor.fitLayerToCanvas(layer.id, true) }
+                LayerMenuRow(IconKind.FIT, "Fit to Canvas") { open = false; editor.fitLayerToCanvas(layer.id, false) }
+                LayerMenuRow(IconKind.FLIP, "Flip Horizontal") { open = false; editor.flipLayer(layer.id, true) }
+                LayerMenuRow(IconKind.FLIP, "Flip Vertical", 90f) { open = false; editor.flipLayer(layer.id, false) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LabelSwatch(color: Color?, selected: Boolean, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(7.dp)
+    Box(
+        Modifier.size(20.dp).clip(shape).background(color ?: KColors.Bg)
+            .border(if (selected) 2.dp else 1.dp, if (selected) Color.White else KColors.Line, shape)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        if (color == null) Text("A", color = KColors.Text, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+@Composable
+private fun LayerMenuRow(icon: IconKind, label: String, rotation: Float = 0f, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 13.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        KIcon(icon, KColors.Muted, Modifier.size(18.dp).rotate(rotation))
+        Spacer(Modifier.width(16.dp))
+        Text(label, color = KColors.Text, fontSize = 14.sp)
     }
 }

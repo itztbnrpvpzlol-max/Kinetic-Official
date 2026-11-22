@@ -29,7 +29,7 @@ enum class IconKind {
     LOCK, UNLOCK, SETTINGS, EXPORT, IMPORT, DELETE, CUT, SPLIT, CROP, ROTATE, FLIP,
     COPY, DUPLICATE, TRIM_START, TRIM_END, BRING_TO_PLAYHEAD, EXTEND_TO_PLAYHEAD, MORE, ZOOM_IN, ZOOM_OUT, EFFECTS, FILTER, MASK, BLEND, WAVEFORM, SEARCH,
     BACK, FRAME_BACK, FRAME_FORWARD, SKIP_START, SKIP_END, CLOSE, CHECK, SHARE, FOLDER, HOME, MIC, MUTE, VOLUME, GRID, ALIGN, FIT,
-    FULLSCREEN, DOWNLOAD, UPLOAD, INFO, GRAPH, MOTION
+    FULLSCREEN, DOWNLOAD, UPLOAD, INFO, GRAPH, MOTION, MORE_V
 }
 
 @Composable
@@ -161,6 +161,7 @@ fun KIcon(kind: IconKind, tint: Color, modifier: Modifier = Modifier.size(22.dp)
                 drawPath(poly(false,pt(.62f,.34f),pt(.78f,.5f),pt(.62f,.66f)),tint,style=st)
                 line(pt(.12f,.3f),pt(.12f,.7f))
             }
+            IconKind.MORE_V -> { filledCircle(.5f,.2f,.07f); filledCircle(.5f,.5f,.07f); filledCircle(.5f,.8f,.07f) }
             IconKind.MORE -> { filledCircle(.2f,.5f,.07f); filledCircle(.5f,.5f,.07f); filledCircle(.8f,.5f,.07f) }
             IconKind.ZOOM_OUT -> { outlinedCircle(.42f,.42f,.27f); line(pt(.62f,.62f),pt(.88f,.88f)); line(pt(.29f,.42f),pt(.55f,.42f)) }
             IconKind.FILTER -> { drawPath(poly(true,pt(.12f,.18f),pt(.88f,.18f),pt(.58f,.52f),pt(.58f,.84f),pt(.42f,.92f),pt(.42f,.52f)),tint,style=st) }

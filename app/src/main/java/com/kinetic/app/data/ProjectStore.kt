@@ -210,7 +210,7 @@ class ProjectStore(context: Context) {
             .put("width", l.width.toDouble()).put("height", l.height.toDouble()).put("visible", l.visible)
             .put("is3D", l.is3D).put("motionBlur", l.motionBlur)
             .put("parentId", l.parentId).put("scaleLinked", l.scaleLinked).put("text", l.text)
-            .put("color", l.color).put("props", props)
+            .put("color", l.color).put("label", l.label).put("props", props)
             .put("effects", JSONArray(l.effects))
             .put("effectStack", JSONArray().also { array ->
                 l.effectStack.forEach { effect ->
@@ -354,6 +354,7 @@ class ProjectStore(context: Context) {
             },
             speed = j.optDouble("speed", 1.0).toFloat().coerceIn(0.1f, 4f),
             volume = j.optDouble("volume", 1.0).toFloat().coerceIn(0f, 2f),
+            label = j.optInt("label", 0),
             maskEnabled = j.optBoolean("maskEnabled", false), blendMode = j.optString("blendMode", "Normal"),
             shapeKind = j.optString("shapeKind", "Rectangle"),
             vectorPoints = (j.optJSONArray("vectorPoints") ?: JSONArray()).let { points -> (0 until points.length()).mapNotNull { index -> points.optJSONObject(index)?.let { point -> VectorPoint(point.optDouble("x", 0.5).toFloat(), point.optDouble("y", 0.5).toFloat()) } } },

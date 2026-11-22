@@ -376,6 +376,7 @@ data class Layer(
     val effectStack: List<EffectInstance> = emptyList(),
     val speed: Float = 1f,
     val volume: Float = 1f,
+    val label: Int = 0,
     val maskEnabled: Boolean = false,
     val blendMode: String = "Normal",
     val shapeKind: String = "Rectangle",
