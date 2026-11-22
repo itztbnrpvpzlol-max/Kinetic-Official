@@ -29,7 +29,7 @@ enum class IconKind {
     LOCK, UNLOCK, SETTINGS, EXPORT, IMPORT, DELETE, CUT, SPLIT, CROP, ROTATE, FLIP,
     COPY, DUPLICATE, TRIM_START, TRIM_END, BRING_TO_PLAYHEAD, EXTEND_TO_PLAYHEAD, MORE, ZOOM_IN, ZOOM_OUT, EFFECTS, FILTER, MASK, BLEND, WAVEFORM, SEARCH,
     BACK, FRAME_BACK, FRAME_FORWARD, SKIP_START, SKIP_END, CLOSE, CHECK, SHARE, FOLDER, HOME, MIC, MUTE, VOLUME, GRID, ALIGN, FIT,
-    FULLSCREEN, DOWNLOAD, UPLOAD, INFO, GRAPH, MOTION, MORE_V
+    FULLSCREEN, DOWNLOAD, UPLOAD, INFO, GRAPH, MOTION, MORE_V, PASTE
 }
 
 @Composable
@@ -130,6 +130,7 @@ fun KIcon(kind: IconKind, tint: Color, modifier: Modifier = Modifier.size(22.dp)
             IconKind.CROP -> { line(pt(.22f,.08f),pt(.22f,.78f)); line(pt(.22f,.78f),pt(.92f,.78f)); line(pt(.08f,.22f),pt(.78f,.22f)); line(pt(.78f,.22f),pt(.78f,.92f)) }
             IconKind.ROTATE -> { drawArc(tint,-35f,285f,true,pt(.12f,.12f),Size(w*.76f,h*.76f),style=st); drawPath(poly(true,pt(.72f,.08f),pt(.9f,.28f),pt(.66f,.3f)),tint) }
             IconKind.FLIP -> { line(pt(.5f,.12f),pt(.5f,.88f)); drawPath(poly(true,pt(.12f,.3f),pt(.42f,.5f),pt(.12f,.7f)),tint,style=st); drawPath(poly(true,pt(.88f,.3f),pt(.58f,.5f),pt(.88f,.7f)),tint,style=st) }
+            IconKind.PASTE -> { rect(.18f,.2f,.64f,.72f); rect(.36f,.08f,.28f,.2f); line(pt(.32f,.5f),pt(.68f,.5f)); line(pt(.32f,.68f),pt(.6f,.68f)) }
             IconKind.COPY -> { rect(.3f,.12f,.56f,.62f); rect(.14f,.28f,.56f,.62f) }
             IconKind.DUPLICATE -> {
                 rect(.34f,.1f,.52f,.58f)

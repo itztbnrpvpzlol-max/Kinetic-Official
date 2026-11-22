@@ -1009,6 +1009,50 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
         return layers.firstOrNull { it.id == layerId }?.effectStack?.any { it.id == effect.id } == true
     }
 
+    var effectClipboard by mutableStateOf<List<EffectInstance>>(emptyList())
+
+    fun copyEffects(layerId: String, effectId: String? = null) {
+        val stack = layers.firstOrNull { it.id == layerId }?.effectStack ?: return
+        effectClipboard = if (effectId == null) stack else stack.filter { it.id == effectId }
+    }
+
+    fun pasteEffects(layerId: String, afterEffectId: String? = null): Boolean {
+        val clip = effectClipboard
+        if (clip.isEmpty() || layers.none { it.id == layerId }) return false
+        val copies = clip.map { it.copy(id = java.util.UUID.randomUUID().toString()) }
+        updateLayer(layerId) { l ->
+            val at = afterEffectId?.let { id -> l.effectStack.indexOfFirst { it.id == id } + 1 }?.takeIf { it > 0 } ?: l.effectStack.size
+            l.copy(effectStack = l.effectStack.take(at) + copies + l.effectStack.drop(at))
+        }
+        return true
+    }
+
+    fun duplicateEffect(layerId: String, effectId: String) {
+        updateLayer(layerId) { l ->
+            val i = l.effectStack.indexOfFirst { it.id == effectId }
+            if (i < 0) l else l.copy(effectStack = l.effectStack.take(i + 1) +
+                l.effectStack[i].copy(id = java.util.UUID.randomUUID().toString()) + l.effectStack.drop(i + 1))
+        }
+    }
+
+    fun moveEffect(layerId: String, effectId: String, delta: Int) {
+        updateLayer(layerId) { l ->
+            val s = l.effectStack.toMutableList()
+            val i = s.indexOfFirst { it.id == effectId }
+            val j = i + delta
+            if (i < 0 || j < 0 || j >= s.size) l else { s.add(j, s.removeAt(i)); l.copy(effectStack = s) }
+        }
+    }
+
+    fun resetEffect(layerId: String, effectId: String) {
+        updateLayer(layerId) { l ->
+            l.copy(effectStack = l.effectStack.map { e ->
+                if (e.id != effectId) e else createEffect(e.effectId)?.copy(id = e.id, enabled = e.enabled) ?: e
+            })
+        }
+        clearEffectParameterSelection()
+    }
+
     fun removeEffect(layerId: String, effectId: String) {
         updateLayer(layerId) { layer -> layer.copy(effectStack = layer.effectStack.filterNot { it.id == effectId }) }
         if (selectedEffectId == effectId) {

@@ -756,6 +756,10 @@ private fun ToolEditPanel(
                         editor.toggleKeyAtTime(layer.id, animatedProp)
                     }
                 }
+                if (tool == "Effects") {
+                    Spacer(Modifier.weight(1f))
+                    EffectRailMenu(editor, layer)
+                }
             }
             Box(Modifier.weight(1f).fillMaxHeight()) {
                 if (showGraph) {
