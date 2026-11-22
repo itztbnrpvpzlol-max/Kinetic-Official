@@ -33,18 +33,7 @@ object EffectKeyframes {
         val span = b.t - a.t
         if (!span.isFinite() || span <= 0.000001f) return b.v
         val u = ((time - a.t) / span).coerceIn(0f, 1f)
-        val p = when (a.type.ordinal) {
-            1 -> 0f
-            2 -> bezier(u, a.x1, a.y1, a.x2, a.y2)
-            3 -> if (u > 0f && u < 1f) 2f.pow(-10f * u) * sin((u * 10f - 0.75f) * (2f * PI.toFloat() / 3f)) + 1f else u
-            4 -> when {
-                u < 1f / 2.75f -> 7.5625f * u * u
-                u < 2f / 2.75f -> { val q = u - 1.5f / 2.75f; 7.5625f * q * q + 0.75f }
-                u < 2.5f / 2.75f -> { val q = u - 2.25f / 2.75f; 7.5625f * q * q + 0.9375f }
-                else -> { val q = u - 2.625f / 2.75f; 7.5625f * q * q + 0.984375f }
-            }
-            else -> u
-        }
+        val p = com.kinetic.app.model.keyProgress(a, u)
         val result = a.v + (b.v - a.v) * p
         return if (result.isFinite()) result else a.v
     }

@@ -292,7 +292,7 @@ enum class PropId(
     }
 }
 
-enum class KeyType { LINEAR, HOLD, BEZIER, ELASTIC, BOUNCE }
+enum class KeyType { LINEAR, HOLD, BEZIER, ELASTIC, BOUNCE, WAVE, STEPS }
 
 /**
  * A keyframe. The segment from this key to the next one is shaped by [type];
@@ -303,7 +303,9 @@ data class Keyframe(
     val v: Float,
     val type: KeyType = KeyType.LINEAR,
     val x1: Float = 0.42f, val y1: Float = 0f,
-    val x2: Float = 0.58f, val y2: Float = 1f
+    val x2: Float = 0.58f, val y2: Float = 1f,
+    /** Type-specific parameters for ELASTIC / BOUNCE / WAVE / STEPS (see [defaultCurveParams]). */
+    val p1: Float = 0f, val p2: Float = 0f
 )
 
 private fun bez(s: Float, a: Float, b: Float): Float {
@@ -376,23 +378,7 @@ data class Prop(val base: Float, val keys: List<Keyframe> = emptyList(), val exp
         val span = b.t - a.t
         if (!span.isFinite() || span <= 0.000001f) return b.v
         val u = ((t - a.t) / span).coerceIn(0f, 1f)
-        val p = when (a.type) {
-            KeyType.HOLD -> 0f
-            KeyType.LINEAR -> u
-            KeyType.BEZIER -> cubicProgress(u, a.x1, a.y1, a.x2, a.y2)
-            KeyType.ELASTIC -> {
-                if (u <= 0f || u >= 1f) u else (2.0.pow(-10.0 * u) * kotlin.math.sin((u * 10.0 - 0.75) * (2.0 * Math.PI / 3.0)) + 1.0).toFloat()
-            }
-            KeyType.BOUNCE -> {
-                val x = u
-                when {
-                    x < 1f / 2.75f -> 7.5625f * x * x
-                    x < 2f / 2.75f -> { val q = x - 1.5f / 2.75f; 7.5625f * q * q + 0.75f }
-                    x < 2.5f / 2.75f -> { val q = x - 2.25f / 2.75f; 7.5625f * q * q + 0.9375f }
-                    else -> { val q = x - 2.625f / 2.75f; 7.5625f * q * q + 0.984375f }
-                }
-            }
-        }
+        val p = keyProgress(a, u)
         val result = a.v + (b.v - a.v) * p
         return result.takeIf { it.isFinite() } ?: a.v
     }

@@ -221,13 +221,21 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
             if (MediaWorkers.isConstrainedDevice) 512 * 1024 else 2 * 1024 * 1024
         )
     }
-    LaunchedEffect(editor.projectPreviewLayers.map { it.id to it.uri }) { audio.prepare(editor.projectPreviewLayers) }
+    // Read the layer list inside snapshotFlow so the whole screen does not recompose on every edit.
+    LaunchedEffect(editor) {
+        snapshotFlow { editor.projectPreviewLayers.map { it.id to it.uri } }
+            .distinctUntilChanged()
+            .collect { audio.prepare(editor.projectPreviewLayers) }
+    }
 
     // Preview frames are prepared once during media import and read from disk.
 
-    LaunchedEffect(editor.projectLayers, editor.duration, editor.compSettings, editor.projectName, editor.beatMarkers) {
-        delay(400)
-        withContext(Dispatchers.IO) { runCatching { projectStore.save(editor) } }
+    LaunchedEffect(editor) {
+        snapshotFlow { listOf(editor.projectLayers, editor.duration, editor.compSettings, editor.projectName, editor.beatMarkers) }
+            .collectLatest {
+                delay(600)
+                withContext(Dispatchers.IO) { runCatching { projectStore.save(editor) } }
+            }
     }
 
     LaunchedEffect(editor.playing, editor.duration, editor.settings.loop, editor.fps) {

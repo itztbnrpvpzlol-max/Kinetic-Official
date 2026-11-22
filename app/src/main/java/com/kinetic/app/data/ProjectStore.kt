@@ -182,7 +182,8 @@ class ProjectStore(context: Context) {
             val keys = JSONArray()
             p.keys.forEach { k -> keys.put(JSONObject().put("t", k.t.toDouble()).put("v", k.v.toDouble())
                 .put("type", k.type.name).put("x1", k.x1.toDouble()).put("y1", k.y1.toDouble())
-                .put("x2", k.x2.toDouble()).put("y2", k.y2.toDouble())) }
+                .put("x2", k.x2.toDouble()).put("y2", k.y2.toDouble())
+                .put("p1", k.p1.toDouble()).put("p2", k.p2.toDouble())) }
             val pj = JSONObject().put("base", p.base.toDouble()).put("keys", keys)
             p.expression?.let { pj.put("expression", it) }
             props.put(id.name, pj)
@@ -224,7 +225,8 @@ class ProjectStore(context: Context) {
                             keys.forEach { key ->
                                 keyArray.put(JSONObject().put("t", key.t.toDouble()).put("v", key.v.toDouble())
                                     .put("type", key.type.name).put("x1", key.x1.toDouble()).put("y1", key.y1.toDouble())
-                                    .put("x2", key.x2.toDouble()).put("y2", key.y2.toDouble()))
+                                    .put("x2", key.x2.toDouble()).put("y2", key.y2.toDouble())
+                                    .put("p1", key.p1.toDouble()).put("p2", key.p2.toDouble()))
                             }
                         })
                     }
@@ -269,7 +271,8 @@ class ProjectStore(context: Context) {
                 Keyframe(k.optDouble("t").toFloat(), k.optDouble("v").toFloat(),
                     runCatching { KeyType.valueOf(k.optString("type", "LINEAR")) }.getOrDefault(KeyType.LINEAR),
                     k.optDouble("x1", 0.42).toFloat(), k.optDouble("y1", 0.0).toFloat(),
-                    k.optDouble("x2", 0.58).toFloat(), k.optDouble("y2", 1.0).toFloat())
+                    k.optDouble("x2", 0.58).toFloat(), k.optDouble("y2", 1.0).toFloat(),
+                    k.optDouble("p1", 0.0).toFloat(), k.optDouble("p2", 0.0).toFloat())
             }
             Prop(p.optDouble("base", 0.0).toFloat(), keys, p.optString("expression").takeIf { it.isNotBlank() })
         }
@@ -348,7 +351,8 @@ class ProjectStore(context: Context) {
                             Keyframe(key.optDouble("t").toFloat(), key.optDouble("v").toFloat(),
                                 runCatching { KeyType.valueOf(key.optString("type", "LINEAR")) }.getOrDefault(KeyType.LINEAR),
                                 key.optDouble("x1", 0.42).toFloat(), key.optDouble("y1", 0.0).toFloat(),
-                                key.optDouble("x2", 0.58).toFloat(), key.optDouble("y2", 1.0).toFloat())
+                                key.optDouble("x2", 0.58).toFloat(), key.optDouble("y2", 1.0).toFloat(),
+                                key.optDouble("p1", 0.0).toFloat(), key.optDouble("p2", 0.0).toFloat())
                         }.sortedBy { it.t }
                         if (keys.isNotEmpty()) parameterKeys[parameter] = keys
                     }

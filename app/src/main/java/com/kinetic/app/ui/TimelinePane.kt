@@ -443,7 +443,7 @@ private fun LayerRow(
                     contentAlignment = Alignment.Center
                 ) { KIcon(IconKind.HANDLE, KColors.Dim) }
                 Box(
-                    Modifier.size(32.dp).pointerInput(layer.id, editor.layers) {
+                    Modifier.size(32.dp).pointerInput(layer.id) {
                         detectDragGesturesAfterLongPress(
                             onDragStart = { parentDrag = 0f; parentDragX = 0f; isParentDragging = true },
                             onDragEnd = {

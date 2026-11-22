@@ -4,24 +4,54 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Text
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -30,26 +60,78 @@ import com.kinetic.app.model.EditorState
 import com.kinetic.app.model.KeyType
 import com.kinetic.app.model.Keyframe
 import com.kinetic.app.model.Layer
-import com.kinetic.app.model.PropId
 import com.kinetic.app.model.Prop
-import com.kinetic.app.model.cubicProgress
+import com.kinetic.app.model.PropId
+import com.kinetic.app.model.defaultCurveParams
+import com.kinetic.app.model.keyProgress
+import kotlinx.coroutines.delay
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 
 private enum class GraphMode { EASE, VALUE, SPEED }
+
 private data class GraphPreset(
     val label: String, val type: KeyType,
-    val x1: Float, val y1: Float, val x2: Float, val y2: Float
+    val x1: Float = 0.42f, val y1: Float = 0f, val x2: Float = 0.58f, val y2: Float = 1f,
+    val p1: Float = 0f, val p2: Float = 0f
+) {
+    fun asKey() = Keyframe(0f, 0f, type, x1, y1, x2, y2, p1, p2)
+}
+
+private val GreenHandle = Color(0xFF42D982)
+private val OrangeHandle = Color(0xFFFFB45B)
+
+private val curveTypes = listOf(
+    KeyType.BEZIER to "Bezier", KeyType.ELASTIC to "Elastic", KeyType.BOUNCE to "Bounce",
+    KeyType.WAVE to "Wave", KeyType.STEPS to "Steps"
 )
 
-private val graphPresets = listOf(
-    GraphPreset("Linear", KeyType.LINEAR, 1f / 3f, 1f / 3f, 2f / 3f, 2f / 3f),
-    GraphPreset("Ease In", KeyType.BEZIER, 0.42f, 0f, 1f, 1f),
-    GraphPreset("Easy Ease", KeyType.BEZIER, 0.3333f, 0f, 0.6667f, 1f),
-    GraphPreset("Ease Out", KeyType.BEZIER, 0f, 0f, 0.58f, 1f),
-    GraphPreset("In / Out", KeyType.BEZIER, 0.42f, 0f, 0.58f, 1f)
+private val presetsByType: Map<KeyType, List<GraphPreset>> = mapOf(
+    KeyType.BEZIER to listOf(
+        GraphPreset("Linear", KeyType.LINEAR),
+        GraphPreset("Ease In", KeyType.BEZIER, 0.42f, 0f, 1f, 1f),
+        GraphPreset("Ease Out", KeyType.BEZIER, 0f, 0f, 0.58f, 1f),
+        GraphPreset("Easy Ease", KeyType.BEZIER, 0.42f, 0f, 0.58f, 1f),
+        GraphPreset("Strong In", KeyType.BEZIER, 0.64f, 0f, 0.78f, 0f),
+        GraphPreset("Strong Out", KeyType.BEZIER, 0.22f, 1f, 0.36f, 1f),
+        GraphPreset("Back Out", KeyType.BEZIER, 0.34f, 1.56f, 0.64f, 1f),
+        GraphPreset("Anticipate", KeyType.BEZIER, 0.36f, 0f, 0.66f, -0.56f),
+        GraphPreset("Hold", KeyType.HOLD)
+    ),
+    KeyType.ELASTIC to listOf(
+        GraphPreset("Soft", KeyType.ELASTIC, p1 = 0.6f, p2 = 2.2f),
+        GraphPreset("Classic", KeyType.ELASTIC, p1 = 1f, p2 = 3f),
+        GraphPreset("Springy", KeyType.ELASTIC, p1 = 1.4f, p2 = 4.5f),
+        GraphPreset("Wild", KeyType.ELASTIC, p1 = 2.2f, p2 = 7f)
+    ),
+    KeyType.BOUNCE to listOf(
+        GraphPreset("Light", KeyType.BOUNCE, p1 = 2f, p2 = 0.25f),
+        GraphPreset("Ball", KeyType.BOUNCE, p1 = 3f, p2 = 0.35f),
+        GraphPreset("Rubber", KeyType.BOUNCE, p1 = 5f, p2 = 0.5f),
+        GraphPreset("Endless", KeyType.BOUNCE, p1 = 8f, p2 = 0.65f)
+    ),
+    KeyType.WAVE to listOf(
+        GraphPreset("Ripple", KeyType.WAVE, p1 = 1f, p2 = 0.12f),
+        GraphPreset("Sway", KeyType.WAVE, p1 = 2f, p2 = 0.18f),
+        GraphPreset("Shake", KeyType.WAVE, p1 = 4f, p2 = 0.1f),
+        GraphPreset("Swell", KeyType.WAVE, p1 = 1.5f, p2 = 0.3f)
+    ),
+    KeyType.STEPS to listOf(
+        GraphPreset("3 Steps", KeyType.STEPS, p1 = 3f),
+        GraphPreset("5 Steps", KeyType.STEPS, p1 = 5f),
+        GraphPreset("8 Steps", KeyType.STEPS, p1 = 8f),
+        GraphPreset("Stair Up", KeyType.STEPS, p1 = 4f, p2 = 1f)
+    )
 )
+
+/** Presets the user saved with the + button (kept while the app is open). */
+private val userPresets = mutableStateListOf<GraphPreset>()
+
+private fun Keyframe.family(): KeyType = when (type) {
+    KeyType.LINEAR, KeyType.HOLD -> KeyType.BEZIER
+    else -> type
+}
 
 private fun graphSegment(keys: List<Keyframe>, selected: Int): Int =
     if (keys.size < 2) -1 else when {
@@ -58,163 +140,61 @@ private fun graphSegment(keys: List<Keyframe>, selected: Int): Int =
         else -> 0
     }
 
+// ---------------------------------------------------------------------------------------------
+// Panels
+// ---------------------------------------------------------------------------------------------
+
 @Composable
 fun GraphPanel(editor: EditorState, layer: Layer, modifier: Modifier = Modifier) {
     val currentLayer = editor.layers.firstOrNull { it.id == layer.id } ?: layer
-    val graphItems = buildList {
-        listOf(PropId.POS_X, PropId.POS_Y, PropId.POS_Z).forEach { id ->
-            if (currentLayer.p(id).keys.isNotEmpty()) add(id.label to id)
-        }
-        if (currentLayer.scaleLinked) {
-            if (currentLayer.p(PropId.SCALE_X).keys.isNotEmpty() || currentLayer.p(PropId.SCALE_Y).keys.isNotEmpty()) {
-                add("Scale" to (if (currentLayer.p(PropId.SCALE_X).keys.isNotEmpty()) PropId.SCALE_X else PropId.SCALE_Y))
+    val graphItems = remember(currentLayer.props, currentLayer.scaleLinked, editor.selectedProp) {
+        val keyed = currentLayer.props.filter { it.value.keys.isNotEmpty() }.keys
+        buildList {
+            listOf(PropId.POS_X, PropId.POS_Y, PropId.POS_Z).forEach { id -> if (id in keyed) add(id.label to id) }
+            if (currentLayer.scaleLinked) {
+                if (PropId.SCALE_X in keyed || PropId.SCALE_Y in keyed) add("Scale" to (if (PropId.SCALE_X in keyed) PropId.SCALE_X else PropId.SCALE_Y))
+            } else {
+                if (PropId.SCALE_X in keyed) add("Scale X" to PropId.SCALE_X)
+                if (PropId.SCALE_Y in keyed) add("Scale Y" to PropId.SCALE_Y)
             }
-        } else {
-            if (currentLayer.p(PropId.SCALE_X).keys.isNotEmpty()) add("Scale X" to PropId.SCALE_X)
-            if (currentLayer.p(PropId.SCALE_Y).keys.isNotEmpty()) add("Scale Y" to PropId.SCALE_Y)
-        }
-        PropId.values().filter { id ->
-            id !in setOf(PropId.POS_X, PropId.POS_Y, PropId.POS_Z, PropId.SCALE_X, PropId.SCALE_Y) &&
-                currentLayer.p(id).keys.isNotEmpty()
-        }.forEach { add(it.label to it) }
-        val selectedTrack = editor.selectedProp
-        if (selectedTrack != null && none { it.second == selectedTrack }) {
-            add(selectedTrack.label to selectedTrack)
+            val skip = setOf(PropId.POS_X, PropId.POS_Y, PropId.POS_Z, PropId.SCALE_X, PropId.SCALE_Y)
+            keyed.filter { it !in skip }.sortedBy { it.ordinal }.forEach { add(it.label to it) }
+            val sel = editor.selectedProp
+            if (sel != null && none { it.second == sel }) add(sel.label to sel)
         }
     }
     val selected = editor.selectedProp?.let { selectedProp ->
         graphItems.firstOrNull { item ->
-            item.second == selectedProp ||
-                (item.first == "Scale" && selectedProp in setOf(PropId.SCALE_X, PropId.SCALE_Y))
+            item.second == selectedProp || (item.first == "Scale" && selectedProp in setOf(PropId.SCALE_X, PropId.SCALE_Y))
         }?.second
     } ?: graphItems.firstOrNull()?.second ?: PropId.OPACITY
     var mode by remember(layer.id) { mutableStateOf(GraphMode.EASE) }
-    val prop = currentLayer.p(selected)
-    val keys = prop.keys
+    val keys = currentLayer.p(selected).keys
     val segment = graphSegment(keys, editor.selectedKey)
-    val segmentKey = keys.getOrNull(segment)
-    val hasBezier = segmentKey?.type == KeyType.BEZIER
 
     Column(modifier.fillMaxSize().background(KColors.Surface)) {
-        Row(
-            Modifier.fillMaxWidth().height(34.dp).padding(horizontal = 8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+        GraphHeader(mode, { mode = it }) {
             if (graphItems.size > 1) {
-                Row(
-                    Modifier.weight(1f).horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(5.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
+                Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
                     graphItems.forEach { (label, id) ->
                         val active = id == selected
-                        Box(
-                            Modifier.clip(RoundedCornerShape(6.dp))
-                                .background(if (active) KColors.Accent.copy(alpha = 0.16f) else KColors.Bg)
-                                .border(1.dp, if (active) KColors.Accent.copy(alpha = 0.6f) else KColors.Line, RoundedCornerShape(6.dp))
-                                .clickable { editor.selectProp(id) }
-                                .padding(horizontal = 8.dp, vertical = 5.dp)
-                        ) {
+                        Box(Modifier.clip(RoundedCornerShape(6.dp))
+                            .background(if (active) KColors.Accent.copy(alpha = 0.16f) else KColors.Bg)
+                            .border(1.dp, if (active) KColors.Accent.copy(alpha = 0.6f) else KColors.Line, RoundedCornerShape(6.dp))
+                            .clickable { editor.selectProp(id) }.padding(horizontal = 8.dp, vertical = 5.dp)) {
                             Text(label, color = if (active) KColors.Accent else KColors.Muted, fontSize = 9.sp)
                         }
                     }
                 }
-                Spacer(Modifier.width(6.dp))
-            } else {
-                Spacer(Modifier.weight(1f))
-            }
-            GraphModeButton("Ease", mode == GraphMode.EASE) { mode = GraphMode.EASE }
-            Spacer(Modifier.width(4.dp))
-            GraphModeButton("Value", mode == GraphMode.VALUE) { mode = GraphMode.VALUE }
-            Spacer(Modifier.width(4.dp))
-            GraphModeButton("Speed", mode == GraphMode.SPEED) { mode = GraphMode.SPEED }
+            } else Spacer(Modifier.weight(1f))
         }
-
         if (keys.size < 2) {
-            Box(Modifier.weight(1f).fillMaxWidth().padding(18.dp), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(7.dp)) {
-                    Text(
-                        if (keys.isEmpty()) "No keyframes on ${selected.label}" else "Add a second keyframe to shape a transition",
-                        color = KColors.Text, fontSize = 13.sp, textAlign = TextAlign.Center
-                    )
-                    Text("Add another keyframe from the timeline or the diamond control.",
-                        color = KColors.Muted, fontSize = 10.sp, textAlign = TextAlign.Center)
-                }
-            }
+            NoCurveHint(if (keys.isEmpty()) "No keyframes on ${selected.label}" else "Add a second keyframe to shape a transition")
         } else {
-            Row(Modifier.weight(1f).fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                GraphCanvas(
-                    modifier = Modifier.weight(1f).fillMaxHeight()
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(KColors.Bg),
-                    mode = mode,
-                    keys = keys,
-                    segment = segment,
-                    valueAt = { t -> currentLayer.p(selected).valueAt(t) },
-                    layer = currentLayer,
-                    onBeginEdit = { editor.beginEdit() },
-                    onHandleChange = { handle, x, y ->
-                        if (segment in 0 until keys.lastIndex) {
-                            val key = keys[segment]
-                            val updated = when (handle) {
-                                1 -> key.copy(type = KeyType.BEZIER,
-                                    x1 = x.coerceIn(0f, 1f),
-                                    y1 = y.coerceIn(0f, 1f))
-                                else -> key.copy(type = KeyType.BEZIER,
-                                    x2 = x.coerceIn(0f, 1f),
-                                    y2 = y.coerceIn(0f, 1f))
-                            }
-                            editor.replaceKey(layer.id, selected, segment, updated, push = false)
-
-                        }
-                    },
-                    onKeyValueChange = { index, value ->
-                        if (index in keys.indices) {
-                            editor.replaceKey(layer.id, selected, index, keys[index].copy(v = value), push = false)
-
-                        }
-                    }
-                )
-
-                if (mode == GraphMode.EASE) {
-                    Column(
-                        Modifier.width(74.dp).fillMaxHeight()
-                            .clip(RoundedCornerShape(9.dp)).background(KColors.Bg)
-                            .border(1.dp, KColors.Line, RoundedCornerShape(9.dp))
-                            .verticalScroll(rememberScrollState()).padding(5.dp),
-                        verticalArrangement = Arrangement.spacedBy(5.dp)
-                    ) {
-                        Text("PRESETS", color = KColors.Muted, fontSize = 8.sp, fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(start = 3.dp, top = 2.dp))
-                        graphPresets.forEach { preset ->
-                            GraphPresetChip(preset, segmentKey?.let {
-                                it.type == preset.type &&
-                                    (preset.type == KeyType.LINEAR ||
-                                        (abs(it.x1 - preset.x1) < 0.025f && abs(it.y1 - preset.y1) < 0.025f &&
-                                         abs(it.x2 - preset.x2) < 0.025f && abs(it.y2 - preset.y2) < 0.025f))
-                            } == true) {
-                                if (segment >= 0) {
-                                    editor.beginEdit()
-                                    val updated = keys[segment].copy(type = preset.type, x1 = preset.x1, y1 = preset.y1,
-                                        x2 = preset.x2, y2 = preset.y2)
-                                    editor.replaceKey(layer.id, selected, segment, updated, push = false)
-
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            Text(
-                when (mode) {
-                    GraphMode.EASE -> if (hasBezier) "Drag either control point to shape the curve." else "Choose a preset, then drag its control points."
-                    GraphMode.VALUE -> "Drag a keyframe point vertically to change its value."
-                    GraphMode.SPEED -> "Speed is derived from the selected segment's value curve."
-                },
-                color = KColors.Muted, fontSize = 9.sp,
-                modifier = Modifier.fillMaxWidth().height(20.dp).padding(horizontal = 10.dp, vertical = 2.dp),
-                maxLines = 1
+            CurveEditor(
+                keys = keys, segment = segment, mode = mode, modifier = Modifier.weight(1f).fillMaxWidth(),
+                onBeginEdit = { editor.beginEdit() },
+                onKeyChange = { index, key -> editor.replaceKey(layer.id, selected, index, key, push = false) }
             )
         }
     }
@@ -223,345 +203,539 @@ fun GraphPanel(editor: EditorState, layer: Layer, modifier: Modifier = Modifier)
 @Composable
 fun EffectGraphPanel(editor: EditorState, layer: Layer, modifier: Modifier = Modifier) {
     val effect = layer.effectStack.firstOrNull { it.id == editor.selectedEffectId }
-    val spec = effect?.let { selected ->
-        controlsFor(selected).firstOrNull { it.key == editor.selectedEffectParameter }
-    }
+    val spec = effect?.let { selected -> controlsFor(selected).firstOrNull { it.key == editor.selectedEffectParameter } }
     if (effect == null || spec == null) {
         Box(modifier.fillMaxSize().background(KColors.Surface), contentAlignment = Alignment.Center) {
-            Text("Select an effect property to edit its animation curve.",
-                color = KColors.Muted, fontSize = 10.sp)
+            Text("Select an effect property to edit its animation curve.", color = KColors.Muted, fontSize = 10.sp)
         }
         return
     }
-    val liveEffect = editor.layers.firstOrNull { it.id == layer.id }
-        ?.effectStack?.firstOrNull { it.id == effect.id } ?: effect
+    val liveEffect = editor.layers.firstOrNull { it.id == layer.id }?.effectStack?.firstOrNull { it.id == effect.id } ?: effect
     val keys = liveEffect.parameterKeys[spec.key].orEmpty()
     var mode by remember(effect.id, spec.key) { mutableStateOf(GraphMode.EASE) }
     val graphSelection = editor.selectedEffectKey.takeIf { it in keys.indices } ?: 0
     val segment = graphSegment(keys, graphSelection)
-    val segmentKey = keys.getOrNull(segment)
-    val hasBezier = segmentKey?.type == KeyType.BEZIER
-    val valueAt: (Float) -> Float = { t ->
-        Prop(liveEffect.parameters[spec.key] ?: spec.default, keys).valueAt(t)
-    }
 
     Column(modifier.fillMaxSize().background(KColors.Surface)) {
-        Row(Modifier.fillMaxWidth().height(34.dp).padding(horizontal = 8.dp),
-            verticalAlignment = Alignment.CenterVertically) {
-            Text(effect.name + " · " + spec.label, color = KColors.Text, fontSize = 10.sp,
-                fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f),
-                maxLines = 1)
-            GraphModeButton("Ease", mode == GraphMode.EASE) { mode = GraphMode.EASE }
-            Spacer(Modifier.width(4.dp))
-            GraphModeButton("Value", mode == GraphMode.VALUE) { mode = GraphMode.VALUE }
-            Spacer(Modifier.width(4.dp))
-            GraphModeButton("Speed", mode == GraphMode.SPEED) { mode = GraphMode.SPEED }
+        GraphHeader(mode, { mode = it }) {
+            Text(effect.name + " · " + spec.label, color = KColors.Text, fontSize = 10.sp, fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.weight(1f), maxLines = 1)
         }
         if (keys.isNotEmpty()) {
-            Row(
-                Modifier.fillMaxWidth().height(30.dp).horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(5.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
+            Row(Modifier.fillMaxWidth().height(30.dp).horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
                 keys.forEachIndexed { index, key ->
-                    val selectedKey = index == graphSelection
-                    Box(
-                        Modifier.clip(RoundedCornerShape(6.dp))
-                            .background(if (selectedKey) KColors.Accent.copy(alpha = 0.16f) else KColors.Bg)
-                            .border(1.dp, if (selectedKey) KColors.Accent else KColors.Line, RoundedCornerShape(6.dp))
-                            .clickable { editor.selectEffectKey(index) }
-                            .padding(horizontal = 8.dp, vertical = 5.dp)
-                    ) {
-                        Text("K" + (index + 1) + " · " +
-                            String.format(java.util.Locale.US, "%.2fs", key.t),
-                            color = if (selectedKey) KColors.Accent else KColors.Muted,
-                            fontSize = 8.sp, fontWeight = FontWeight.SemiBold)
+                    val sel = index == graphSelection
+                    Box(Modifier.clip(RoundedCornerShape(6.dp)).background(if (sel) KColors.Accent.copy(alpha = 0.16f) else KColors.Bg)
+                        .border(1.dp, if (sel) KColors.Accent else KColors.Line, RoundedCornerShape(6.dp))
+                        .clickable { editor.selectEffectKey(index) }.padding(horizontal = 8.dp, vertical = 5.dp)) {
+                        Text("K" + (index + 1) + " · " + String.format(java.util.Locale.US, "%.2fs", key.t),
+                            color = if (sel) KColors.Accent else KColors.Muted, fontSize = 8.sp, fontWeight = FontWeight.SemiBold)
                     }
                 }
             }
         }
-
         if (keys.size < 2) {
-            Box(Modifier.weight(1f).fillMaxWidth().padding(18.dp), contentAlignment = Alignment.Center) {
-                Text(if (keys.isEmpty()) "No keyframes on " + spec.label
-                    else "Add a second keyframe to shape a transition",
-                    color = KColors.Text, fontSize = 13.sp, textAlign = TextAlign.Center)
-            }
+            NoCurveHint(if (keys.isEmpty()) "No keyframes on " + spec.label else "Add a second keyframe to shape a transition")
         } else {
-            Row(Modifier.weight(1f).fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                GraphCanvas(
-                    modifier = Modifier.weight(1f).fillMaxHeight()
-                        .clip(RoundedCornerShape(10.dp)).background(KColors.Bg),
-                    mode = mode,
-                    keys = keys,
-                    segment = segment,
-                    valueAt = valueAt,
-                    layer = layer,
-                    onBeginEdit = { editor.beginEdit() },
-                    onHandleChange = { handle, x, y ->
-                        if (segment in 0 until keys.lastIndex) {
-                            val key = keys[segment]
-                            val updated = if (handle == 1) key.copy(type = KeyType.BEZIER,
-                                x1 = x.coerceIn(0f, 1f), y1 = y.coerceIn(0f, 1f))
-                            else key.copy(type = KeyType.BEZIER,
-                                x2 = x.coerceIn(0f, 1f), y2 = y.coerceIn(0f, 1f))
-                            editor.replaceEffectParameterKey(layer.id, effect.id, spec.key, segment, updated)
-                        }
-                    },
-                    onKeyValueChange = { index, value ->
-                        if (index in keys.indices) {
-                            editor.replaceEffectParameterKey(layer.id, effect.id, spec.key,
-                                index, keys[index].copy(v = value))
-                        }
-                    }
-                )
-                if (mode == GraphMode.EASE) {
-                    Column(
-                        Modifier.width(74.dp).fillMaxHeight().clip(RoundedCornerShape(9.dp))
-                            .background(KColors.Bg).border(1.dp, KColors.Line, RoundedCornerShape(9.dp))
-                            .verticalScroll(rememberScrollState()).padding(5.dp),
-                        verticalArrangement = Arrangement.spacedBy(5.dp)
-                    ) {
-                        Text("PRESETS", color = KColors.Muted, fontSize = 8.sp,
-                            fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 3.dp, top = 2.dp))
-                        graphPresets.forEach { preset ->
-                            GraphPresetChip(preset, segmentKey?.let {
-                                it.type == preset.type &&
-                                    (preset.type == KeyType.LINEAR ||
-                                        (abs(it.x1 - preset.x1) < 0.025f && abs(it.y1 - preset.y1) < 0.025f &&
-                                         abs(it.x2 - preset.x2) < 0.025f && abs(it.y2 - preset.y2) < 0.025f))
-                            } == true) {
-                                if (segment >= 0) {
-                                    editor.beginEdit()
-                                    val updated = keys[segment].copy(type = preset.type,
-                                        x1 = preset.x1, y1 = preset.y1, x2 = preset.x2, y2 = preset.y2)
-                                    editor.replaceEffectParameterKey(layer.id, effect.id, spec.key, segment, updated)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            Text(
-                when (mode) {
-                    GraphMode.EASE -> if (hasBezier) "Drag either control point to shape the curve."
-                        else "Choose a preset, then drag its control points."
-                    GraphMode.VALUE -> "Drag a keyframe point vertically to change its value."
-                    GraphMode.SPEED -> "Speed is derived from the selected segment's value curve."
-                },
-                color = KColors.Muted, fontSize = 9.sp,
-                modifier = Modifier.fillMaxWidth().height(20.dp).padding(horizontal = 10.dp, vertical = 2.dp),
-                maxLines = 1
+            CurveEditor(
+                keys = keys, segment = segment, mode = mode, modifier = Modifier.weight(1f).fillMaxWidth(),
+                onBeginEdit = { editor.beginEdit() },
+                onKeyChange = { index, key -> editor.replaceEffectParameterKey(layer.id, effect.id, spec.key, index, key) }
             )
         }
     }
 }
 
 @Composable
-private fun GraphModeButton(label: String, selected: Boolean, onClick: () -> Unit) {
-    Box(
-        Modifier.clip(RoundedCornerShape(7.dp))
-            .background(if (selected) KColors.Accent.copy(alpha = 0.17f) else KColors.Bg)
-            .border(1.dp, if (selected) KColors.Accent.copy(alpha = 0.65f) else KColors.Line, RoundedCornerShape(7.dp))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 10.dp, vertical = 6.dp)
-    ) {
-        Text(label, color = if (selected) KColors.Accent else KColors.Muted, fontSize = 9.sp, fontWeight = FontWeight.SemiBold)
-    }
-}
-
-@Composable
-private fun GraphPresetChip(preset: GraphPreset, selected: Boolean, onClick: () -> Unit) {
-    Column(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(7.dp))
-            .background(if (selected) KColors.Accent.copy(alpha = 0.16f) else KColors.Surface)
-            .border(1.dp, if (selected) KColors.Accent else KColors.Line, RoundedCornerShape(7.dp))
-            .clickable(onClick = onClick).padding(vertical = 4.dp, horizontal = 2.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(3.dp)
-    ) {
-        Canvas(Modifier.fillMaxWidth().height(18.dp).padding(horizontal = 5.dp)) {
-            val path = Path()
-            val left = 1.dp.toPx()
-            val right = size.width - left
-            val top = 2.dp.toPx()
-            val bottom = size.height - top
-            for (i in 0..24) {
-                val u = i / 24f
-                val v = if (preset.type == KeyType.LINEAR) u else cubicProgress(u, preset.x1, preset.y1, preset.x2, preset.y2)
-                val p = Offset(left + (right - left) * u, bottom - (bottom - top) * v)
-                if (i == 0) path.moveTo(p.x, p.y) else path.lineTo(p.x, p.y)
+private fun GraphHeader(mode: GraphMode, onMode: (GraphMode) -> Unit, left: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit) {
+    Row(Modifier.fillMaxWidth().height(34.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        left()
+        Spacer(Modifier.width(6.dp))
+        listOf(GraphMode.EASE to "Ease", GraphMode.VALUE to "Value", GraphMode.SPEED to "Speed").forEachIndexed { i, (m, label) ->
+            if (i > 0) Spacer(Modifier.width(4.dp))
+            Box(Modifier.clip(RoundedCornerShape(7.dp))
+                .background(if (mode == m) KColors.Accent.copy(alpha = 0.17f) else KColors.Bg)
+                .border(1.dp, if (mode == m) KColors.Accent.copy(alpha = 0.65f) else KColors.Line, RoundedCornerShape(7.dp))
+                .clickable { onMode(m) }.padding(horizontal = 10.dp, vertical = 6.dp)) {
+                Text(label, color = if (mode == m) KColors.Accent else KColors.Muted, fontSize = 9.sp, fontWeight = FontWeight.SemiBold)
             }
-            drawPath(path, if (selected) KColors.Accent else KColors.Text,
-                style = Stroke(1.7.dp.toPx(), cap = StrokeCap.Round))
         }
-        Text(preset.label, color = if (selected) KColors.Accent else KColors.Text,
-            fontSize = 7.sp, maxLines = 1, textAlign = TextAlign.Center)
     }
 }
 
 @Composable
-private fun GraphCanvas(
-    modifier: Modifier,
-    mode: GraphMode,
-    keys: List<Keyframe>,
-    segment: Int,
-    valueAt: (Float) -> Float,
-    layer: Layer,
-    onBeginEdit: () -> Unit,
-    onHandleChange: (Int, Float, Float) -> Unit,
-    onKeyValueChange: (Int, Float) -> Unit
+private fun NoCurveHint(text: String) {
+    Box(Modifier.fillMaxSize().padding(18.dp), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(7.dp)) {
+            Text(text, color = KColors.Text, fontSize = 13.sp, textAlign = TextAlign.Center)
+            Text("Add another keyframe from the timeline or the diamond control.", color = KColors.Muted, fontSize = 10.sp, textAlign = TextAlign.Center)
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Curve editor: canvas + type picker + presets. Edits are applied locally while dragging and
+// pushed to the project at ~30 Hz so the rest of the UI is not recomposed on every touch event.
+// ---------------------------------------------------------------------------------------------
+
+@Composable
+private fun CurveEditor(
+    keys: List<Keyframe>, segment: Int, mode: GraphMode, modifier: Modifier,
+    onBeginEdit: () -> Unit, onKeyChange: (Int, Keyframe) -> Unit
 ) {
-    val latestHandleChange by rememberUpdatedState(onHandleChange)
-    val latestValueChange by rememberUpdatedState(onKeyValueChange)
-    val latestBeginEdit by rememberUpdatedState(onBeginEdit)
+    val haptic = LocalHapticFeedback.current
+    var dragKeys by remember { mutableStateOf<List<Keyframe>?>(null) }
+    var activeHandle by remember { mutableStateOf(0) }
+    var lastCommit by remember { mutableLongStateOf(0L) }
+    var dirtyIndex by remember { mutableStateOf(0) }
     val latestKeys by rememberUpdatedState(keys)
-    val latestValueAt by rememberUpdatedState(valueAt)
-    val minValue = keys.minOfOrNull { it.v } ?: 0f
-    val maxValue = keys.maxOfOrNull { it.v } ?: 1f
-    val valueSpan = (maxValue - minValue).let { if (it < 0.0001f) max(abs(maxValue) * 0.2f, 1f) else it }
-    val valueLow = minValue - valueSpan * 0.18f
-    val valueHigh = maxValue + valueSpan * 0.18f
-    val latestValueLow by rememberUpdatedState(valueLow)
-    val latestValueHigh by rememberUpdatedState(valueHigh)
+    val latestOnKeyChange by rememberUpdatedState(onKeyChange)
+    val latestOnBegin by rememberUpdatedState(onBeginEdit)
+    val shown = dragKeys ?: keys
+    val seg = segment.coerceIn(0, shown.lastIndex - 1)
+    val a = shown[seg]
+    var typeMenu by remember { mutableStateOf(false) }
 
-    Canvas(
-        modifier.clipToBounds().pointerInput(mode, segment) {
-            var activeHandle = 0
-            var activeKey = -1
-            val pad = 10.dp.toPx()
-            val inset = 0f
-            val left = pad + inset
-            val right = size.width - pad - inset
-            val top = pad + inset
-            val bottom = size.height - pad - inset
-            val width = (right - left).coerceAtLeast(1f)
-            val height = (bottom - top).coerceAtLeast(1f)
-
-            detectDragGestures(
-                onDragStart = { point ->
-                    activeHandle = 0
-                    activeKey = -1
-                    val currentKeys = latestKeys
-                    if (segment !in 0 until currentKeys.lastIndex) return@detectDragGestures
-
-                    if (mode == GraphMode.EASE && currentKeys[segment].type == KeyType.BEZIER) {
-                        val key = currentKeys[segment]
-                        val p1 = Offset(left + width * key.x1, bottom - height * key.y1.coerceIn(0f, 1f))
-                        val p2 = Offset(left + width * key.x2, bottom - height * key.y2.coerceIn(0f, 1f))
-                        val d1 = (point - p1).getDistance()
-                        val d2 = (point - p2).getDistance()
-                        val hit = 52.dp.toPx()
-                        if (min(d1, d2) <= hit) activeHandle = if (d1 <= d2) 1 else 2
-                    } else if (mode == GraphMode.VALUE) {
-                        val low = latestValueLow
-                        val high = latestValueHigh
-                        val p0 = Offset(left, bottom - height * ((currentKeys[segment].v - low) / (high - low)))
-                        val p1 = Offset(right, bottom - height * ((currentKeys[segment + 1].v - low) / (high - low)))
-                        val d0 = (point - p0).getDistance()
-                        val d1 = (point - p1).getDistance()
-                        if (min(d0, d1) <= 52.dp.toPx()) activeKey = if (d0 <= d1) segment else segment + 1
-                    }
-                    if (activeHandle != 0 || activeKey >= 0) latestBeginEdit()
-                },
-                onDragEnd = { activeHandle = 0; activeKey = -1 },
-                onDragCancel = { activeHandle = 0; activeKey = -1 }
-            ) { change, _ ->
-                if (activeHandle == 0 && activeKey < 0) return@detectDragGestures
-                change.consume()
-                val nx = ((change.position.x - left) / width).coerceIn(0f, 1f)
-                if (activeHandle != 0) {
-                    val ny = (1f - (change.position.y - top) / height).coerceIn(0f, 1f)
-                    latestHandleChange(activeHandle, nx, ny)
-                } else {
-                    val normalized = (1f - (change.position.y - top) / height).coerceIn(0f, 1f)
-                    latestValueChange(activeKey, latestValueLow + normalized * (latestValueHigh - latestValueLow))
-                }
-            }
-        }
-    ) {
-        val pad = 10.dp.toPx()
-        val inset = 0f
-        val left = pad + inset
-        val right = size.width - pad - inset
-        val top = pad + inset
-        val bottom = size.height - pad - inset
-        val width = (right - left).coerceAtLeast(1f)
-        val height = (bottom - top).coerceAtLeast(1f)
-        val grid = KColors.Line.copy(alpha = 0.72f)
-
-        for (i in 0..4) {
-            val x = left + width * i / 4f
-            val y = top + height * i / 4f
-            drawLine(grid, Offset(x, top), Offset(x, bottom), 1.dp.toPx())
-            drawLine(grid, Offset(left, y), Offset(right, y), 1.dp.toPx())
-        }
-
-        if (segment in 0 until keys.lastIndex) {
-            val a = keys[segment]
-            val b = keys[segment + 1]
-            val path = Path()
-            for (i in 0..140) {
-                val u = i / 140f
-                val y = when (mode) {
-                    GraphMode.EASE -> if (a.type == KeyType.LINEAR) u else cubicProgress(u, a.x1, a.y1.coerceIn(0f, 1f), a.x2, a.y2.coerceIn(0f, 1f)).coerceIn(0f, 1f)
-                    GraphMode.VALUE -> {
-                        val t = a.t + (b.t - a.t) * u
-                        val value = latestValueAt(t)
-                        ((value - valueLow) / (valueHigh - valueLow)).coerceIn(-0.25f, 1.25f)
-                    }
-                    GraphMode.SPEED -> {
-                        val t = a.t + (b.t - a.t) * u
-                        val dt = max((b.t - a.t) / 500f, 0.0005f)
-                        val before = latestValueAt((t - dt).coerceAtLeast(a.t))
-                        val after = latestValueAt((t + dt).coerceAtMost(b.t))
-                        val speed = abs(after - before) / max(2f * dt, 0.0001f)
-                        val base = abs(b.v - a.v) / max(b.t - a.t, 0.001f)
-                        (speed / max(base * 3f, 1f)).coerceIn(0f, 1f)
-                    }
-                }
-                val p = Offset(left + width * u, bottom - height * y)
-                if (i == 0) path.moveTo(p.x, p.y) else path.lineTo(p.x, p.y)
-            }
-            drawPath(path, Color.White, style = Stroke(2.5.dp.toPx(), cap = StrokeCap.Round))
-
-            if (mode == GraphMode.EASE) {
-                val start = Offset(left, bottom)
-                val end = Offset(right, top)
-                if (a.type == KeyType.BEZIER) {
-                    val c1 = Offset(left + width * a.x1, bottom - height * a.y1.coerceIn(0f, 1f))
-                    val c2 = Offset(left + width * a.x2, bottom - height * a.y2.coerceIn(0f, 1f))
-                    drawLine(Color(0xFF42D982), start, c1, 2.dp.toPx(), cap = StrokeCap.Round)
-                    drawLine(Color(0xFFFFB45B), end, c2, 2.dp.toPx(), cap = StrokeCap.Round)
-                    drawCircle(Color(0xFF42D982).copy(alpha = 0.18f), 16.dp.toPx(), c1)
-                    drawCircle(Color(0xFFFFB45B).copy(alpha = 0.18f), 16.dp.toPx(), c2)
-                    drawCircle(Color(0xFF42D982), 8.dp.toPx(), c1)
-                    drawCircle(Color(0xFFFFB45B), 8.dp.toPx(), c2)
-                    drawCircle(Color.White, 3.dp.toPx(), c1)
-                    drawCircle(Color.White, 3.dp.toPx(), c2)
-                }
-                drawCircle(KColors.Accent, 6.dp.toPx(), start)
-                drawCircle(Color.White, 6.dp.toPx(), end)
-                if (a.type == KeyType.LINEAR) drawLine(Color(0x557F8791), start, end, 1.dp.toPx())
-            } else {
-                val startY = if (mode == GraphMode.VALUE)
-                    bottom - height * ((a.v - valueLow) / (valueHigh - valueLow)) else bottom
-                val endY = if (mode == GraphMode.VALUE)
-                    bottom - height * ((b.v - valueLow) / (valueHigh - valueLow)) else bottom
-                drawCircle(KColors.Accent, 7.dp.toPx(), Offset(left, startY))
-                drawCircle(Color.White, 7.dp.toPx(), Offset(right, endY))
-                if (mode == GraphMode.VALUE) {
-                    drawLine(KColors.Accent.copy(alpha = 0.5f), Offset(left, startY), Offset(left, bottom), 1.dp.toPx())
-                    drawLine(Color.White.copy(alpha = 0.35f), Offset(right, endY), Offset(right, bottom), 1.dp.toPx())
-                }
-            }
-        } else {
-            drawLine(Color.White.copy(alpha = 0.55f), Offset(left, bottom), Offset(right, top), 2.dp.toPx())
-        }
-
-        drawLine(KColors.Muted.copy(alpha = 0.75f), Offset(left, bottom), Offset(right, bottom), 1.dp.toPx())
-        drawLine(KColors.Muted.copy(alpha = 0.75f), Offset(left, top), Offset(left, bottom), 1.dp.toPx())
+    fun applyLive(index: Int, key: Keyframe, force: Boolean = false) {
+        dirtyIndex = index
+        dragKeys = (dragKeys ?: latestKeys).toMutableList().also { it[index] = key }
+        val now = System.nanoTime()
+        if (force || now - lastCommit > 30_000_000L) { lastCommit = now; latestOnKeyChange(index, key) }
     }
+
+    // Parameter scrubbing has no "end" callback: once edits stop, commit the final value and drop the local copy.
+    LaunchedEffect(dragKeys, activeHandle) {
+        val local = dragKeys
+        if (local != null && activeHandle == 0) {
+            delay(150)
+            if (dirtyIndex in local.indices) latestOnKeyChange(dirtyIndex, local[dirtyIndex])
+            dragKeys = null
+        }
+    }
+    fun applyDiscrete(key: Keyframe) {
+        onBeginEdit()
+        dragKeys = null
+        onKeyChange(seg, key)
+    }
+
+    val latestShown by rememberUpdatedState(shown)
+    val latestSeg by rememberUpdatedState(seg)
+    val latestMode by rememberUpdatedState(mode)
+
+    Row(modifier, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+        Box(Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(12.dp)).background(KColors.Bg)) {
+            // ---- canvas
+            Canvas(Modifier.fillMaxSize().clipToBounds().pointerInput(Unit) {
+                val pad = 16.dp.toPx()
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    val ks = latestShown
+                    val s = latestSeg
+                    if (s !in 0 until ks.lastIndex) return@awaitEachGesture
+                    val g = GraphGeometry(size.width.toFloat(), size.height.toFloat(), pad, ks, s, latestMode)
+                    var handle = 0
+                    var valueIndex = -1
+                    val key = ks[s]
+                    val hit = 46.dp.toPx()
+                    if (latestMode == GraphMode.EASE && (key.family() == KeyType.BEZIER)) {
+                        val h = easeHandles(key)
+                        val p1 = g.pt(h[0], h[1]); val p2 = g.pt(h[2], h[3])
+                        val d1 = (down.position - p1).getDistance(); val d2 = (down.position - p2).getDistance()
+                        if (min(d1, d2) <= hit) handle = if (d1 <= d2) 1 else 2
+                    } else if (latestMode == GraphMode.VALUE) {
+                        val p0 = g.valuePt(0f, ks[s].v); val p1 = g.valuePt(1f, ks[s + 1].v)
+                        val d0 = (down.position - p0).getDistance(); val d1 = (down.position - p1).getDistance()
+                        if (min(d0, d1) <= hit) valueIndex = if (d0 <= d1) s else s + 1
+                    }
+                    if (handle == 0 && valueIndex < 0) return@awaitEachGesture
+                    down.consume()
+                    latestOnBegin()
+                    activeHandle = handle
+                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    var base = key
+                    if (handle != 0 && key.type != KeyType.BEZIER) {
+                        val h = easeHandles(key)
+                        base = key.copy(type = KeyType.BEZIER, x1 = h[0], y1 = h[1], x2 = h[2], y2 = h[3])
+                    }
+                    fun move(pos: Offset, force: Boolean) {
+                        if (handle != 0) {
+                            val nx = ((pos.x - g.left) / g.w).coerceIn(0f, 1f)
+                            val ny = g.unY(pos.y).coerceIn(EASE_LO + 0.05f, EASE_HI - 0.05f)
+                            // gentle snapping to the 0 / 1 rails and thirds
+                            val sy = snap(ny, floatArrayOf(0f, 1f), 0.035f)
+                            val sx = snap(nx, floatArrayOf(0f, 1f / 3f, 0.5f, 2f / 3f, 1f), 0.02f)
+                            val updated = if (handle == 1) base.copy(x1 = sx, y1 = sy) else base.copy(x2 = sx, y2 = sy)
+                            applyLive(s, updated, force)
+                            base = updated
+                        } else {
+                            val v = g.unValue(pos.y)
+                            applyLive(valueIndex, latestShown[valueIndex].copy(v = v), force)
+                        }
+                    }
+                    move(down.position, false)
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        val ch = event.changes.firstOrNull { it.id == down.id } ?: break
+                        if (!ch.pressed) { ch.consume(); break }
+                        ch.consume()
+                        move(ch.position, false)
+                    }
+                    val finalKeys = dragKeys
+                    if (finalKeys != null) {
+                        val idx = if (handle != 0) s else valueIndex
+                        latestOnKeyChange(idx, finalKeys[idx])
+                    }
+                    dragKeys = null
+                    activeHandle = 0
+                }
+            }) {
+                drawCurveScene(shown, seg, mode, activeHandle)
+            }
+
+            // ---- overlays
+            if (mode == GraphMode.EASE) {
+                val family = a.family()
+                Box(Modifier.align(Alignment.TopStart).padding(8.dp)) {
+                    Row(Modifier.clip(RoundedCornerShape(9.dp)).background(KColors.Surface.copy(alpha = 0.92f))
+                        .border(1.dp, KColors.Line, RoundedCornerShape(9.dp)).clickable { typeMenu = true }
+                        .padding(horizontal = 9.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        CurveGlyph(a, true, Modifier.size(width = 18.dp, height = 12.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text(curveTypes.first { it.first == family }.second, color = KColors.Text, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                        Spacer(Modifier.width(4.dp))
+                        KIcon(IconKind.CHEVRON_DOWN, KColors.Muted, Modifier.size(10.dp))
+                    }
+                    DropdownMenu(expanded = typeMenu, onDismissRequest = { typeMenu = false }, containerColor = KColors.Surface) {
+                        curveTypes.forEach { (type, label) ->
+                            DropdownMenuItem(
+                                leadingIcon = { CurveGlyph(typeSample(type), type == family, Modifier.size(width = 22.dp, height = 14.dp)) },
+                                text = { Text(label, color = if (type == family) KColors.Accent else KColors.Text, fontSize = 13.sp,
+                                    fontWeight = if (type == family) FontWeight.SemiBold else FontWeight.Normal) },
+                                onClick = {
+                                    typeMenu = false
+                                    if (type != family) applyDiscrete(switchType(a, type))
+                                }
+                            )
+                        }
+                    }
+                }
+                Text(formulaText(a), color = KColors.Muted, fontSize = 8.sp, maxLines = 1,
+                    modifier = Modifier.align(Alignment.TopEnd).padding(top = 12.dp, end = 10.dp))
+                if (family != KeyType.BEZIER) {
+                    ParamChips(a, Modifier.align(Alignment.BottomCenter).padding(bottom = 8.dp),
+                        onBegin = onBeginEdit, onLive = { applyLive(seg, it) }, onDone = { dragKeys = null; onKeyChange(seg, it) })
+                }
+            } else {
+                Text(if (mode == GraphMode.VALUE) "Drag the end points up or down to change their values"
+                    else "Speed follows the value curve of this segment",
+                    color = KColors.Muted, fontSize = 8.sp, maxLines = 1, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 6.dp))
+            }
+        }
+
+        if (mode == GraphMode.EASE) {
+            PresetColumn(a, Modifier.width(78.dp).fillMaxHeight()) { applyDiscrete(it) }
+        }
+    }
+}
+
+private fun switchType(from: Keyframe, type: KeyType): Keyframe = when (type) {
+    KeyType.BEZIER -> if (from.family() == KeyType.BEZIER) from else from.copy(type = KeyType.BEZIER, x1 = 0.42f, y1 = 0f, x2 = 0.58f, y2 = 1f)
+    else -> { val (p1, p2) = defaultCurveParams(type); from.copy(type = type, p1 = p1, p2 = p2) }
+}
+
+private fun typeSample(type: KeyType): Keyframe = when (type) {
+    KeyType.BEZIER -> Keyframe(0f, 0f, KeyType.BEZIER, 0.42f, 0f, 0.58f, 1f)
+    else -> { val (p1, p2) = defaultCurveParams(type); Keyframe(0f, 0f, type, p1 = p1, p2 = p2) }
+}
+
+private fun snap(v: Float, targets: FloatArray, tol: Float): Float {
+    for (t in targets) if (abs(v - t) <= tol) return t
+    return v
+}
+
+/** Bezier control points of a segment key; straight segments expose the handles of a straight line. */
+private fun easeHandles(k: Keyframe): FloatArray =
+    if (k.type == KeyType.BEZIER) floatArrayOf(k.x1, k.y1, k.x2, k.y2)
+    else floatArrayOf(1f / 3f, 1f / 3f, 2f / 3f, 2f / 3f)
+
+private fun fmt2(v: Float) = String.format(java.util.Locale.US, "%.2f", v)
+
+private fun formulaText(k: Keyframe): String = when (k.type) {
+    KeyType.BEZIER -> "cubic-bezier(${fmt2(k.x1)}, ${fmt2(k.y1)}, ${fmt2(k.x2)}, ${fmt2(k.y2)})"
+    KeyType.LINEAR -> "linear"
+    KeyType.HOLD -> "hold"
+    KeyType.ELASTIC -> "elastic(${fmt2(if (k.p1 > 0f) k.p1 else 1f)}, ${fmt2(if (k.p2 > 0f) k.p2 else 3f)})"
+    KeyType.BOUNCE -> if (k.p1 > 0f) "bounce(${k.p1.toInt()}, ${fmt2(k.p2)})" else "bounce"
+    KeyType.WAVE -> "wave(${fmt2(if (k.p1 > 0f) k.p1 else 2f)}, ${fmt2(k.p2)})"
+    KeyType.STEPS -> "steps(${(if (k.p1 > 0f) k.p1 else 5f).toInt()}, ${if (k.p2 >= 0.5f) "start" else "end"})"
+}
+
+// ---------------------------------------------------------------------------------------------
+// Parameter chips (Elastic / Bounce / Wave / Steps)
+// ---------------------------------------------------------------------------------------------
+
+private data class ParamSpec(val label: String, val min: Float, val max: Float, val step: Float, val format: String, val index: Int)
+
+private fun paramSpecs(type: KeyType): List<ParamSpec> = when (type) {
+    KeyType.ELASTIC -> listOf(ParamSpec("Amplitude", 0.1f, 3f, 0.012f, "%.2f", 1), ParamSpec("Oscillation", 1f, 10f, 0.04f, "%.1f", 2))
+    KeyType.BOUNCE -> listOf(ParamSpec("Bounces", 1f, 10f, 0.05f, "%.0f", 1), ParamSpec("Bounciness", 0.05f, 0.9f, 0.004f, "%.2f", 2))
+    KeyType.WAVE -> listOf(ParamSpec("Cycles", 0.5f, 10f, 0.05f, "%.1f", 1), ParamSpec("Amplitude", 0f, 0.5f, 0.002f, "%.2f", 2))
+    KeyType.STEPS -> listOf(ParamSpec("Steps", 2f, 24f, 0.08f, "%.0f", 1))
+    else -> emptyList()
+}
+
+@Composable
+private fun ParamChips(k: Keyframe, modifier: Modifier, onBegin: () -> Unit, onLive: (Keyframe) -> Unit, onDone: (Keyframe) -> Unit) {
+    val specs = paramSpecs(k.type)
+    val latestKey by rememberUpdatedState(k)
+    Row(modifier, horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+        specs.forEach { spec ->
+            val value = if (spec.index == 1) k.p1 else k.p2
+            val shownValue = if (value <= 0f && spec.index == 1) defaultCurveParams(k.type).first else if (value <= 0f && spec.index == 2 && k.type != KeyType.STEPS) defaultCurveParams(k.type).second else value
+            Row(Modifier.clip(RoundedCornerShape(9.dp)).background(KColors.Surface.copy(alpha = 0.94f))
+                .border(1.dp, KColors.Line, RoundedCornerShape(9.dp)).padding(start = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(spec.label, color = KColors.Muted, fontSize = 8.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.width(4.dp))
+                ScrubValueBar("", shownValue, Modifier.width(58.dp).height(28.dp), step = spec.step, minValue = spec.min, maxValue = spec.max,
+                    valueFormat = spec.format, onScrubStart = onBegin,
+                    onValueChange = { v ->
+                        val cur = latestKey
+                        val seeded = if (cur.p1 <= 0f) cur.copy(p1 = defaultCurveParams(cur.type).first, p2 = if (cur.type == KeyType.STEPS) cur.p2 else defaultCurveParams(cur.type).second) else cur
+                        onLive(if (spec.index == 1) seeded.copy(p1 = v) else seeded.copy(p2 = v))
+                    })
+            }
+        }
+        if (k.type == KeyType.STEPS) {
+            Row(Modifier.clip(RoundedCornerShape(9.dp)).background(KColors.Surface.copy(alpha = 0.94f))
+                .border(1.dp, KColors.Line, RoundedCornerShape(9.dp)), verticalAlignment = Alignment.CenterVertically) {
+                listOf("End" to 0f, "Start" to 1f).forEach { (label, mode) ->
+                    val on = (k.p2 >= 0.5f) == (mode >= 0.5f)
+                    Box(Modifier.height(28.dp).clip(RoundedCornerShape(9.dp)).background(if (on) KColors.Accent.copy(alpha = 0.2f) else Color.Transparent)
+                        .clickable { onBegin(); onDone(latestKey.copy(p1 = if (latestKey.p1 <= 0f) 5f else latestKey.p1, p2 = mode)) }
+                        .padding(horizontal = 9.dp), contentAlignment = Alignment.Center) {
+                        Text(label, color = if (on) KColors.Accent else KColors.Muted, fontSize = 9.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Presets
+// ---------------------------------------------------------------------------------------------
+
+@Composable
+private fun PresetColumn(a: Keyframe, modifier: Modifier, onPick: (Keyframe) -> Unit) {
+    val family = a.family()
+    val list = (presetsByType[family] ?: emptyList()) + userPresets.filter { p ->
+        (if (p.type == KeyType.LINEAR || p.type == KeyType.HOLD) KeyType.BEZIER else p.type) == family
+    }
+    Column(modifier.clip(RoundedCornerShape(12.dp)).background(KColors.Bg).border(1.dp, KColors.Line, RoundedCornerShape(12.dp))
+        .verticalScroll(rememberScrollState()).padding(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("PRESETS", color = KColors.Muted, fontSize = 8.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            Box(Modifier.size(22.dp).clip(CircleShape).background(KColors.Surface).clickable {
+                userPresets.add(GraphPreset("Custom ${userPresets.size + 1}", a.type, a.x1, a.y1, a.x2, a.y2, a.p1, a.p2))
+            }, contentAlignment = Alignment.Center) { KIcon(IconKind.PLUS, KColors.Text, Modifier.size(12.dp)) }
+        }
+        list.forEach { preset ->
+            val selected = presetMatches(a, preset)
+            val isUser = preset in userPresets
+            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(9.dp))
+                .background(if (selected) KColors.Accent.copy(alpha = 0.14f) else KColors.Surface)
+                .border(1.dp, if (selected) KColors.Accent else KColors.Line, RoundedCornerShape(9.dp))
+                .pointerInput(preset) {
+                    detectTapGestures(
+                        onTap = { onPick(a.copy(type = preset.type, x1 = preset.x1, y1 = preset.y1, x2 = preset.x2, y2 = preset.y2, p1 = preset.p1, p2 = preset.p2)) },
+                        onLongPress = { if (isUser) userPresets.remove(preset) }
+                    )
+                }.padding(vertical = 5.dp, horizontal = 3.dp),
+                horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                CurveGlyph(preset.asKey(), selected, Modifier.fillMaxWidth().height(22.dp).padding(horizontal = 6.dp))
+                Text(preset.label, color = if (selected) KColors.Accent else KColors.Text, fontSize = 8.sp, maxLines = 1, textAlign = TextAlign.Center)
+            }
+        }
+    }
+}
+
+private fun presetMatches(a: Keyframe, p: GraphPreset): Boolean {
+    if (a.type != p.type) return false
+    return when (p.type) {
+        KeyType.LINEAR, KeyType.HOLD -> true
+        KeyType.BEZIER -> abs(a.x1 - p.x1) < 0.02f && abs(a.y1 - p.y1) < 0.02f && abs(a.x2 - p.x2) < 0.02f && abs(a.y2 - p.y2) < 0.02f
+        else -> abs(a.p1 - p.p1) < 0.05f && abs(a.p2 - p.p2) < 0.02f
+    }
+}
+
+/** Tiny static curve preview used by presets and the type menu. */
+@Composable
+private fun CurveGlyph(key: Keyframe, highlighted: Boolean, modifier: Modifier) {
+    Canvas(modifier) {
+        val n = 28
+        var lo = 0f; var hi = 1f
+        val ys = FloatArray(n + 1) { keyProgress(key, it / n.toFloat()) }
+        for (y in ys) { lo = min(lo, y); hi = max(hi, y) }
+        val path = Path()
+        val padY = 2.dp.toPx()
+        for (i in 0..n) {
+            val x = size.width * i / n
+            val y = size.height - padY - (size.height - 2 * padY) * ((ys[i] - lo) / (hi - lo))
+            if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+        }
+        drawPath(path, if (highlighted) KColors.Accent else KColors.Text, style = Stroke(1.6.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Drawing
+// ---------------------------------------------------------------------------------------------
+
+private const val EASE_LO = -0.5f
+private const val EASE_HI = 1.5f
+
+private class GraphGeometry(
+    width: Float, height: Float, pad: Float, keys: List<Keyframe>, segment: Int, val mode: GraphMode
+) {
+    val left = pad
+    val right = width - pad
+    val top = pad
+    val bottom = height - pad
+    val w = (right - left).coerceAtLeast(1f)
+    val h = (bottom - top).coerceAtLeast(1f)
+    var valueLow = 0f
+    var valueHigh = 1f
+    var easeLo = EASE_LO
+    var easeHi = EASE_HI
+
+    init {
+        if (segment in 0 until keys.lastIndex) {
+            val a = keys[segment]; val b = keys[segment + 1]
+            val lo = min(a.v, b.v); val hi = max(a.v, b.v)
+            val span = (hi - lo).let { if (it < 0.0001f) max(abs(hi) * 0.2f, 1f) else it }
+            valueLow = lo - span * 0.25f
+            valueHigh = hi + span * 0.25f
+            if (a.type != KeyType.BEZIER && a.type != KeyType.LINEAR && a.type != KeyType.HOLD) {
+                var mn = 0f; var mx = 1f
+                for (i in 0..60) { val y = keyProgress(a, i / 60f); mn = min(mn, y); mx = max(mx, y) }
+                easeLo = min(EASE_LO, mn - 0.1f); easeHi = max(EASE_HI, mx + 0.1f)
+            }
+        }
+    }
+
+    fun pt(nx: Float, ny: Float) = Offset(left + w * nx, bottom - h * (ny - easeLo) / (easeHi - easeLo))
+    fun unY(py: Float) = easeLo + (bottom - py) / h * (easeHi - easeLo)
+    fun valuePt(nx: Float, v: Float) = Offset(left + w * nx, bottom - h * ((v - valueLow) / (valueHigh - valueLow)))
+    fun unValue(py: Float) = valueLow + ((bottom - py) / h) * (valueHigh - valueLow)
+}
+
+private fun DrawScope.drawCurveScene(keys: List<Keyframe>, seg: Int, mode: GraphMode, activeHandle: Int) {
+    if (seg !in 0 until keys.lastIndex) return
+    val pad = 16.dp.toPx()
+    val g = GraphGeometry(size.width, size.height, pad, keys, seg, mode)
+    val a = keys[seg]; val b = keys[seg + 1]
+    val accent = KColors.Accent
+
+    // ---- grid
+    val gridMinor = KColors.Line.copy(alpha = 0.5f)
+    for (i in 0..4) {
+        val x = g.left + g.w * i / 4f
+        drawLine(gridMinor, Offset(x, g.top), Offset(x, g.bottom), 1.dp.toPx())
+    }
+    if (mode == GraphMode.EASE) {
+        val dash = PathEffect.dashPathEffect(floatArrayOf(5.dp.toPx(), 4.dp.toPx()))
+        for (rail in floatArrayOf(0f, 1f)) {
+            val y = g.pt(0f, rail).y
+            drawLine(KColors.Muted.copy(alpha = 0.55f), Offset(g.left, y), Offset(g.right, y), 1.dp.toPx(), pathEffect = dash)
+        }
+        for (q in floatArrayOf(0.25f, 0.5f, 0.75f)) {
+            val y = g.pt(0f, q).y
+            drawLine(gridMinor, Offset(g.left, y), Offset(g.right, y), 1.dp.toPx())
+        }
+    } else {
+        for (i in 0..4) {
+            val y = g.top + g.h * i / 4f
+            drawLine(gridMinor, Offset(g.left, y), Offset(g.right, y), 1.dp.toPx())
+        }
+    }
+
+    // ---- sample curve
+    val n = 96
+    val pts = FloatArray((n + 1) * 2)
+    val prop = if (mode != GraphMode.EASE) Prop(0f, listOf(a, b)) else null
+    for (i in 0..n) {
+        val u = i / n.toFloat()
+        val p: Offset = when (mode) {
+            GraphMode.EASE -> g.pt(u, keyProgress(a, u))
+            GraphMode.VALUE -> g.valuePt(u, prop!!.valueAt(a.t + (b.t - a.t) * u))
+            GraphMode.SPEED -> {
+                val t = a.t + (b.t - a.t) * u
+                val dt = max((b.t - a.t) / 400f, 0.0005f)
+                val before = prop!!.valueAt((t - dt).coerceAtLeast(a.t))
+                val after = prop.valueAt((t + dt).coerceAtMost(b.t))
+                val speed = abs(after - before) / max(2f * dt, 0.0001f)
+                val peak = abs(b.v - a.v) / max(b.t - a.t, 0.001f)
+                Offset(g.left + g.w * u, g.bottom - g.h * (speed / max(peak * 3f, 1f)).coerceIn(0f, 1f))
+            }
+        }
+        pts[i * 2] = p.x; pts[i * 2 + 1] = p.y
+    }
+    val line = Path().apply {
+        moveTo(pts[0], pts[1])
+        for (i in 1..n) lineTo(pts[i * 2], pts[i * 2 + 1])
+    }
+    val baseline = if (mode == GraphMode.EASE) g.pt(0f, 0f).y else g.bottom
+    val fill = Path().apply {
+        moveTo(pts[0], baseline)
+        for (i in 0..n) lineTo(pts[i * 2], pts[i * 2 + 1])
+        lineTo(pts[n * 2], baseline)
+        close()
+    }
+    drawPath(fill, Brush.verticalGradient(listOf(accent.copy(alpha = 0.22f), accent.copy(alpha = 0f)), startY = g.top, endY = g.bottom))
+    drawPath(line, accent.copy(alpha = 0.22f), style = Stroke(8.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+    drawPath(line, Color.White, style = Stroke(2.6.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+
+    // ---- axes
+    drawLine(KColors.Muted.copy(alpha = 0.7f), Offset(g.left, g.bottom), Offset(g.right, g.bottom), 1.dp.toPx())
+    drawLine(KColors.Muted.copy(alpha = 0.7f), Offset(g.left, g.top), Offset(g.left, g.bottom), 1.dp.toPx())
+
+    // ---- anchors + handles
+    if (mode == GraphMode.EASE) {
+        val start = g.pt(0f, 0f); val end = g.pt(1f, 1f)
+        if (a.family() == KeyType.BEZIER) {
+            val h = easeHandles(a)
+            val c1 = g.pt(h[0], h[1]); val c2 = g.pt(h[2], h[3])
+            val ghost = if (a.type == KeyType.BEZIER) 1f else 0.55f
+            drawHandle(start, c1, GreenHandle, ghost, activeHandle == 1)
+            drawHandle(end, c2, OrangeHandle, ghost, activeHandle == 2)
+        }
+        drawAnchor(start, accent, true)
+        drawAnchor(end, Color.White, false)
+    } else {
+        val s = if (mode == GraphMode.VALUE) g.valuePt(0f, a.v) else Offset(g.left, g.bottom)
+        val e = if (mode == GraphMode.VALUE) g.valuePt(1f, b.v) else Offset(g.right, g.bottom)
+        if (mode == GraphMode.VALUE) {
+            drawLine(accent.copy(alpha = 0.4f), s, Offset(s.x, g.bottom), 1.dp.toPx())
+            drawLine(Color.White.copy(alpha = 0.3f), e, Offset(e.x, g.bottom), 1.dp.toPx())
+        }
+        drawAnchor(s, accent, true)
+        drawAnchor(e, Color.White, false)
+    }
+}
+
+private fun DrawScope.drawAnchor(c: Offset, color: Color, filledInner: Boolean) {
+    drawCircle(color.copy(alpha = 0.22f), 11.dp.toPx(), c)
+    drawCircle(color, 6.dp.toPx(), c)
+    drawCircle(Color(0xFF111418), 2.6.dp.toPx(), c)
+    if (!filledInner) drawCircle(Color.White, 1.4.dp.toPx(), c)
+}
+
+private fun DrawScope.drawHandle(anchor: Offset, c: Offset, color: Color, alpha: Float, active: Boolean) {
+    drawLine(color.copy(alpha = 0.85f * alpha), anchor, c, 1.6.dp.toPx(), cap = StrokeCap.Round)
+    val scale = if (active) 1.25f else 1f
+    drawCircle(color.copy(alpha = (if (active) 0.32f else 0.18f) * alpha), 19.dp.toPx() * scale, c)
+    drawCircle(Color(0xFF0B0D10).copy(alpha = alpha), 9.5.dp.toPx() * scale, c)
+    drawCircle(color.copy(alpha = alpha), 8.dp.toPx() * scale, c)
+    drawCircle(Color.White.copy(alpha = alpha), 3.2.dp.toPx() * scale, c)
 }
