@@ -770,6 +770,9 @@ private fun ToolEditPanel(
 ) {
     val displayTime = rememberEditorDisplayTime(editor)
     var showGraph by remember(tool, layer.id) { mutableStateOf(false) }
+    val isTextTool = tool == "Edit" || tool == "Animate"
+    var textTab by remember(layer.id) { mutableStateOf(if (tool == "Animate") "Animator" else "Text") }
+    androidx.compose.runtime.LaunchedEffect(tool) { if (tool == "Animate") textTab = "Animator" else if (tool == "Edit") textTab = "Text" }
     val animatedProp = when (tool) {
         "Speed" -> PropId.SPEED
         "Volume" -> PropId.VOLUME
@@ -786,7 +789,17 @@ private fun ToolEditPanel(
     val panelShape = RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp)
     Column(modifier.clip(panelShape).background(KColors.Surface).border(1.dp, KColors.Line, panelShape)) {
         Row(Modifier.fillMaxWidth().height(38.dp).padding(start = 13.dp, end = 5.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("${layer.name}  ·  $tool", color = KColors.Text, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+            if (isTextTool) {
+                Row(Modifier.weight(1f).fillMaxHeight(), verticalAlignment = Alignment.CenterVertically) {
+                    listOf("Text", "Style", "Layout", "Animator").forEach { t ->
+                        Box(Modifier.weight(1f).fillMaxHeight().clickable { textTab = t; showGraph = false }, contentAlignment = Alignment.Center) {
+                            Text(t, fontSize = 12.sp, fontWeight = if (textTab == t) FontWeight.SemiBold else FontWeight.Medium,
+                                color = if (textTab == t) KColors.Accent else KColors.Muted)
+                            if (textTab == t) Box(Modifier.align(Alignment.BottomCenter).width(24.dp).height(2.dp).background(KColors.Accent))
+                        }
+                    }
+                }
+            } else Text("${layer.name}  ·  $tool", color = KColors.Text, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
                 maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
             Box(Modifier.size(32.dp).clickable(onClick = onClose), contentAlignment = Alignment.Center) {
                 KIcon(IconKind.CLOSE, KColors.Muted, Modifier.size(16.dp))
@@ -841,7 +854,7 @@ private fun ToolEditPanel(
                     else GraphPanel(editor, layer)
                 } else {
                     ToolPanelControls(tool, editor, layer, displayTime, onExtractAudio, maskTool,
-                        onMaskToolChange, rotoForeground, onRotoForegroundChange, onOpenEffects, onOpenMasking)
+                        onMaskToolChange, rotoForeground, onRotoForegroundChange, onOpenEffects, onOpenMasking, textTab)
                 }
             }
         }
@@ -849,7 +862,7 @@ private fun ToolEditPanel(
 }
 
 @Composable
-private fun ToolPanelControls(tool: String, editor: EditorState, layer: Layer, displayTime: Float, onExtractAudio: () -> Unit, maskTool: String, onMaskToolChange: (String) -> Unit, rotoForeground: Boolean, onRotoForegroundChange: (Boolean) -> Unit, onOpenEffects: () -> Unit, onOpenMasking: () -> Unit) {
+private fun ToolPanelControls(tool: String, editor: EditorState, layer: Layer, displayTime: Float, onExtractAudio: () -> Unit, maskTool: String, onMaskToolChange: (String) -> Unit, rotoForeground: Boolean, onRotoForegroundChange: (Boolean) -> Unit, onOpenEffects: () -> Unit, onOpenMasking: () -> Unit, textTab: String) {
     val textTool = tool == "Edit" || tool == "Animate"
     Column(
         Modifier.fillMaxSize().background(KColors.Surface).then(
@@ -883,7 +896,7 @@ private fun ToolPanelControls(tool: String, editor: EditorState, layer: Layer, d
                 EffectControlsPanel(editor, layer, onOpenEffects)
             }
             "Camera" -> CameraControls(editor, layer)
-            "Edit", "Animate" -> TextEditorPanel(editor, layer, if (tool == "Animate") "Animator" else "Text", onOpenMasking)
+            "Edit", "Animate" -> TextEditorPanel(editor, layer, textTab, onOpenMasking)
             "Blend modes" -> {
                 Text("BLEND MODE", color = KColors.Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold)
                 ChoiceStringUnitRow(listOf("Normal" to "Normal", "Multiply" to "Multiply", "Screen" to "Screen", "Add" to "Add"),

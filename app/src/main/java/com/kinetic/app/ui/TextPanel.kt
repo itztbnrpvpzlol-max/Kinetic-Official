@@ -83,27 +83,14 @@ private fun fmtNum(v: Float, decimals: Int = 0): String =
 
 /** Edit panel for TEXT layers: Text, Style, Layout (with Path Options) and Animator (Flow) tabs. */
 @Composable
-fun TextEditorPanel(editor: EditorState, layer: Layer, initialTab: String, onOpenMasking: () -> Unit) {
-    var tab by remember(layer.id, initialTab) { mutableStateOf(initialTab) }
-    Column(Modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxWidth().height(38.dp), verticalAlignment = Alignment.CenterVertically) {
-            listOf("Text", "Style", "Layout", "Animator").forEach { t ->
-                Box(Modifier.weight(1f).fillMaxSize().clickable { tab = t }, contentAlignment = Alignment.Center) {
-                    Text(t, fontSize = 12.sp, fontWeight = if (tab == t) FontWeight.SemiBold else FontWeight.Medium,
-                        color = if (tab == t) KColors.Accent else KColors.Muted)
-                    if (tab == t) Box(Modifier.align(Alignment.BottomCenter).width(26.dp).height(2.dp).background(KColors.Accent))
-                }
-            }
-        }
-        Box(Modifier.fillMaxWidth().height(1.dp).background(KColors.Line))
-        Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 10.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            when (tab) {
-                "Text" -> TextTab(editor, layer)
-                "Style" -> StyleTab(editor, layer)
-                "Layout" -> LayoutTab(editor, layer, onOpenMasking)
-                else -> AnimatorTab(editor, layer)
-            }
+fun TextEditorPanel(editor: EditorState, layer: Layer, tab: String, onOpenMasking: () -> Unit) {
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        when (tab) {
+            "Text" -> TextTab(editor, layer)
+            "Style" -> StyleTab(editor, layer)
+            "Layout" -> LayoutTab(editor, layer, onOpenMasking)
+            else -> AnimatorTab(editor, layer)
         }
     }
 }
