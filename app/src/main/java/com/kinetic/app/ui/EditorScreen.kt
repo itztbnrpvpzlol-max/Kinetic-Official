@@ -462,6 +462,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                             Toast.makeText(ctx, "The effects engine could not create $label", Toast.LENGTH_LONG).show()
                         }
                         else -> {
+                            EffectPrefs.record(ctx, effectId)
                             showEffectsScreen = false
                             showPropertiesPanel = false
                             showToolPanel = true

@@ -7,6 +7,12 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import com.kinetic.app.engine.EffectCategories
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,8 +30,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.lazy.items as rowItems
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -68,17 +73,17 @@ private data class EffectCategory(
 )
 
 private val effectCategories = listOf(
-    EffectCategory("COLOR & LIGHT", IconKind.ADJ, Color(0xFFFF82B2), Color(0xFF281C2A), R.drawable.smp_lake),
-    EffectCategory("STYLIZE", IconKind.EFFECTS, Color(0xFFC0A2FF), Color(0xFF241E35), R.drawable.smp_stars),
-    EffectCategory("DRAWING & EDGE", IconKind.GRAPH, Color(0xFFFFC078), Color(0xFF30251D), R.drawable.smp_door),
-    EffectCategory("MOTION", IconKind.MOTION, Color(0xFF86B7FF), Color(0xFF1D2940), R.drawable.smp_closeup),
-    EffectCategory("DISTORTION & WARP", IconKind.BLEND, Color(0xFF70DAD4), Color(0xFF1A2D32), R.drawable.smp_blush),
-    EffectCategory("PROCEDURAL", IconKind.GRID, Color(0xFFB5A4FF), Color(0xFF252238), R.drawable.smp_haze),
-    EffectCategory("BLUR", IconKind.FILTER, Color(0xFF8BC8FF), Color(0xFF1D2B39), R.drawable.smp_laugh),
-    EffectCategory("3D", IconKind.SHAPES, Color(0xFFFF987C), Color(0xFF332326), R.drawable.smp_lake),
-    EffectCategory("TEXT", IconKind.TEXT, Color(0xFFFFD77A), Color(0xFF332B1F), R.drawable.smp_haze),
-    EffectCategory("AUDIO", IconKind.WAVEFORM, Color(0xFF79D8A7), Color(0xFF1B302A), R.drawable.smp_laugh),
-    EffectCategory("OTHER", IconKind.MORE, Color(0xFFB2C0D6), Color(0xFF242B37), R.drawable.smp_blush)
+    EffectCategory("COLOR & LIGHT", IconKind.ADJ, Color(0xFFFF82B2), Color(0xFF281C2A), R.drawable.cat_color),
+    EffectCategory("STYLIZE", IconKind.EFFECTS, Color(0xFFC0A2FF), Color(0xFF241E35), R.drawable.cat_stylize),
+    EffectCategory("DRAWING & EDGE", IconKind.GRAPH, Color(0xFFFFC078), Color(0xFF30251D), R.drawable.cat_drawing),
+    EffectCategory("MOTION", IconKind.MOTION, Color(0xFF86B7FF), Color(0xFF1D2940), R.drawable.cat_motion),
+    EffectCategory("DISTORTION & WARP", IconKind.BLEND, Color(0xFF70DAD4), Color(0xFF1A2D32), R.drawable.cat_distortion),
+    EffectCategory("PROCEDURAL", IconKind.GRID, Color(0xFFB5A4FF), Color(0xFF252238), R.drawable.cat_procedural),
+    EffectCategory("BLUR", IconKind.FILTER, Color(0xFF8BC8FF), Color(0xFF1D2B39), R.drawable.cat_blur),
+    EffectCategory("3D", IconKind.SHAPES, Color(0xFFFF987C), Color(0xFF332326), R.drawable.cat_three_d),
+    EffectCategory("TEXT", IconKind.TEXT, Color(0xFFFFD77A), Color(0xFF332B1F), R.drawable.cat_text),
+    EffectCategory("AUDIO", IconKind.WAVEFORM, Color(0xFF79D8A7), Color(0xFF1B302A), R.drawable.cat_audio),
+    EffectCategory("OTHER", IconKind.MORE, Color(0xFFB2C0D6), Color(0xFF242B37), R.drawable.cat_other)
 )
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -87,6 +92,11 @@ fun EffectsBrowserScreen(onClose: () -> Unit, onAddEffect: (String) -> Unit) {
     var selectedCategory by remember { mutableStateOf<EffectCategory?>(null) }
     var query by remember { mutableStateOf("") }
     val catalogEffects = EffectCatalog.effects
+    val ctx = LocalContext.current
+    var favs by remember { mutableStateOf(EffectPrefs.favourites(ctx)) }
+    val recentIds = remember { EffectPrefs.recent(ctx) }
+    val counts = remember { EffectPrefs.counts(ctx) }
+    val toggleFav: (String) -> Unit = { id -> favs = EffectPrefs.toggleFavourite(ctx, id) }
 
     Column(Modifier.fillMaxSize().background(KColors.Bg).statusBarsPadding().navigationBarsPadding()) {
         Row(Modifier.fillMaxWidth().padding(start = 18.dp, end = 18.dp, top = 12.dp, bottom = 14.dp),
@@ -120,74 +130,98 @@ fun EffectsBrowserScreen(onClose: () -> Unit, onAddEffect: (String) -> Unit) {
                     Spacer(Modifier.size(8.dp))
                     Text("${inCategory.size} effects", color = KColors.Muted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                     Spacer(Modifier.weight(1f))
-                    Text("Tap to add to the selected layer", color = KColors.Dim, fontSize = 10.sp)
+                    Text("Tap to add · hold to favourite", color = KColors.Dim, fontSize = 10.sp)
                 }
                 if (inCategory.isEmpty()) {
                     Text("No effects in this category.", color = KColors.Dim, fontSize = 12.sp,
                         modifier = Modifier.padding(horizontal = 18.dp, vertical = 20.dp))
                 } else {
-                    EffectGrid(inCategory, category.accent, onAddEffect)
+                    EffectGrid(inCategory, category.accent, favs, toggleFav, onAddEffect)
                 }
             }
             query.isNotBlank() -> {
                 val results = remember(query) { EffectCatalog.search(query) }
                 Text("${results.size} result${if (results.size == 1) "" else "s"}", color = KColors.Muted,
                     fontSize = 12.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 18.dp))
-                EffectGrid(results, KColors.Accent, onAddEffect)
+                EffectGrid(results, KColors.Accent, favs, toggleFav, onAddEffect)
             }
-            else -> HomeContent(catalogEffects.isEmpty(), effectCategories, catalogEffects) { selectedCategory = it }
+            else -> HomeContent(catalogEffects, effectCategories, recentIds, counts, favs, toggleFav, onAddEffect) { selectedCategory = it }
         }
+    }
+}
+
+private fun accentOf(effect: EcEffect): Color =
+    effectCategories.firstOrNull { it.title == effect.category }?.accent ?: KColors.Accent
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun HomeContent(
+    effects: List<EcEffect>, categories: List<EffectCategory>, recentIds: List<String>, counts: Map<String, Int>,
+    favs: Set<String>, onToggleFav: (String) -> Unit, onAdd: (String) -> Unit, onPick: (EffectCategory) -> Unit
+) {
+    val byId = remember(effects) { effects.associateBy { it.id } }
+    val recent = remember(effects, recentIds) { recentIds.mapNotNull { byId[it] } }
+    val favList = remember(effects, favs) { favs.mapNotNull { byId[it] }.sortedBy { it.name } }
+    val sug = remember(effects, counts) { EffectPrefs.suggestions(effects, counts) }
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+        if (sug.effects.isNotEmpty()) {
+            ShelfHeader("Suggested", if (sug.personal) "Picked from the effects you use most" else "Popular effects to get you started",
+                IconKind.EFFECTS, Color(0xFFC0A2FF))
+            EffectRow(sug.effects, favs, onToggleFav, onAdd)
+            Spacer(Modifier.height(20.dp))
+        }
+        ShelfHeader("Recent", if (recent.isEmpty()) "Effects you add will show up here." else "Your latest effects", IconKind.STOPWATCH, Color(0xFF79B9FF))
+        if (recent.isNotEmpty()) EffectRow(recent, favs, onToggleFav, onAdd)
+        Spacer(Modifier.height(20.dp))
+        ShelfHeader("Favourites", if (favList.isEmpty()) "Hold any effect to save it here." else "Your saved effects", IconKind.STAR, Color(0xFFFFC36B))
+        if (favList.isNotEmpty()) EffectRow(favList, favs, onToggleFav, onAdd)
+        Spacer(Modifier.height(22.dp))
+        Column(Modifier.padding(horizontal = 18.dp)) {
+            SectionHeading("Categories")
+            Spacer(Modifier.height(12.dp))
+            if (effects.isEmpty()) {
+                Text(
+                    EffectCatalog.error?.let { "Effects engine unavailable: ${it.take(96)}" } ?: "Loading effects…",
+                    color = KColors.Dim, fontSize = 12.sp, modifier = Modifier.padding(vertical = 12.dp)
+                )
+            }
+            categories.chunked(2).forEach { row ->
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    row.forEach { category ->
+                        CategoryTile(category, effects.count { it.category == category.title }, Modifier.weight(1f)) { onPick(category) }
+                    }
+                    if (row.size == 1) Spacer(Modifier.weight(1f))
+                }
+                Spacer(Modifier.height(10.dp))
+            }
+            Spacer(Modifier.height(18.dp))
+        }
+    }
+}
+
+@Composable
+private fun ShelfHeader(title: String, subtitle: String, icon: IconKind, accent: Color) {
+    Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp).padding(bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+        KIcon(icon, accent, Modifier.size(17.dp))
+        Spacer(Modifier.size(8.dp))
+        Text(title, color = KColors.Text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.size(10.dp))
+        Text(subtitle, color = KColors.Muted, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
     }
 }
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun HomeContent(empty: Boolean, categories: List<EffectCategory>, effects: List<EcEffect>, onPick: (EffectCategory) -> Unit) {
-    val shelfPager = rememberPagerState(pageCount = { 2 })
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 18.dp)) {
-        Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            SectionHeading("Suggested")
-            Spacer(Modifier.weight(1f))
-            KIcon(IconKind.EFFECTS, KColors.Dim, Modifier.size(17.dp))
+private fun EffectRow(effects: List<EcEffect>, favs: Set<String>, onToggleFav: (String) -> Unit, onAdd: (String) -> Unit) {
+    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(horizontal = 14.dp)) {
+        rowItems(effects, key = { it.id }) { effect ->
+            EffectCard(effect, accentOf(effect), effect.id in favs, { onToggleFav(effect.id) }, Modifier.width(106.dp)) { onAdd(effect.id) }
         }
-        Text("Suggestions will appear as you use effects.", color = KColors.Muted, fontSize = 11.sp)
-        Spacer(Modifier.height(18.dp))
-        HorizontalPager(state = shelfPager, modifier = Modifier.fillMaxWidth().height(80.dp), pageSpacing = 24.dp) { page ->
-            if (page == 0) ShelfSection("Recent", "Your recently used effects will appear here.", IconKind.STOPWATCH, Color(0xFF79B9FF))
-            else ShelfSection("Favourites", "Your saved effects will appear here.", IconKind.STAR, Color(0xFFFFC36B))
-        }
-        Row(Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 20.dp),
-            horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-            repeat(2) { page ->
-                Box(Modifier.padding(horizontal = 3.dp)
-                    .size(if (shelfPager.currentPage == page) 15.dp else 5.dp, 5.dp)
-                    .clip(CircleShape)
-                    .background(if (shelfPager.currentPage == page) KColors.Text else KColors.Dim.copy(alpha = 0.55f)))
-            }
-        }
-        SectionHeading("Categories")
-        Spacer(Modifier.height(12.dp))
-        if (empty) {
-            Text(
-                EffectCatalog.error?.let { "Effects engine unavailable: ${it.take(96)}" } ?: "Loading effects…",
-                color = KColors.Dim, fontSize = 12.sp, modifier = Modifier.padding(vertical = 12.dp)
-            )
-        }
-        categories.chunked(2).forEach { row ->
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                row.forEach { category ->
-                    CategoryTile(category, effects.count { it.category == category.title }, Modifier.weight(1f)) { onPick(category) }
-                }
-                if (row.size == 1) Spacer(Modifier.weight(1f))
-            }
-            Spacer(Modifier.height(10.dp))
-        }
-        Spacer(Modifier.height(18.dp))
     }
 }
 
 @Composable
-private fun EffectGrid(effects: List<EcEffect>, accent: Color, onAdd: (String) -> Unit) {
+private fun EffectGrid(effects: List<EcEffect>, accent: Color, favs: Set<String>, onToggleFav: (String) -> Unit, onAdd: (String) -> Unit) {
     LazyVerticalGrid(
         columns = GridCells.Fixed(3),
         modifier = Modifier.fillMaxSize(),
@@ -195,16 +229,30 @@ private fun EffectGrid(effects: List<EcEffect>, accent: Color, onAdd: (String) -
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        items(effects, key = { it.id }) { effect -> EffectCard(effect, accent) { onAdd(effect.id) } }
+        items(effects, key = { it.id }) { effect ->
+            EffectCard(effect, accent, effect.id in favs, { onToggleFav(effect.id) }) { onAdd(effect.id) }
+        }
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun EffectCard(effect: EcEffect, accent: Color, onClick: () -> Unit) {
+private fun EffectCard(
+    effect: EcEffect, accent: Color, fav: Boolean, onToggleFav: () -> Unit, modifier: Modifier = Modifier, onClick: () -> Unit
+) {
     val shape = RoundedCornerShape(14.dp)
-    Column(Modifier.clip(shape).background(KColors.Surface).border(1.dp, KColors.Line, shape).clickable(onClick = onClick)) {
+    val haptic = LocalHapticFeedback.current
+    Column(modifier.clip(shape).background(KColors.Surface).border(1.dp, KColors.Line, shape)
+        .combinedClickable(onClick = onClick, onLongClick = {
+            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+            onToggleFav()
+        })) {
         Box(Modifier.fillMaxWidth().aspectRatio(1f)) {
-            EffectThumb(effect, accent, Modifier.fillMaxSize())
+            EffectThumb(effect, Modifier.fillMaxSize())
+            if (fav) Box(
+                Modifier.align(Alignment.TopStart).padding(6.dp).size(22.dp).clip(CircleShape).background(KColors.Bg.copy(alpha = 0.78f)),
+                contentAlignment = Alignment.Center
+            ) { KIcon(IconKind.STAR, Color(0xFFFFC36B), Modifier.size(12.dp)) }
             Box(
                 Modifier.align(Alignment.TopEnd).padding(6.dp).size(24.dp)
                     .clip(CircleShape).background(KColors.Bg.copy(alpha = 0.78f)),
@@ -219,47 +267,30 @@ private fun EffectCard(effect: EcEffect, accent: Color, onClick: () -> Unit) {
 }
 
 @Composable
-private fun EffectThumb(effect: EcEffect, accent: Color, modifier: Modifier = Modifier) {
+private fun EffectThumb(effect: EcEffect, modifier: Modifier = Modifier) {
     val ctx = LocalContext.current
-    val base = painterResource(EffectThumbs.imageFor(effect))
-    if (effect.audio) {
-        Box(modifier.background(KColors.Surface2)) {
-            Image(base, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-            Box(Modifier.fillMaxSize().background(Color(0xFF0E1A16).copy(alpha = 0.72f)))
-            AudioArt(accent, effect.id.hashCode(), Modifier.fillMaxSize())
-        }
-        return
-    }
     val image by produceState(EffectThumbs.peek(effect.id), effect.id) {
         if (value == null) value = EffectThumbs.load(ctx, effect)
+    }
+    val photo = EffectThumbs.usesPhoto(effect)
+    val base = if (photo) painterResource(EffectThumbs.imageFor(effect)) else null
+    val flat = when {
+        effect.audio -> Color(0xFF101C17)
+        effect.category == EffectCategories.TEXT -> Color.White
+        else -> Color.Black
     }
     Box(modifier.background(KColors.Surface2)) {
         Crossfade(image, label = "thumb") { img ->
             if (img == null) {
-                Box(Modifier.fillMaxSize()) {
-                    Image(base, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-                    Box(Modifier.fillMaxSize().background(KColors.Bg.copy(alpha = 0.55f)))
+                Box(Modifier.fillMaxSize().background(flat)) {
+                    if (base != null) {
+                        Image(base, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                        Box(Modifier.fillMaxSize().background(KColors.Bg.copy(alpha = 0.55f)))
+                    }
                 }
             } else {
                 Image(img, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
             }
-        }
-    }
-}
-
-@Composable
-private fun AudioArt(accent: Color, seed: Int, modifier: Modifier = Modifier) {
-    Canvas(modifier) {
-        val bars = 11
-        val gap = size.width * 0.03f
-        val bw = (size.width * 0.78f - gap * (bars - 1)) / bars
-        val x0 = size.width * 0.11f
-        for (i in 0 until bars) {
-            val k = ((seed ushr (i % 16)) and 7) / 7f
-            val env = 1f - kotlin.math.abs(i - bars / 2) / (bars / 2f) * 0.55f
-            val bh = size.height * (0.16f + 0.5f * k * env)
-            drawRoundRect(accent.copy(alpha = 0.55f + 0.4f * env), Offset(x0 + i * (bw + gap), (size.height - bh) / 2f),
-                Size(bw, bh), CornerRadius(bw / 2f))
         }
     }
 }
@@ -292,19 +323,6 @@ private fun SearchField(query: String, onChange: (String) -> Unit) {
 @Composable
 private fun SectionHeading(title: String) {
     Text(title, color = KColors.Text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-}
-
-@Composable
-private fun ShelfSection(title: String, emptyMessage: String, icon: IconKind, accent: Color) {
-    Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            KIcon(icon, accent, Modifier.size(18.dp))
-            Spacer(Modifier.size(8.dp))
-            Text(title, color = KColors.Text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-        }
-        Spacer(Modifier.height(7.dp))
-        Text(emptyMessage, color = KColors.Muted, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-    }
 }
 
 @Composable
