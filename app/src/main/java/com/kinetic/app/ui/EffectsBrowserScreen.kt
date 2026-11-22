@@ -63,6 +63,8 @@ import androidx.compose.ui.unit.sp
 import com.kinetic.app.R
 import com.kinetic.app.engine.EcEffect
 import com.kinetic.app.engine.EffectCatalog
+import com.kinetic.app.model.LayerType
+import com.kinetic.app.model.effectFitsLayer
 
 private data class EffectCategory(
     val title: String,
@@ -88,10 +90,13 @@ private val effectCategories = listOf(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun EffectsBrowserScreen(onClose: () -> Unit, onAddEffect: (String) -> Unit) {
-    var selectedCategory by remember { mutableStateOf<EffectCategory?>(null) }
+fun EffectsBrowserScreen(layerType: LayerType?, onClose: () -> Unit, onAddEffect: (String) -> Unit) {
+    var selectedCategory by remember {
+        mutableStateOf<EffectCategory?>(if (layerType == LayerType.AUDIO) effectCategories.firstOrNull { it.title == "AUDIO" } else null)
+    }
     var query by remember { mutableStateOf("") }
-    val catalogEffects = EffectCatalog.effects
+    val allEffects = EffectCatalog.effects
+    val catalogEffects = remember(layerType, allEffects) { allEffects.filter { effectFitsLayer(it, layerType) } }
     val ctx = LocalContext.current
     var favs by remember { mutableStateOf(EffectPrefs.favourites(ctx)) }
     val recentIds = remember { EffectPrefs.recent(ctx) }
@@ -124,7 +129,7 @@ fun EffectsBrowserScreen(onClose: () -> Unit, onAddEffect: (String) -> Unit) {
 
         when {
             category != null -> {
-                val inCategory = EffectCatalog.inCategory(category.title)
+                val inCategory = remember(catalogEffects, category) { catalogEffects.filter { it.category == category.title }.sortedBy { it.name.lowercase() } }
                 Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp), verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.size(8.dp).clip(CircleShape).background(category.accent))
                     Spacer(Modifier.size(8.dp))
@@ -140,7 +145,7 @@ fun EffectsBrowserScreen(onClose: () -> Unit, onAddEffect: (String) -> Unit) {
                 }
             }
             query.isNotBlank() -> {
-                val results = remember(query) { EffectCatalog.search(query) }
+                val results = remember(query, catalogEffects) { EffectCatalog.search(query).filter { effectFitsLayer(it, layerType) } }
                 Text("${results.size} result${if (results.size == 1) "" else "s"}", color = KColors.Muted,
                     fontSize = 12.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 18.dp))
                 EffectGrid(results, KColors.Accent, favs, toggleFav, onAddEffect)
@@ -185,7 +190,7 @@ private fun HomeContent(
                     color = KColors.Dim, fontSize = 12.sp, modifier = Modifier.padding(vertical = 12.dp)
                 )
             }
-            categories.chunked(2).forEach { row ->
+            categories.filter { c -> effects.isEmpty() || effects.any { it.category == c.title } }.chunked(2).forEach { row ->
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     row.forEach { category ->
                         CategoryTile(category, effects.count { it.category == category.title }, Modifier.weight(1f)) { onPick(category) }

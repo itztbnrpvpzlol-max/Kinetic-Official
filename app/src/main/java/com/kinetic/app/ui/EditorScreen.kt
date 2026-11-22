@@ -446,6 +446,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
         }
         if (showEffectsScreen) {
             EffectsBrowserScreen(
+                layerType = editor.selected?.type,
                 onClose = { showEffectsScreen = false },
                 onAddEffect = { effectId ->
                     val layer = editor.selected

@@ -350,6 +350,16 @@ fun createEffect(effectId: String): EffectInstance? {
     return EffectInstance(name = spec.name, effectId = spec.id, parameters = parameters, texts = texts)
 }
 
+/** Audio effects belong on audio and video layers, picture effects on everything except audio layers. */
+fun effectFitsLayer(effect: com.kinetic.app.engine.EcEffect, type: LayerType?): Boolean = when (type) {
+    null, LayerType.VIDEO -> true
+    LayerType.AUDIO -> effect.audio
+    else -> !effect.audio
+}
+
+fun effectFitsLayer(effectId: String, type: LayerType?): Boolean =
+    EffectCatalog.find(effectId)?.let { effectFitsLayer(it, type) } ?: false
+
 data class Layer(
     val id: String = UUID.randomUUID().toString(),
     val type: LayerType,

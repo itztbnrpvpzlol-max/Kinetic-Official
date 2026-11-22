@@ -1003,7 +1003,8 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
     }
 
     fun addEffect(layerId: String, effectId: String): Boolean {
-        if (layers.none { it.id == layerId }) return false
+        val target = layers.firstOrNull { it.id == layerId } ?: return false
+        if (!effectFitsLayer(effectId, target.type)) return false
         val effect = createEffect(effectId) ?: return false
         updateLayer(layerId) { layer -> layer.copy(effectStack = layer.effectStack + effect) }
         return layers.firstOrNull { it.id == layerId }?.effectStack?.any { it.id == effect.id } == true
@@ -1017,8 +1018,9 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
     }
 
     fun pasteEffects(layerId: String, afterEffectId: String? = null): Boolean {
-        val clip = effectClipboard
-        if (clip.isEmpty() || layers.none { it.id == layerId }) return false
+        val target = layers.firstOrNull { it.id == layerId } ?: return false
+        val clip = effectClipboard.filter { effectFitsLayer(it.effectId, target.type) }
+        if (clip.isEmpty()) return false
         val copies = clip.map { it.copy(id = java.util.UUID.randomUUID().toString()) }
         updateLayer(layerId) { l ->
             val at = afterEffectId?.let { id -> l.effectStack.indexOfFirst { it.id == id } + 1 }?.takeIf { it > 0 } ?: l.effectStack.size
