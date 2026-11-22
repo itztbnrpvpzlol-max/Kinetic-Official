@@ -284,7 +284,16 @@ private fun AnimatorTab(editor: EditorState, layer: Layer) {
     anims.forEachIndexed { index, a -> AnimatorCard(editor, layer, a, index, freeSlot) }
     Row(Modifier.fillMaxWidth().height(44.dp).clip(RoundedCornerShape(12.dp)).background(if (freeSlot != null) KColors.Accent else KColors.Surface2)
         .clickable(enabled = freeSlot != null) {
-            editor.editText(layer, true) { it.copy(textAnimators = it.textAnimators + TextAnimator(slot = freeSlot!!, name = "Animation ${it.textAnimators.size + 1}")) }
+            editor.editText(layer, true) { l ->
+                // New animators start with a ready-made Strength curve (100% -> 0%) that you can reshape in the graph.
+                val key = taId(freeSlot!!, "STRENGTH")
+                val curve = com.kinetic.app.model.Prop(100f, listOf(
+                    com.kinetic.app.model.Keyframe(l.start, 100f, com.kinetic.app.model.KeyType.BEZIER, 0.22f, 1f, 0.36f, 1f),
+                    com.kinetic.app.model.Keyframe(l.start + 0.6f, 0f)
+                ))
+                l.copy(textAnimators = l.textAnimators + TextAnimator(slot = freeSlot, name = "Animation ${l.textAnimators.size + 1}"),
+                    props = l.props + (key to curve))
+            }
         }, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
         KIcon(IconKind.PLUS, Color.White, Modifier.size(16.dp))
         Spacer(Modifier.width(8.dp))
@@ -344,9 +353,6 @@ private fun AnimatorCard(editor: EditorState, layer: Layer, a: TextAnimator, ind
             Section("Strength & Delay")
             line("Strength", "STRENGTH")
             line("Delay", "DELAY")
-            line("Duration", "DURATION")
-            Spacer(Modifier.height(4.dp))
-            ChipRow("Ease", TextEngine.eases, a.ease) { e -> update { it.copy(ease = e) } }
             Section("Transform")
             line("Opacity", "OPACITY")
             line("Position X", "POS_X")
@@ -388,7 +394,7 @@ private fun AnimatorCard(editor: EditorState, layer: Layer, a: TextAnimator, ind
                     Text("Random", color = KColors.Accent, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
                 }
             }
-            ToggleRow("Reverse", "Exit animation", a.reverse) { update { it.copy(reverse = !it.reverse) } }
+            ToggleRow("Reverse", "Stagger from the last unit", a.reverse) { update { it.copy(reverse = !it.reverse) } }
         }
     }
     if (renaming) TextInputDialog("Rename animator", a.name, onDone = { n -> renaming = false; update { it.copy(name = n.ifBlank { it.name }) } }, onDismiss = { renaming = false })

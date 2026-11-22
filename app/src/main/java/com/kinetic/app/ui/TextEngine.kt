@@ -266,12 +266,12 @@ internal object TextEngine {
         return a + (b - a) * u
     }
 
-    private fun applyAnimator(a: TextAnimator, unit: Int, layer: Layer, time: Float, fx: UnitFx) {
+    private fun applyAnimator(a: TextAnimator, unit: Int, maxUnit: Int, layer: Layer, time: Float, fx: UnitFx) {
         fun v(key: String) = layer.p(taId(a.slot, key)).valueAt(time)
-        val local = if (a.reverse) layer.end - time else time - layer.start
-        val dur = max(v("DURATION") / 1000f, 0.001f)
-        val raw = ((local - unit * v("DELAY") / 1000f) / dur).coerceIn(0f, 1f)
-        val k = (1f - ease(a.ease, raw)) * (v("STRENGTH") / 100f)
+        // Strength is a keyframed curve (shaped in the graph editor). Each unit samples it a little
+        // later than the previous one: that stagger is Delay. Reverse staggers from the last unit.
+        val order = if (a.reverse) maxUnit - unit else unit
+        val k = layer.p(taId(a.slot, "STRENGTH")).valueAt(time - order * v("DELAY") / 1000f) / 100f
         fx.opacity *= (1f + (v("OPACITY") / 100f - 1f) * k).coerceIn(0f, 1f)
         fx.dx += v("POS_X") * k
         fx.dy += v("POS_Y") * k
@@ -374,6 +374,7 @@ internal object TextEngine {
         val camera = Camera()
         val camMatrix = Matrix()
         val unitFxCache = HashMap<String, UnitFx>()
+        val maxUnits = HashMap<String, Int>()
         val lineCols = IntArray(lay.lineCount)
         lay.glyphs.forEach { lineCols[it.line] = max(lineCols[it.line], it.col + 1) }
         val unitPivot = FloatArray(2)
@@ -386,7 +387,8 @@ internal object TextEngine {
                 val unit = unitOf(a, g)
                 val key = a.id + ":" + unit
                 val f = unitFxCache.getOrPut(key) {
-                    UnitFx().also { applyAnimator(a, unit, layer, time, it) }
+                    val maxU = maxUnits.getOrPut(a.id) { lay.glyphs.maxOf { unitOf(a, it) } }
+                    UnitFx().also { applyAnimator(a, unit, maxU, layer, time, it) }
                 }
                 val c = center(a, g)
                 unitPivot[0] = c[0]; unitPivot[1] = c[1]

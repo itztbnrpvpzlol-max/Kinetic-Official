@@ -37,7 +37,6 @@ data class TaField(val key: String, val label: String, val default: Float, val m
 val TA_FIELDS: List<TaField> = listOf(
     TaField("STRENGTH", "Strength", 100f, 0f, 300f, "%.0f%%"),
     TaField("DELAY", "Delay", 80f, 0f, 3000f, "%.0f ms"),
-    TaField("DURATION", "Duration", 600f, 20f, 6000f, "%.0f ms"),
     TaField("OPACITY", "Opacity", 100f, 0f, 100f, "%.0f%%"),
     TaField("POS_X", "Pos X", 0f, -4000f, 4000f, "%.1f px"),
     TaField("POS_Y", "Pos Y", 0f, -4000f, 4000f, "%.1f px"),
@@ -84,7 +83,6 @@ data class TextAnimator(
     val name: String = "Animation 1",
     val enabled: Boolean = true,
     val collapsed: Boolean = false,
-    val ease: String = "Ease Out",
     val separateScale: Boolean = false,
     /** "All", "Per Character", "Per Word" or "Per Line". */
     val unit: String = "Per Character",
@@ -150,7 +148,7 @@ internal fun textStyleFromJson(j: org.json.JSONObject?): TextStyle {
 internal fun List<TextAnimator>.toJson(): org.json.JSONArray = org.json.JSONArray().also { arr ->
     forEach { a ->
         arr.put(org.json.JSONObject().put("id", a.id).put("slot", a.slot).put("name", a.name).put("enabled", a.enabled)
-            .put("collapsed", a.collapsed).put("ease", a.ease).put("separateScale", a.separateScale)
+            .put("collapsed", a.collapsed).put("separateScale", a.separateScale)
             .put("unit", a.unit).put("seed", a.seed).put("reverse", a.reverse))
     }
 }
@@ -163,7 +161,7 @@ internal fun textAnimatorsFromJson(arr: org.json.JSONArray?): List<TextAnimator>
             id = j.optString("id", java.util.UUID.randomUUID().toString()),
             slot = j.optInt("slot", 0).coerceIn(0, TEXT_ANIMATOR_SLOTS - 1), name = j.optString("name", d.name),
             enabled = j.optBoolean("enabled", true), collapsed = j.optBoolean("collapsed", false),
-            ease = j.optString("ease", d.ease), separateScale = j.optBoolean("separateScale", false),
+            separateScale = j.optBoolean("separateScale", false),
             unit = j.optString("unit", d.unit), seed = j.optInt("seed", 0), reverse = j.optBoolean("reverse", false)
         )
     }
