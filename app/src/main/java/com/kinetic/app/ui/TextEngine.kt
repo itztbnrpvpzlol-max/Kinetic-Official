@@ -267,11 +267,14 @@ internal object TextEngine {
     }
 
     private fun applyAnimator(a: TextAnimator, unit: Int, maxUnit: Int, layer: Layer, time: Float, fx: UnitFx) {
-        fun v(key: String) = layer.p(taId(a.slot, key)).valueAt(time)
-        // Strength is a keyframed curve (shaped in the graph editor). Each unit samples it a little
-        // later than the previous one: that stagger is Delay. Reverse staggers from the last unit.
+        // Every value is a plain keyframeable property that is applied directly (no hidden "from" state).
+        // Delay staggers the units: unit N reads all the curves N * Delay later. Reverse staggers from the last unit.
         val order = if (a.reverse) maxUnit - unit else unit
-        val k = layer.p(taId(a.slot, "STRENGTH")).valueAt(time - order * v("DELAY") / 1000f) / 100f
+        val delaySec = layer.p(taId(a.slot, "DELAY")).valueAt(time) / 1000f
+        val t = time - order * delaySec
+        fun v(key: String) = layer.p(taId(a.slot, key)).valueAt(t)
+        // Strength scales how far every value is pushed away from the resting state.
+        val k = v("STRENGTH") / 100f
         fx.opacity *= (1f + (v("OPACITY") / 100f - 1f) * k).coerceIn(0f, 1f)
         fx.dx += v("POS_X") * k
         fx.dy += v("POS_Y") * k
