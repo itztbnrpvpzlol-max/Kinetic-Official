@@ -241,7 +241,7 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
             if (l.width <= 0f || l.height <= 0f) return@updateLayer l
             val sw = COMP_W / l.width
             val sh = COMP_H / l.height
-            val k = (if (fill) max(sw, sh) else min(sw, sh)) * 100f
+            val k = (if (fill) max(sw, sh) else minOf(sw, sh)) * 100f
             fun signed(prop: PropId) = if (l.p(prop).valueAt(t) < 0f) -k else k
             l.copy(props = l.props + mapOf(
                 PropId.SCALE_X to l.p(PropId.SCALE_X).withValueAt(t, signed(PropId.SCALE_X), eps),
