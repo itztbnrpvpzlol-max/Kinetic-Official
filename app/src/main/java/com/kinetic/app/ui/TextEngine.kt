@@ -15,7 +15,9 @@ import com.kinetic.app.model.COMP_H
 import com.kinetic.app.model.COMP_W
 import com.kinetic.app.model.Layer
 import com.kinetic.app.model.TextAnimator
+import com.kinetic.app.model.PropId
 import com.kinetic.app.model.TextStyle
+import com.kinetic.app.model.taId
 import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
@@ -126,7 +128,8 @@ internal object TextEngine {
         val n = lines.size
         val path = pathFor(layer, time, boxW, boxH)
         if (path != null) {
-            layoutOnPath(glyphs, lineWidths, path, st, lineH)
+            layoutOnPath(glyphs, lineWidths, path, st, lineH,
+                layer.p(PropId.TEXT_FIRST_MARGIN).valueAt(time), layer.p(PropId.TEXT_LAST_MARGIN).valueAt(time))
             return Layout(glyphs, n, word, maxW, true, midOffset)
         }
         val padX = max(0f, (boxW - maxW) / 2f).coerceAtMost(boxW / 2f)
@@ -145,7 +148,7 @@ internal object TextEngine {
         return Layout(glyphs, n, word, maxW, false, midOffset)
     }
 
-    private fun layoutOnPath(glyphs: List<Glyph>, lineWidths: FloatArray, path: android.graphics.Path, st: TextStyle, lineH: Float) {
+    private fun layoutOnPath(glyphs: List<Glyph>, lineWidths: FloatArray, path: android.graphics.Path, st: TextStyle, lineH: Float, firstMargin: Float, lastMargin: Float) {
         val pm = PathMeasure(path, false)
         val len = pm.length
         val pos = FloatArray(2); val tan = FloatArray(2)
@@ -153,13 +156,13 @@ internal object TextEngine {
         glyphs.forEach { g ->
             val lw = lineWidths[g.line]
             val count = glyphs.count { it.line == g.line }
-            val avail = len - st.firstMargin - st.lastMargin
+            val avail = len - firstMargin - lastMargin
             val extra = if (st.forceAlign && count > 1) (avail - lw) / (count - 1) else 0f
             val start = when {
-                st.forceAlign -> st.firstMargin
-                st.align == 0 -> st.firstMargin
-                st.align == 2 -> len - st.lastMargin - lw
-                else -> st.firstMargin + (avail - lw) / 2f
+                st.forceAlign -> firstMargin
+                st.align == 0 -> firstMargin
+                st.align == 2 -> len - lastMargin - lw
+                else -> firstMargin + (avail - lw) / 2f
             }
             val d = start + perLineCursor[g.line] + extra * g.col + g.adv / 2f
             perLineCursor[g.line] += g.adv
@@ -201,12 +204,17 @@ internal object TextEngine {
         val lineH = st.size * st.lineHeight
         var padX = st.size * 0.3f + (if (st.strokeEnabled) st.strokeWidth else 0f)
         var padY = padX
+        fun peak(id: PropId): Float {
+            val p = layer.p(id)
+            return max(abs(p.base), p.keys.maxOfOrNull { abs(it.v) } ?: 0f)
+        }
         for (a in layer.textAnimators.filter { it.enabled }) {
-            padX += abs(a.posX) + abs(a.wiggleX) + abs(a.tracking) * maxChars / 2f +
-                max(0f, max(a.scale, if (a.separateScale) a.scale else a.scale) - 100f) / 100f * maxW / 2f
-            padY += abs(a.posY) + abs(a.wiggleY) +
-                max(0f, (if (a.separateScale) a.scaleY else a.scale) - 100f) / 100f * lineH * lines.size / 2f
-            if (a.rotation != 0f || a.rotX != 0f || a.rotY != 0f || a.wiggleRot != 0f) {
+            fun pk(key: String) = peak(taId(a.slot, key))
+            padX += pk("POS_X") + pk("WIG_X") + pk("TRACKING") * maxChars / 2f +
+                max(0f, pk("SCALE") - 100f) / 100f * maxW / 2f
+            padY += pk("POS_Y") + pk("WIG_Y") +
+                max(0f, (if (a.separateScale) pk("SCALE_Y") else pk("SCALE")) - 100f) / 100f * lineH * lines.size / 2f
+            if (pk("ROTATION") != 0f || pk("ROT_X") != 0f || pk("ROT_Y") != 0f || pk("WIG_ROT") != 0f) {
                 val extra = st.size * 0.5f
                 padX += extra; padY += extra
             }
@@ -259,35 +267,37 @@ internal object TextEngine {
     }
 
     private fun applyAnimator(a: TextAnimator, unit: Int, layer: Layer, time: Float, fx: UnitFx) {
+        fun v(key: String) = layer.p(taId(a.slot, key)).valueAt(time)
         val local = if (a.reverse) layer.end - time else time - layer.start
-        val dur = max(a.durationMs / 1000f, 0.001f)
-        val raw = ((local - unit * a.delayMs / 1000f) / dur).coerceIn(0f, 1f)
-        val k = (1f - ease(a.ease, raw)) * (a.strength / 100f)
-        fx.opacity *= (1f + (a.opacity / 100f - 1f) * k).coerceIn(0f, 1f)
-        fx.dx += a.posX * k
-        fx.dy += a.posY * k
-        val sxFrom = a.scale / 100f
-        val syFrom = (if (a.separateScale) a.scaleY else a.scale) / 100f
+        val dur = max(v("DURATION") / 1000f, 0.001f)
+        val raw = ((local - unit * v("DELAY") / 1000f) / dur).coerceIn(0f, 1f)
+        val k = (1f - ease(a.ease, raw)) * (v("STRENGTH") / 100f)
+        fx.opacity *= (1f + (v("OPACITY") / 100f - 1f) * k).coerceIn(0f, 1f)
+        fx.dx += v("POS_X") * k
+        fx.dy += v("POS_Y") * k
+        val sxFrom = v("SCALE") / 100f
+        val syFrom = (if (a.separateScale) v("SCALE_Y") else v("SCALE")) / 100f
         fx.sx *= 1f + (sxFrom - 1f) * k
         fx.sy *= 1f + (syFrom - 1f) * k
-        fx.rot += a.rotation * k
-        fx.track += a.tracking * k
-        fx.rotX += a.rotX * k
-        fx.rotY += a.rotY * k
-        if (a.wiggleX != 0f || a.wiggleY != 0f || a.wiggleScale != 0f || a.wiggleRot != 0f) {
-            val u = (time - layer.start) * a.wiggleSpeed
-            val hold = (a.hold / 100f).coerceIn(0f, 1f)
+        fx.rot += v("ROTATION") * k
+        fx.track += v("TRACKING") * k
+        fx.rotX += v("ROT_X") * k
+        fx.rotY += v("ROT_Y") * k
+        val wx = v("WIG_X"); val wy = v("WIG_Y"); val wsc = v("WIG_SCALE"); val wr = v("WIG_ROT")
+        if (wx != 0f || wy != 0f || wsc != 0f || wr != 0f) {
+            val u = (time - layer.start) * v("WIG_SPEED")
+            val hold = (v("HOLD") / 100f).coerceIn(0f, 1f)
             fun n(chan: Int): Float {
                 val smooth = noise(a.seed, unit, chan, u)
                 if (hold <= 0f) return smooth
                 val stepped = noise(a.seed, unit, chan, floor(u))
                 return smooth + (stepped - smooth) * hold
             }
-            fx.dx += a.wiggleX * n(0)
-            fx.dy += a.wiggleY * n(1)
-            val ws = 1f + a.wiggleScale / 100f * n(2)
+            fx.dx += wx * n(0)
+            fx.dy += wy * n(1)
+            val ws = 1f + wsc / 100f * n(2)
             fx.sx *= ws; fx.sy *= ws
-            fx.rot += a.wiggleRot * n(3)
+            fx.rot += wr * n(3)
         }
     }
 

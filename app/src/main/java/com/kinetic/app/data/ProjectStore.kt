@@ -258,7 +258,7 @@ class ProjectStore(context: Context) {
                 PropId.CAM_BLUR -> 100.0
                 PropId.SPEED -> j.optDouble("speed", 1.0)
                 PropId.VOLUME -> j.optDouble("volume", 1.0)
-                else -> if (id.isVectorPoint) {
+                else -> com.kinetic.app.model.taDefault(id)?.toDouble() ?: if (id.isVectorPoint) {
                     val point = j.optJSONArray("vectorPoints")?.optJSONObject(id.vectorPointIndex)
                     point?.optDouble(if (id.vectorPointAxis == 'X') "x" else "y", 0.5) ?: 0.5
                 } else 0.0

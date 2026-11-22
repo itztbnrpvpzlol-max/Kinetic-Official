@@ -21,43 +21,71 @@ data class TextStyle(
     /** Line height as a multiple of the font size. */
     val lineHeight: Float = 1.2f,
     // Path options (After Effects "Path Options"): the text follows the layer's mask.
+    // First/Last Margin are keyframeable layer properties (PropId.TEXT_FIRST_MARGIN / TEXT_LAST_MARGIN).
     val pathOnMask: Boolean = false,
     val reversePath: Boolean = false,
     val perpendicular: Boolean = true,
-    val forceAlign: Boolean = false,
-    val firstMargin: Float = 0f,
-    val lastMargin: Float = 0f
+    val forceAlign: Boolean = false
 )
+
+/** Number of animator slots a text layer can hold (each owns a block of keyframeable properties). */
+const val TEXT_ANIMATOR_SLOTS = 6
+
+/** One keyframeable Flow parameter. Values live in [Layer.props] under `TA<slot>_<key>`. */
+data class TaField(val key: String, val label: String, val default: Float, val min: Float, val max: Float, val format: String)
+
+val TA_FIELDS: List<TaField> = listOf(
+    TaField("STRENGTH", "Strength", 100f, 0f, 300f, "%.0f%%"),
+    TaField("DELAY", "Delay", 80f, 0f, 3000f, "%.0f ms"),
+    TaField("DURATION", "Duration", 600f, 20f, 6000f, "%.0f ms"),
+    TaField("OPACITY", "Opacity", 100f, 0f, 100f, "%.0f%%"),
+    TaField("POS_X", "Pos X", 0f, -4000f, 4000f, "%.1f px"),
+    TaField("POS_Y", "Pos Y", 0f, -4000f, 4000f, "%.1f px"),
+    TaField("SCALE", "Scale", 100f, 0f, 1000f, "%.1f%%"),
+    TaField("SCALE_Y", "Scale Y", 100f, 0f, 1000f, "%.1f%%"),
+    TaField("ROTATION", "Rotation", 0f, -3600f, 3600f, "%.1f\u00B0"),
+    TaField("TRACKING", "Tracking", 0f, -300f, 600f, "%.1f px"),
+    TaField("ROT_X", "Rot X 3D", 0f, -1080f, 1080f, "%.1f\u00B0"),
+    TaField("ROT_Y", "Rot Y 3D", 0f, -1080f, 1080f, "%.1f\u00B0"),
+    TaField("WIG_X", "Wiggle X", 0f, 0f, 1000f, "%.1f px"),
+    TaField("WIG_Y", "Wiggle Y", 0f, 0f, 1000f, "%.1f px"),
+    TaField("WIG_SCALE", "Wiggle Scale", 0f, 0f, 500f, "%.1f%%"),
+    TaField("WIG_ROT", "Wiggle Rot", 0f, 0f, 720f, "%.1f\u00B0"),
+    TaField("WIG_SPEED", "Speed", 2f, 0f, 60f, "%.2f/s"),
+    TaField("HOLD", "Hold", 0f, 0f, 100f, "%.0f%%")
+)
+
+fun taId(slot: Int, key: String): PropId = PropId.valueOf("TA${slot}_$key")
+
+private val taLookup: Map<PropId, TaField> by lazy {
+    buildMap { for (slot in 0 until TEXT_ANIMATOR_SLOTS) for (f in TA_FIELDS) put(taId(slot, f.key), f) }
+}
+
+fun taFieldOf(id: PropId): TaField? = taLookup[id]
+fun taDefault(id: PropId): Float? = when (id) {
+    PropId.TEXT_FIRST_MARGIN, PropId.TEXT_LAST_MARGIN -> 0f
+    else -> taLookup[id]?.default
+}
+fun taFormat(id: PropId, v: Float): String? = when (id) {
+    PropId.TEXT_FIRST_MARGIN, PropId.TEXT_LAST_MARGIN -> fmt("%.1f px", v)
+    else -> taLookup[id]?.let { fmt(it.format, v) }
+}
+fun taClamp(id: PropId, v: Float): Float? = taLookup[id]?.let { v.coerceIn(it.min, it.max) }
+val PropId.isTextProp: Boolean get() = taLookup.containsKey(this) || this == PropId.TEXT_FIRST_MARGIN || this == PropId.TEXT_LAST_MARGIN
 
 /**
  * A "Flow" text animator. Every text unit (character / word / line) animates from the FROM values
- * below to its resting state, staggered by [delayMs]. Wiggle runs on top as continuous noise.
+ * to its resting state, staggered by Delay. Wiggle runs on top as continuous noise. All numbers are
+ * keyframeable layer properties in the animator's [slot]; this class holds the non-numeric settings.
  */
 data class TextAnimator(
     val id: String = UUID.randomUUID().toString(),
+    val slot: Int = 0,
     val name: String = "Animation 1",
     val enabled: Boolean = true,
     val collapsed: Boolean = false,
-    val strength: Float = 100f,
-    val delayMs: Float = 80f,
-    val durationMs: Float = 600f,
     val ease: String = "Ease Out",
-    val opacity: Float = 100f,
-    val posX: Float = 0f,
-    val posY: Float = 0f,
-    val scale: Float = 100f,
-    val scaleY: Float = 100f,
     val separateScale: Boolean = false,
-    val rotation: Float = 0f,
-    val tracking: Float = 0f,
-    val rotX: Float = 0f,
-    val rotY: Float = 0f,
-    val wiggleX: Float = 0f,
-    val wiggleY: Float = 0f,
-    val wiggleScale: Float = 0f,
-    val wiggleRot: Float = 0f,
-    val wiggleSpeed: Float = 2f,
-    val hold: Float = 0f,
     /** "All", "Per Character", "Per Word" or "Per Line". */
     val unit: String = "Per Character",
     val seed: Int = 0,
@@ -67,6 +95,15 @@ data class TextAnimator(
 
 /** Whether the mask on this layer clips it. Text that uses its mask as a path is not clipped. */
 val Layer.maskClips: Boolean get() = maskEnabled && !(type == LayerType.TEXT && textStyle.pathOnMask)
+
+/** Hash of every keyframeable text value, so cached text rasters refresh when a property changes. */
+fun Layer.textPropsHash(): Int {
+    var h = 17
+    for (a in textAnimators) for (f in TA_FIELDS) h = h * 31 + (props[taId(a.slot, f.key)]?.hashCode() ?: 0)
+    h = h * 31 + (props[PropId.TEXT_FIRST_MARGIN]?.hashCode() ?: 0)
+    h = h * 31 + (props[PropId.TEXT_LAST_MARGIN]?.hashCode() ?: 0)
+    return h
+}
 
 val Layer.textIsAnimated: Boolean get() =
     type == LayerType.TEXT && (textAnimators.any { it.enabled } || (textStyle.pathOnMask && maskPath != null))
@@ -91,7 +128,7 @@ internal fun TextStyle.toJson(): org.json.JSONObject = org.json.JSONObject()
     .put("gradientEnabled", gradientEnabled).put("gradientColor", gradientColor).put("gradientAngle", gradientAngle.toDouble())
     .put("align", align).put("tracking", tracking.toDouble()).put("lineHeight", lineHeight.toDouble())
     .put("pathOnMask", pathOnMask).put("reversePath", reversePath).put("perpendicular", perpendicular)
-    .put("forceAlign", forceAlign).put("firstMargin", firstMargin.toDouble()).put("lastMargin", lastMargin.toDouble())
+    .put("forceAlign", forceAlign)
 
 internal fun textStyleFromJson(j: org.json.JSONObject?): TextStyle {
     if (j == null) return TextStyle()
@@ -106,22 +143,14 @@ internal fun textStyleFromJson(j: org.json.JSONObject?): TextStyle {
         align = j.optInt("align", d.align), tracking = j.optDouble("tracking", 0.0).toFloat(),
         lineHeight = j.optDouble("lineHeight", d.lineHeight.toDouble()).toFloat(),
         pathOnMask = j.optBoolean("pathOnMask", false), reversePath = j.optBoolean("reversePath", false),
-        perpendicular = j.optBoolean("perpendicular", true), forceAlign = j.optBoolean("forceAlign", false),
-        firstMargin = j.optDouble("firstMargin", 0.0).toFloat(), lastMargin = j.optDouble("lastMargin", 0.0).toFloat()
+        perpendicular = j.optBoolean("perpendicular", true), forceAlign = j.optBoolean("forceAlign", false)
     )
 }
 
 internal fun List<TextAnimator>.toJson(): org.json.JSONArray = org.json.JSONArray().also { arr ->
     forEach { a ->
-        arr.put(org.json.JSONObject().put("id", a.id).put("name", a.name).put("enabled", a.enabled).put("collapsed", a.collapsed)
-            .put("strength", a.strength.toDouble()).put("delayMs", a.delayMs.toDouble()).put("durationMs", a.durationMs.toDouble())
-            .put("ease", a.ease).put("opacity", a.opacity.toDouble()).put("posX", a.posX.toDouble()).put("posY", a.posY.toDouble())
-            .put("scale", a.scale.toDouble()).put("scaleY", a.scaleY.toDouble()).put("separateScale", a.separateScale)
-            .put("rotation", a.rotation.toDouble()).put("tracking", a.tracking.toDouble())
-            .put("rotX", a.rotX.toDouble()).put("rotY", a.rotY.toDouble())
-            .put("wiggleX", a.wiggleX.toDouble()).put("wiggleY", a.wiggleY.toDouble())
-            .put("wiggleScale", a.wiggleScale.toDouble()).put("wiggleRot", a.wiggleRot.toDouble())
-            .put("wiggleSpeed", a.wiggleSpeed.toDouble()).put("hold", a.hold.toDouble())
+        arr.put(org.json.JSONObject().put("id", a.id).put("slot", a.slot).put("name", a.name).put("enabled", a.enabled)
+            .put("collapsed", a.collapsed).put("ease", a.ease).put("separateScale", a.separateScale)
             .put("unit", a.unit).put("seed", a.seed).put("reverse", a.reverse))
     }
 }
@@ -129,17 +158,12 @@ internal fun List<TextAnimator>.toJson(): org.json.JSONArray = org.json.JSONArra
 internal fun textAnimatorsFromJson(arr: org.json.JSONArray?): List<TextAnimator> {
     if (arr == null) return emptyList()
     val d = TextAnimator()
-    fun org.json.JSONObject.f(k: String, def: Float) = optDouble(k, def.toDouble()).toFloat()
     return (0 until arr.length()).mapNotNull { arr.optJSONObject(it) }.map { j ->
         TextAnimator(
-            id = j.optString("id", java.util.UUID.randomUUID().toString()), name = j.optString("name", d.name),
+            id = j.optString("id", java.util.UUID.randomUUID().toString()),
+            slot = j.optInt("slot", 0).coerceIn(0, TEXT_ANIMATOR_SLOTS - 1), name = j.optString("name", d.name),
             enabled = j.optBoolean("enabled", true), collapsed = j.optBoolean("collapsed", false),
-            strength = j.f("strength", d.strength), delayMs = j.f("delayMs", d.delayMs), durationMs = j.f("durationMs", d.durationMs),
-            ease = j.optString("ease", d.ease), opacity = j.f("opacity", d.opacity), posX = j.f("posX", 0f), posY = j.f("posY", 0f),
-            scale = j.f("scale", 100f), scaleY = j.f("scaleY", 100f), separateScale = j.optBoolean("separateScale", false),
-            rotation = j.f("rotation", 0f), tracking = j.f("tracking", 0f), rotX = j.f("rotX", 0f), rotY = j.f("rotY", 0f),
-            wiggleX = j.f("wiggleX", 0f), wiggleY = j.f("wiggleY", 0f), wiggleScale = j.f("wiggleScale", 0f),
-            wiggleRot = j.f("wiggleRot", 0f), wiggleSpeed = j.f("wiggleSpeed", d.wiggleSpeed), hold = j.f("hold", 0f),
+            ease = j.optString("ease", d.ease), separateScale = j.optBoolean("separateScale", false),
             unit = j.optString("unit", d.unit), seed = j.optInt("seed", 0), reverse = j.optBoolean("reverse", false)
         )
     }

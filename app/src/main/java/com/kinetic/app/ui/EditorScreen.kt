@@ -92,6 +92,7 @@ import com.kinetic.app.model.Layer
 import com.kinetic.app.model.LayerType
 import com.kinetic.app.model.PropId
 import com.kinetic.app.model.isDescendantOf
+import com.kinetic.app.model.isTextProp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -774,6 +775,7 @@ private fun ToolEditPanel(
         "Volume" -> PropId.VOLUME
         "Blending" -> PropId.OPACITY
         "Camera" -> editor.selectedProp
+        "Edit", "Animate" -> editor.selectedProp?.takeIf { it.isTextProp }
         else -> null
     }
     val selectedEffect = layer.effectStack.firstOrNull { it.id == editor.selectedEffectId }

@@ -55,7 +55,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kinetic.app.model.EditorState
 import com.kinetic.app.model.Layer
+import com.kinetic.app.model.PropId
+import com.kinetic.app.model.TEXT_ANIMATOR_SLOTS
+import com.kinetic.app.model.TA_FIELDS
 import com.kinetic.app.model.TextAnimator
+import com.kinetic.app.model.taId
 import com.kinetic.app.model.VectorPoint
 import com.kinetic.app.model.withBox
 import kotlin.math.abs
@@ -275,8 +279,8 @@ private fun LayoutTab(editor: EditorState, layer: Layer, onOpenMasking: () -> Un
         ToggleRow("Reverse Path", "Flip the direction of the text", st.reversePath) { editor.editText(layer, true) { it.copy(textStyle = st.copy(reversePath = !st.reversePath)) } }
         ToggleRow("Perpendicular To Path", "Rotate each character with the curve", st.perpendicular) { editor.editText(layer, true) { it.copy(textStyle = st.copy(perpendicular = !st.perpendicular)) } }
         ToggleRow("Force Alignment", "Spread text between the first and last margin", st.forceAlign) { editor.editText(layer, true) { it.copy(textStyle = st.copy(forceAlign = !st.forceAlign)) } }
-        SliderRow("First Margin", st.firstMargin, -1500f, 3000f, 0, { editor.beginEdit() }) { v -> editor.editText(layer) { it.copy(textStyle = it.textStyle.copy(firstMargin = v)) } }
-        SliderRow("Last Margin", st.lastMargin, -1500f, 3000f, 0, { editor.beginEdit() }) { v -> editor.editText(layer) { it.copy(textStyle = it.textStyle.copy(lastMargin = v)) } }
+        PropertyLine("First Margin", editor, layer, listOf(PropId.TEXT_FIRST_MARGIN))
+        PropertyLine("Last Margin", editor, layer, listOf(PropId.TEXT_LAST_MARGIN))
         Text("First Margin moves left-aligned text along the path, Last Margin moves right-aligned text. Force Alignment uses both.",
             color = KColors.Dim, fontSize = 10.sp)
     }
@@ -286,45 +290,52 @@ private fun LayoutTab(editor: EditorState, layer: Layer, onOpenMasking: () -> Un
 @Composable
 private fun AnimatorTab(editor: EditorState, layer: Layer) {
     val anims = layer.textAnimators
+    val freeSlot = (0 until TEXT_ANIMATOR_SLOTS).firstOrNull { s -> anims.none { it.slot == s } }
     if (anims.isEmpty()) {
         Text("No animators yet.", color = KColors.Muted, fontSize = 13.sp, modifier = Modifier.fillMaxWidth().padding(top = 10.dp), textAlign = TextAlign.Center)
     }
-    anims.forEachIndexed { index, a -> AnimatorCard(editor, layer, a, index) }
-    Row(Modifier.fillMaxWidth().height(44.dp).clip(RoundedCornerShape(12.dp)).background(KColors.Accent)
-        .clickable {
-            editor.editText(layer, true) { it.copy(textAnimators = it.textAnimators + TextAnimator(name = "Animation ${it.textAnimators.size + 1}")) }
+    anims.forEachIndexed { index, a -> AnimatorCard(editor, layer, a, index, freeSlot) }
+    Row(Modifier.fillMaxWidth().height(44.dp).clip(RoundedCornerShape(12.dp)).background(if (freeSlot != null) KColors.Accent else KColors.Surface2)
+        .clickable(enabled = freeSlot != null) {
+            editor.editText(layer, true) { it.copy(textAnimators = it.textAnimators + TextAnimator(slot = freeSlot!!, name = "Animation ${it.textAnimators.size + 1}")) }
         }, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
         KIcon(IconKind.PLUS, Color.White, Modifier.size(16.dp))
         Spacer(Modifier.width(8.dp))
-        Text("Add Animator", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+        Text(if (freeSlot != null) "Add Animator" else "Animator limit reached (${TEXT_ANIMATOR_SLOTS})", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
     }
 }
 
+private fun Layer.clearAnimatorProps(slot: Int): Layer = copy(props = props - TA_FIELDS.map { taId(slot, it.key) }.toSet())
+
 @Composable
-private fun AnimatorCard(editor: EditorState, layer: Layer, a: TextAnimator, index: Int) {
-    fun update(push: Boolean = false, f: (TextAnimator) -> TextAnimator) =
+private fun AnimatorCard(editor: EditorState, layer: Layer, a: TextAnimator, index: Int, freeSlot: Int?) {
+    fun update(push: Boolean = true, f: (TextAnimator) -> TextAnimator) =
         editor.editText(layer, push) { l -> l.copy(textAnimators = l.textAnimators.map { if (it.id == a.id) f(it) else it }) }
+    @Composable fun line(label: String, key: String) = PropertyLine(label, editor, layer, listOf(taId(a.slot, key)))
     var menu by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf(false) }
-    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(KColors.Surface2)) {
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(KColors.Row)) {
         Row(Modifier.fillMaxWidth().height(46.dp).padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
             KIcon(IconKind.HANDLE, KColors.Dim, Modifier.size(16.dp))
             Spacer(Modifier.width(8.dp))
             Text("Flow", color = KColors.Dim, fontSize = 10.sp)
             Spacer(Modifier.width(6.dp))
-            Text(a.name, color = KColors.Text, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-            IconTap(if (a.enabled) IconKind.EYE else IconKind.EYE_OFF, if (a.enabled) KColors.Accent else KColors.Dim) { update(true) { it.copy(enabled = !it.enabled) } }
-            IconTap(if (a.collapsed) IconKind.CHEVRON_DOWN else IconKind.CHEVRON_UP, KColors.Accent) { update(true) { it.copy(collapsed = !it.collapsed) } }
-            IconTap(IconKind.DELETE, KColors.Danger) { editor.editText(layer, true) { l -> l.copy(textAnimators = l.textAnimators.filter { it.id != a.id }) } }
+            Text(a.name, color = KColors.Text, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            IconTap(if (a.enabled) IconKind.EYE else IconKind.EYE_OFF, if (a.enabled) KColors.Accent else KColors.Dim) { update { it.copy(enabled = !it.enabled) } }
+            IconTap(if (a.collapsed) IconKind.CHEVRON_DOWN else IconKind.CHEVRON_UP, KColors.Muted) { update { it.copy(collapsed = !it.collapsed) } }
+            IconTap(IconKind.DELETE, KColors.Danger) {
+                editor.editText(layer, true) { l -> l.copy(textAnimators = l.textAnimators.filter { it.id != a.id }).clearAnimatorProps(a.slot) }
+            }
             Box {
                 IconTap(IconKind.MORE_V, KColors.Text) { menu = true }
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, containerColor = KColors.Surface) {
                     DropdownMenuItem(text = { Text("Rename", color = KColors.Text) }, onClick = { menu = false; renaming = true })
-                    DropdownMenuItem(text = { Text("Duplicate", color = KColors.Text) }, onClick = {
+                    if (freeSlot != null) DropdownMenuItem(text = { Text("Duplicate", color = KColors.Text) }, onClick = {
                         menu = false
                         editor.editText(layer, true) { l ->
-                            val copy = a.copy(id = java.util.UUID.randomUUID().toString(), name = a.name + " copy")
-                            l.copy(textAnimators = l.textAnimators.toMutableList().also { it.add(index + 1, copy) })
+                            val copy = a.copy(id = java.util.UUID.randomUUID().toString(), slot = freeSlot, name = a.name + " copy")
+                            val copiedProps = TA_FIELDS.mapNotNull { f -> l.props[taId(a.slot, f.key)]?.let { taId(freeSlot, f.key) to it } }.toMap()
+                            l.copy(textAnimators = l.textAnimators.toMutableList().also { it.add(index + 1, copy) }, props = l.props + copiedProps)
                         }
                     })
                     if (index > 0) DropdownMenuItem(text = { Text("Move up", color = KColors.Text) }, onClick = {
@@ -336,60 +347,64 @@ private fun AnimatorCard(editor: EditorState, layer: Layer, a: TextAnimator, ind
                         editor.editText(layer, true) { l -> l.copy(textAnimators = l.textAnimators.toMutableList().also { java.util.Collections.swap(it, index, index + 1) }) }
                     })
                     DropdownMenuItem(text = { Text("Reset values", color = KColors.Danger) }, onClick = {
-                        menu = false; update(true) { TextAnimator(id = it.id, name = it.name, unit = it.unit) }
+                        menu = false
+                        editor.editText(layer, true) { l -> l.clearAnimatorProps(a.slot) }
                     })
                 }
             }
         }
-        if (!a.collapsed) Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            val start = { editor.beginEdit() }
+        if (!a.collapsed) Column(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Section("Strength & Delay")
-            RulerRow("Strength (%)", a.strength, 0f, 300f, 5f, 2.2f, start) { v -> update { it.copy(strength = v) } }
-            RulerRow("Delay (ms)", a.delayMs, 0f, 1500f, 10f, 0.9f, start) { v -> update { it.copy(delayMs = v) } }
-            RulerRow("Duration (ms)", a.durationMs, 50f, 4000f, 50f, 0.35f, start) { v -> update { it.copy(durationMs = v) } }
-            ChipRow("Ease", TextEngine.eases, a.ease) { e -> update(true) { it.copy(ease = e) } }
+            line("Strength", "STRENGTH")
+            line("Delay", "DELAY")
+            line("Duration", "DURATION")
+            Spacer(Modifier.height(4.dp))
+            ChipRow("Ease", TextEngine.eases, a.ease) { e -> update { it.copy(ease = e) } }
             Section("Transform")
-            RulerRow("Opacity (%)", a.opacity, 0f, 100f, 5f, 2.4f, start) { v -> update { it.copy(opacity = v) } }
-            RulerRow("Pos X (px)", a.posX, -1500f, 1500f, 5f, 1.4f, start) { v -> update { it.copy(posX = v) } }
-            RulerRow("Pos Y (px)", a.posY, -1500f, 1500f, 5f, 1.4f, start) { v -> update { it.copy(posY = v) } }
-            RulerRow(if (a.separateScale) "Scale X (%)" else "Scale (%)", a.scale, 0f, 500f, 5f, 1.4f, start) { v -> update { it.copy(scale = v) } }
-            if (a.separateScale) RulerRow("Scale Y (%)", a.scaleY, 0f, 500f, 5f, 1.4f, start) { v -> update { it.copy(scaleY = v) } }
-            RulerRow("Rotation (°)", a.rotation, -720f, 720f, 5f, 1.4f, start) { v -> update { it.copy(rotation = v) } }
-            RulerRow("Tracking (px)", a.tracking, -100f, 200f, 5f, 1.4f, start) { v -> update { it.copy(tracking = v) } }
-            RulerRow("Rot X 3D (°)", a.rotX, -360f, 360f, 5f, 1.4f, start) { v -> update { it.copy(rotX = v) } }
-            RulerRow("Rot Y 3D (°)", a.rotY, -360f, 360f, 5f, 1.4f, start) { v -> update { it.copy(rotY = v) } }
+            line("Opacity", "OPACITY")
+            line("Position X", "POS_X")
+            line("Position Y", "POS_Y")
+            line(if (a.separateScale) "Scale X" else "Scale", "SCALE")
+            if (a.separateScale) line("Scale Y", "SCALE_Y")
+            line("Rotation", "ROTATION")
+            line("Tracking", "TRACKING")
+            line("Rotation X 3D", "ROT_X")
+            line("Rotation Y 3D", "ROT_Y")
             Section("Wiggle")
-            RulerRow("Wiggle X (px)", a.wiggleX, 0f, 400f, 5f, 1.4f, start) { v -> update { it.copy(wiggleX = v) } }
-            RulerRow("Wiggle Y (px)", a.wiggleY, 0f, 400f, 5f, 1.4f, start) { v -> update { it.copy(wiggleY = v) } }
-            RulerRow("Wiggle Scale (%)", a.wiggleScale, 0f, 200f, 5f, 1.4f, start) { v -> update { it.copy(wiggleScale = v) } }
-            RulerRow("Wiggle Rot (°)", a.wiggleRot, 0f, 360f, 5f, 1.4f, start) { v -> update { it.copy(wiggleRot = v) } }
-            RulerRow("Speed (/s)", a.wiggleSpeed, 0f, 30f, 1f, 5f, start, decimals = 1) { v -> update { it.copy(wiggleSpeed = v) } }
-            RulerRow("Hold (%)", a.hold, 0f, 100f, 5f, 2.4f, start) { v -> update { it.copy(hold = v) } }
+            line("Wiggle X", "WIG_X")
+            line("Wiggle Y", "WIG_Y")
+            line("Wiggle Scale", "WIG_SCALE")
+            line("Wiggle Rotation", "WIG_ROT")
+            line("Speed", "WIG_SPEED")
+            line("Hold", "HOLD")
             Section("Unit")
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                 TextEngine.units.forEach { u ->
-                    Box(Modifier.weight(1f).height(38.dp).clip(RoundedCornerShape(8.dp))
-                        .background(if (a.unit == u) KColors.Accent else KColors.Bg)
-                        .clickable { update(true) { it.copy(unit = u) } }, contentAlignment = Alignment.Center) {
-                        Text(u, color = if (a.unit == u) Color.White else KColors.Text, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                    Box(Modifier.weight(1f).height(30.dp).clip(RoundedCornerShape(6.dp))
+                        .background(if (a.unit == u) KColors.Accent.copy(alpha = .12f) else KColors.Bg)
+                        .border(1.dp, if (a.unit == u) KColors.Accent.copy(alpha = .55f) else KColors.Line, RoundedCornerShape(6.dp))
+                        .clickable { update { it.copy(unit = u) } }, contentAlignment = Alignment.Center) {
+                        Text(u, color = if (a.unit == u) KColors.Accent else KColors.Text, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
                     }
                 }
             }
-            ToggleRow("Separate Scale", "Scale X and Y apart", a.separateScale) { update(true) { it.copy(separateScale = !it.separateScale, scaleY = if (!it.separateScale) it.scale else it.scaleY) } }
-            Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            ToggleRow("Separate Scale", "Scale X and Y apart", a.separateScale) { update { it.copy(separateScale = !it.separateScale) } }
+            Row(Modifier.fillMaxWidth().height(40.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("Wiggle Seed", color = KColors.Text, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-                    Text("Re-roll the random motion", color = KColors.Dim, fontSize = 10.sp)
+                    Text("Wiggle Seed", color = KColors.Text, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                    Text("Re-roll the random motion", color = KColors.Dim, fontSize = 9.sp)
                 }
-                Text(a.seed.toString(), color = KColors.Muted, fontSize = 12.sp)
-                Spacer(Modifier.width(10.dp))
-                Box(Modifier.clip(RoundedCornerShape(8.dp)).background(KColors.Bg).clickable { update(true) { it.copy(seed = (Math.random() * 9999).toInt()) } }
-                    .padding(horizontal = 14.dp, vertical = 9.dp)) { Text("Random", color = KColors.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold) }
+                Text(a.seed.toString(), color = KColors.Muted, fontSize = 11.sp)
+                Spacer(Modifier.width(8.dp))
+                Box(Modifier.height(30.dp).clip(RoundedCornerShape(6.dp)).background(KColors.Bg).border(1.dp, KColors.Line, RoundedCornerShape(6.dp))
+                    .clickable { update { it.copy(seed = (Math.random() * 9999).toInt()) } }.padding(horizontal = 12.dp), contentAlignment = Alignment.Center) {
+                    Text("Random", color = KColors.Accent, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                }
             }
-            ToggleRow("Reverse", "Exit animation", a.reverse) { update(true) { it.copy(reverse = !it.reverse) } }
+            ToggleRow("Reverse", "Exit animation", a.reverse) { update { it.copy(reverse = !it.reverse) } }
         }
     }
-    if (renaming) TextInputDialog("Rename animator", a.name, onDone = { n -> renaming = false; update(true) { it.copy(name = n.ifBlank { it.name }) } }, onDismiss = { renaming = false })
+    if (renaming) TextInputDialog("Rename animator", a.name, onDone = { n -> renaming = false; update { it.copy(name = n.ifBlank { it.name }) } }, onDismiss = { renaming = false })
 }
 
 // ---------------------------------------------------------------- shared widgets
@@ -464,94 +479,15 @@ private fun SwatchRow(current: Int, dimmed: Boolean = false, onPick: (Int) -> Un
     }
 }
 
-/** Horizontal track slider with a tap-to-type value box. */
+/** Kinetic-style property row: label on the left, drag-to-scrub value box on the right (same look as the Properties panel). */
 @Composable
 private fun SliderRow(label: String, value: Float, min: Float, max: Float, decimals: Int, onStart: () -> Unit, onChange: (Float) -> Unit) {
-    var typing by remember { mutableStateOf(false) }
-    val latest by rememberUpdatedState(onChange)
-    val latestStart by rememberUpdatedState(onStart)
-    var width by remember { mutableFloatStateOf(1f) }
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(label, color = KColors.Text, fontSize = 13.sp, fontWeight = FontWeight.Medium, modifier = Modifier.width(78.dp), maxLines = 1)
-        Box(Modifier.weight(1f).height(36.dp).onSizeChanged { width = it.width.toFloat().coerceAtLeast(1f) }
-            .pointerInput(min, max) {
-                detectDragGestures(onDragStart = { o -> latestStart(); latest((min + (o.x / width).coerceIn(0f, 1f) * (max - min))) }) { change, _ ->
-                    change.consume(); latest(min + (change.position.x / width).coerceIn(0f, 1f) * (max - min))
-                }
-            }.pointerInput(min, max) {
-                detectTapGestures { o -> latestStart(); latest(min + (o.x / width).coerceIn(0f, 1f) * (max - min)) }
-            }, contentAlignment = Alignment.CenterStart) {
-            val frac = ((value - min) / (max - min)).coerceIn(0f, 1f)
-            Box(Modifier.fillMaxWidth().height(14.dp).clip(RoundedCornerShape(7.dp)).background(KColors.Bg))
-            Box(Modifier.fillMaxWidth(frac.coerceAtLeast(0.02f)).height(14.dp).clip(RoundedCornerShape(7.dp)).background(KColors.Accent))
-            val density = LocalDensity.current.density
-            Box(Modifier.padding(start = ((width * frac) / density - 2f).coerceAtLeast(0f).dp).width(4.dp).height(26.dp).clip(RoundedCornerShape(2.dp)).background(Color.White))
-        }
-        Spacer(Modifier.width(10.dp))
-        Box(Modifier.width(62.dp).height(34.dp).clip(RoundedCornerShape(8.dp)).background(KColors.Bg)
-            .border(1.dp, KColors.Dim, RoundedCornerShape(8.dp)).clickable { typing = true }, contentAlignment = Alignment.Center) {
-            Text(fmtNum(value, decimals), color = KColors.Text, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-        }
+    Row(Modifier.fillMaxWidth().height(35.dp).padding(horizontal = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, color = KColors.Text, fontSize = 12.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+        ScrubValueBar("", value, Modifier.weight(1f), step = (max - min) / 300f, minValue = min, maxValue = max,
+            valueFormat = "%.${decimals}f", onScrubStart = onStart, onValueChange = onChange)
     }
-    if (typing) TextInputDialog(label, fmtNum(value, decimals), onDone = { s ->
-        typing = false
-        s.trim().toFloatOrNull()?.let { onStart(); onChange(it) }
-    }, onDismiss = { typing = false })
-}
-
-/** Alight-Motion-style scrolling ruler: drag horizontally and the ruler moves under a fixed value bubble. */
-@Composable
-private fun RulerRow(
-    label: String, value: Float, min: Float, max: Float, tick: Float, dpPerUnit: Float,
-    onStart: () -> Unit, decimals: Int = 0, onChange: (Float) -> Unit
-) {
-    val density = LocalDensity.current.density
-    val latestValue by rememberUpdatedState(value)
-    val latestChange by rememberUpdatedState(onChange)
-    val latestStart by rememberUpdatedState(onStart)
-    var typing by remember { mutableStateOf(false) }
-    val tickColor = KColors.Dim
-    Row(Modifier.fillMaxWidth().height(54.dp).clip(RoundedCornerShape(10.dp)).background(KColors.Bg), verticalAlignment = Alignment.CenterVertically) {
-        Text(label, color = KColors.Text, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(0.34f).padding(start = 10.dp), maxLines = 2)
-        Box(Modifier.weight(0.66f).fillMaxSize().pointerInput(min, max, dpPerUnit) {
-            var startValue = 0f; var total = 0f
-            detectHorizontalDragGestures(onDragStart = { startValue = latestValue; total = 0f; latestStart() }) { change, drag ->
-                change.consume()
-                total += drag
-                latestChange((startValue - total / (dpPerUnit * density)).coerceIn(min, max))
-            }
-        }) {
-            Canvas(Modifier.fillMaxSize()) {
-                val cx = size.width / 2f
-                val pxPerUnit = dpPerUnit * density
-                val half = cx / pxPerUnit
-                var t = ceil(((value - half) / tick).toDouble()).toFloat() * tick
-                val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-                    color = 0xFF9D9D9D.toInt(); textSize = 9f * density; textAlign = android.graphics.Paint.Align.CENTER
-                }
-                var guard = 0
-                while (t <= value + half && guard++ < 400) {
-                    if (t >= min - 0.001f && t <= max + 0.001f) {
-                        val x = cx + (t - value) * pxPerUnit
-                        val major = abs((t / tick).roundToInt()) % 2 == 0
-                        val hgt = (if (major) 14f else 8f) * density
-                        drawLine(tickColor, Offset(x, size.height - 6f * density), Offset(x, size.height - 6f * density - hgt), strokeWidth = 1.2f * density)
-                        if (major) drawContext.canvas.nativeCanvas.drawText(fmtNum(t, if (tick < 1f) 1 else 0), x, size.height - 24f * density, paint)
-                    }
-                    t += tick
-                }
-                drawLine(KColors.Accent, Offset(cx, size.height - 6f * density), Offset(cx, size.height - 26f * density), strokeWidth = 2f * density)
-            }
-            Box(Modifier.align(Alignment.TopCenter).padding(top = 4.dp).clip(RoundedCornerShape(8.dp)).background(KColors.Accent)
-                .clickable { typing = true }.padding(horizontal = 12.dp, vertical = 3.dp)) {
-                Text(fmtNum(value, decimals), color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-            }
-        }
-    }
-    if (typing) TextInputDialog(label, fmtNum(value, decimals), onDone = { s ->
-        typing = false
-        s.trim().toFloatOrNull()?.let { onStart(); onChange(it.coerceIn(min, max)) }
-    }, onDismiss = { typing = false })
+    Box(Modifier.fillMaxWidth().height(1.dp).background(KColors.Line.copy(alpha = 0.55f)))
 }
 
 @Composable

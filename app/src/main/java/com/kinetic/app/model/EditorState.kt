@@ -888,6 +888,7 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
             id == PropId.CAM_FOCUS -> value.coerceAtLeast(0f)
             id == PropId.CAM_APERTURE -> value.coerceAtLeast(0f)
             id == PropId.CAM_BLUR -> value.coerceIn(0f, 1000f)
+            taClamp(id, value) != null -> taClamp(id, value)!!
             else -> value
         }
         val t = time
@@ -900,7 +901,10 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
                 next = next + (other to l.p(other).withValueAt(t, v, eps))
             }
             val result = l.copy(props = next)
-            if (isPositionAxis(id)) syncPositionKeyframes(result) else result
+            if (id.isTextProp && l.type == LayerType.TEXT) {
+                val (bw, bh) = com.kinetic.app.ui.TextEngine.autoFit(result)
+                result.withBox(bw, bh)
+            } else if (isPositionAxis(id)) syncPositionKeyframes(result) else result
         }
     }
 

@@ -35,6 +35,7 @@ import com.kinetic.app.data.PreviewDiagnostics
 import com.kinetic.app.model.COMP_H
 import com.kinetic.app.model.maskClips
 import com.kinetic.app.model.textIsAnimated
+import com.kinetic.app.model.textPropsHash
 import com.kinetic.app.model.COMP_W
 import com.kinetic.app.model.EditorState
 import com.kinetic.app.model.LayerType
@@ -273,7 +274,7 @@ fun CpuPreviewCanvas(
     // of the plain vector drawing. Old results are left to the GC rather than recycled, because
     // the draw pass may still hold them.
     val vectorSignature = editor.previewLayers.filter { it.type == LayerType.TEXT || it.type == LayerType.SHAPE }.map {
-        "${it.id}|${it.text}|${it.textStyle.hashCode()}|${it.textAnimators.hashCode()}|${it.color}|${it.width}|${it.height}|${it.shapeKind}|${it.vectorClosed}|${it.vectorPoints.hashCode()}|${it.visible}|${it.start}|${it.duration}|${it.effectStack.hashCode()}"
+        "${it.id}|${it.text}|${it.textStyle.hashCode()}|${it.textAnimators.hashCode()}|${it.textPropsHash()}|${it.color}|${it.width}|${it.height}|${it.shapeKind}|${it.vectorClosed}|${it.vectorPoints.hashCode()}|${it.visible}|${it.start}|${it.duration}|${it.effectStack.hashCode()}"
     }
     LaunchedEffect(vectorSignature) {
         while (true) {
@@ -289,7 +290,7 @@ fun CpuPreviewCanvas(
                 }
                 val timeDependent = playing || EffectStackRunner.isTimeDependent(stack)
                 val bucket = if (timeDependent || layer.textIsAnimated) (time * 24).toInt() else 0
-                var key = layer.text.hashCode().toLong() * 31L + layer.textStyle.hashCode() * 17L + layer.textAnimators.hashCode()
+                var key = layer.text.hashCode().toLong() * 31L + layer.textStyle.hashCode() * 17L + layer.textAnimators.hashCode() + layer.textPropsHash()
                 if (layer.textStyle.pathOnMask) key = key * 31L + layer.maskPath.hashCode()
                 key = key * 31L + layer.color + layer.width.hashCode() + layer.height.hashCode() + layer.shapeKind.hashCode()
                 key = key * 31L + layer.vectorPointsAt(time).hashCode() + layer.vectorClosed.hashCode()

@@ -59,6 +59,7 @@ import com.kinetic.app.data.PreviewDiagnostics
 import com.kinetic.app.model.COMP_H
 import com.kinetic.app.model.maskClips
 import com.kinetic.app.model.textIsAnimated
+import com.kinetic.app.model.textPropsHash
 import com.kinetic.app.model.COMP_W
 import com.kinetic.app.model.EditorState
 import com.kinetic.app.model.LayerType
@@ -633,7 +634,7 @@ private fun GpuCompositionPreviewCanvas(
                 val signature = if (layer.type == LayerType.TEXT)
                     ((((layer.text.hashCode() * 31 + layer.color) * 31 +
                         logicalWidth * 7 + logicalHeight) * 31 + layer.textStyle.hashCode()) * 31 +
-                        layer.textAnimators.hashCode()) * 31 +
+                        layer.textAnimators.hashCode() + layer.textPropsHash()) * 31 +
                         (if (layer.textStyle.pathOnMask) layer.maskPath.hashCode() else 0) * 7 +
                         (if (layer.textIsAnimated) (editor.time * 30f).toInt() else 0)
                 else (((layer.color * 31 + logicalWidth * 7 + logicalHeight) * 31 +
