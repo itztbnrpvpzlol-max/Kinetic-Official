@@ -49,6 +49,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -68,6 +69,7 @@ import kotlinx.coroutines.delay
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.roundToInt
 
 private enum class GraphMode { EASE, VALUE, SPEED }
 
@@ -100,10 +102,10 @@ private val presetsByType: Map<KeyType, List<GraphPreset>> = mapOf(
         GraphPreset("Hold", KeyType.HOLD)
     ),
     KeyType.ELASTIC to listOf(
-        GraphPreset("Soft", KeyType.ELASTIC, p1 = 0.6f, p2 = 2.2f),
-        GraphPreset("Classic", KeyType.ELASTIC, p1 = 1f, p2 = 3f),
-        GraphPreset("Springy", KeyType.ELASTIC, p1 = 1.4f, p2 = 4.5f),
-        GraphPreset("Wild", KeyType.ELASTIC, p1 = 2.2f, p2 = 7f)
+        GraphPreset("Soft", KeyType.ELASTIC, p1 = 0.1f, p2 = 2f),
+        GraphPreset("Classic", KeyType.ELASTIC, p1 = 0.23f, p2 = 3f),
+        GraphPreset("Springy", KeyType.ELASTIC, p1 = 0.4f, p2 = 4f),
+        GraphPreset("Wild", KeyType.ELASTIC, p1 = 0.7f, p2 = 6f)
     ),
     KeyType.BOUNCE to listOf(
         GraphPreset("Light", KeyType.BOUNCE, p1 = 2f, p2 = 0.25f),
@@ -287,6 +289,7 @@ private fun CurveEditor(
     val haptic = LocalHapticFeedback.current
     var dragKeys by remember { mutableStateOf<List<Keyframe>?>(null) }
     var activeHandle by remember { mutableStateOf(0) }
+    var dragRange by remember { mutableStateOf<Pair<Float, Float>?>(null) }
     var lastCommit by remember { mutableLongStateOf(0L) }
     var dirtyIndex by remember { mutableStateOf(0) }
     val latestKeys by rememberUpdatedState(keys)
@@ -328,21 +331,34 @@ private fun CurveEditor(
             // ---- canvas
             Canvas(Modifier.fillMaxSize().clipToBounds().pointerInput(Unit) {
                 val pad = 16.dp.toPx()
+                val rail = 14.dp.toPx()
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
                     val ks = latestShown
                     val s = latestSeg
                     if (s !in 0 until ks.lastIndex) return@awaitEachGesture
-                    val g = GraphGeometry(size.width.toFloat(), size.height.toFloat(), pad, ks, s, latestMode)
+                    val key = ks[s]
+                    val range = if (latestMode == GraphMode.EASE)
+                        GraphGeometry(size.width.toFloat(), size.height.toFloat(), pad, rail, ks, s, latestMode, null).let { it.easeLo to it.easeHi }
+                    else null
+                    val g = GraphGeometry(size.width.toFloat(), size.height.toFloat(), pad, rail, ks, s, latestMode, range)
                     var handle = 0
                     var valueIndex = -1
-                    val key = ks[s]
                     val hit = 46.dp.toPx()
-                    if (latestMode == GraphMode.EASE && (key.family() == KeyType.BEZIER)) {
-                        val h = easeHandles(key)
-                        val p1 = g.pt(h[0], h[1]); val p2 = g.pt(h[2], h[3])
-                        val d1 = (down.position - p1).getDistance(); val d2 = (down.position - p2).getDistance()
-                        if (min(d1, d2) <= hit) handle = if (d1 <= d2) 1 else 2
+                    if (latestMode == GraphMode.EASE) {
+                        if (key.family() == KeyType.BEZIER) {
+                            val h = easeHandles(key)
+                            val p1 = g.pt(h[0], h[1]); val p2 = g.pt(h[2], h[3])
+                            val d1 = (down.position - p1).getDistance(); val d2 = (down.position - p2).getDistance()
+                            if (min(d1, d2) <= hit) handle = if (d1 <= d2) 1 else 2
+                        } else {
+                            val ph = paramHandles(key, g)
+                            var best = hit
+                            for (i in 0..1) ph[i]?.let { p ->
+                                val d = (down.position - p).getDistance()
+                                if (d <= best) { best = d; handle = 3 + i }
+                            }
+                        }
                     } else if (latestMode == GraphMode.VALUE) {
                         val p0 = g.valuePt(0f, ks[s].v); val p1 = g.valuePt(1f, ks[s + 1].v)
                         val d0 = (down.position - p0).getDistance(); val d1 = (down.position - p1).getDistance()
@@ -352,34 +368,39 @@ private fun CurveEditor(
                     down.consume()
                     latestOnBegin()
                     activeHandle = handle
+                    dragRange = range
                     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                     var base = key
-                    if (handle != 0 && key.type != KeyType.BEZIER) {
+                    if ((handle == 1 || handle == 2) && key.type != KeyType.BEZIER) {
                         val h = easeHandles(key)
                         base = key.copy(type = KeyType.BEZIER, x1 = h[0], y1 = h[1], x2 = h[2], y2 = h[3])
                     }
-                    fun move(pos: Offset, force: Boolean) {
-                        if (handle != 0) {
-                            val nx = ((pos.x - g.left) / g.w).coerceIn(0f, 1f)
-                            val ny = g.unY(pos.y).coerceIn(EASE_LO + 0.05f, EASE_HI - 0.05f)
-                            // gentle snapping to the 0 / 1 rails and thirds
-                            val sy = snap(ny, floatArrayOf(0f, 1f), 0.035f)
-                            val sx = snap(nx, floatArrayOf(0f, 1f / 3f, 0.5f, 2f / 3f, 1f), 0.02f)
-                            val updated = if (handle == 1) base.copy(x1 = sx, y1 = sy) else base.copy(x2 = sx, y2 = sy)
-                            applyLive(s, updated, force)
-                            base = updated
-                        } else {
-                            val v = g.unValue(pos.y)
-                            applyLive(valueIndex, latestShown[valueIndex].copy(v = v), force)
+                    fun move(pos: Offset) {
+                        when (handle) {
+                            1, 2 -> {
+                                val nx = ((pos.x - g.left) / g.w).coerceIn(0f, 1f)
+                                val ny = g.unY(pos.y).coerceIn(g.easeLo + 0.02f, g.easeHi - 0.02f)
+                                val sy = snap(ny, floatArrayOf(0f, 1f), 0.035f)
+                                val sx = snap(nx, floatArrayOf(0f, 1f / 3f, 0.5f, 2f / 3f, 1f), 0.02f)
+                                val updated = if (handle == 1) base.copy(x1 = sx, y1 = sy) else base.copy(x2 = sx, y2 = sy)
+                                applyLive(s, updated)
+                                base = updated
+                            }
+                            3, 4 -> {
+                                val updated = dragParam(base, handle, pos, g)
+                                applyLive(s, updated)
+                                base = updated
+                            }
+                            else -> applyLive(valueIndex, latestShown[valueIndex].copy(v = g.unValue(pos.y)))
                         }
                     }
-                    move(down.position, false)
+                    move(down.position)
                     while (true) {
                         val event = awaitPointerEvent()
                         val ch = event.changes.firstOrNull { it.id == down.id } ?: break
                         if (!ch.pressed) { ch.consume(); break }
                         ch.consume()
-                        move(ch.position, false)
+                        move(ch.position)
                     }
                     val finalKeys = dragKeys
                     if (finalKeys != null) {
@@ -388,9 +409,10 @@ private fun CurveEditor(
                     }
                     dragKeys = null
                     activeHandle = 0
+                    dragRange = null
                 }
             }) {
-                drawCurveScene(shown, seg, mode, activeHandle)
+                drawCurveScene(shown, seg, mode, activeHandle, dragRange)
             }
 
             // ---- overlays
@@ -422,9 +444,18 @@ private fun CurveEditor(
                 }
                 Text(formulaText(a), color = KColors.Muted, fontSize = 8.sp, maxLines = 1,
                     modifier = Modifier.align(Alignment.TopEnd).padding(top = 12.dp, end = 10.dp))
-                if (family != KeyType.BEZIER) {
-                    ParamChips(a, Modifier.align(Alignment.BottomCenter).padding(bottom = 8.dp),
-                        onBegin = onBeginEdit, onLive = { applyLive(seg, it) }, onDone = { dragKeys = null; onKeyChange(seg, it) })
+                if (family == KeyType.STEPS) {
+                    Row(Modifier.align(Alignment.BottomEnd).padding(end = 8.dp, bottom = 8.dp).clip(RoundedCornerShape(9.dp))
+                        .background(KColors.Surface.copy(alpha = 0.94f)).border(1.dp, KColors.Line, RoundedCornerShape(9.dp))) {
+                        listOf("End" to 0f, "Start" to 1f).forEach { (label, jump) ->
+                            val on = (a.p2 >= 0.5f) == (jump >= 0.5f)
+                            Box(Modifier.height(26.dp).clip(RoundedCornerShape(9.dp))
+                                .background(if (on) KColors.Accent.copy(alpha = 0.2f) else Color.Transparent)
+                                .clickable { applyDiscrete(seeded(a).copy(p2 = jump)) }.padding(horizontal = 9.dp), contentAlignment = Alignment.Center) {
+                                Text(label, color = if (on) KColors.Accent else KColors.Muted, fontSize = 9.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                    }
                 }
             } else {
                 Text(if (mode == GraphMode.VALUE) "Drag the end points up or down to change their values"
@@ -465,7 +496,7 @@ private fun formulaText(k: Keyframe): String = when (k.type) {
     KeyType.BEZIER -> "cubic-bezier(${fmt2(k.x1)}, ${fmt2(k.y1)}, ${fmt2(k.x2)}, ${fmt2(k.y2)})"
     KeyType.LINEAR -> "linear"
     KeyType.HOLD -> "hold"
-    KeyType.ELASTIC -> "elastic(${fmt2(if (k.p1 > 0f) k.p1 else 1f)}, ${fmt2(if (k.p2 > 0f) k.p2 else 3f)})"
+    KeyType.ELASTIC -> if (k.p1 > 0f) "elastic(${fmt2(k.p1)}, ${fmt2(if (k.p2 > 0f) k.p2 else 3f)}, out)" else "elastic"
     KeyType.BOUNCE -> if (k.p1 > 0f) "bounce(${k.p1.toInt()}, ${fmt2(k.p2)})" else "bounce"
     KeyType.WAVE -> "wave(${fmt2(if (k.p1 > 0f) k.p1 else 2f)}, ${fmt2(k.p2)})"
     KeyType.STEPS -> "steps(${(if (k.p1 > 0f) k.p1 else 5f).toInt()}, ${if (k.p2 >= 0.5f) "start" else "end"})"
@@ -474,53 +505,6 @@ private fun formulaText(k: Keyframe): String = when (k.type) {
 // ---------------------------------------------------------------------------------------------
 // Parameter chips (Elastic / Bounce / Wave / Steps)
 // ---------------------------------------------------------------------------------------------
-
-private data class ParamSpec(val label: String, val min: Float, val max: Float, val step: Float, val format: String, val index: Int)
-
-private fun paramSpecs(type: KeyType): List<ParamSpec> = when (type) {
-    KeyType.ELASTIC -> listOf(ParamSpec("Amplitude", 0.1f, 3f, 0.012f, "%.2f", 1), ParamSpec("Oscillation", 1f, 10f, 0.04f, "%.1f", 2))
-    KeyType.BOUNCE -> listOf(ParamSpec("Bounces", 1f, 10f, 0.05f, "%.0f", 1), ParamSpec("Bounciness", 0.05f, 0.9f, 0.004f, "%.2f", 2))
-    KeyType.WAVE -> listOf(ParamSpec("Cycles", 0.5f, 10f, 0.05f, "%.1f", 1), ParamSpec("Amplitude", 0f, 0.5f, 0.002f, "%.2f", 2))
-    KeyType.STEPS -> listOf(ParamSpec("Steps", 2f, 24f, 0.08f, "%.0f", 1))
-    else -> emptyList()
-}
-
-@Composable
-private fun ParamChips(k: Keyframe, modifier: Modifier, onBegin: () -> Unit, onLive: (Keyframe) -> Unit, onDone: (Keyframe) -> Unit) {
-    val specs = paramSpecs(k.type)
-    val latestKey by rememberUpdatedState(k)
-    Row(modifier, horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-        specs.forEach { spec ->
-            val value = if (spec.index == 1) k.p1 else k.p2
-            val shownValue = if (value <= 0f && spec.index == 1) defaultCurveParams(k.type).first else if (value <= 0f && spec.index == 2 && k.type != KeyType.STEPS) defaultCurveParams(k.type).second else value
-            Row(Modifier.clip(RoundedCornerShape(9.dp)).background(KColors.Surface.copy(alpha = 0.94f))
-                .border(1.dp, KColors.Line, RoundedCornerShape(9.dp)).padding(start = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(spec.label, color = KColors.Muted, fontSize = 8.sp, fontWeight = FontWeight.SemiBold)
-                Spacer(Modifier.width(4.dp))
-                ScrubValueBar("", shownValue, Modifier.width(58.dp).height(28.dp), step = spec.step, minValue = spec.min, maxValue = spec.max,
-                    valueFormat = spec.format, onScrubStart = onBegin,
-                    onValueChange = { v ->
-                        val cur = latestKey
-                        val seeded = if (cur.p1 <= 0f) cur.copy(p1 = defaultCurveParams(cur.type).first, p2 = if (cur.type == KeyType.STEPS) cur.p2 else defaultCurveParams(cur.type).second) else cur
-                        onLive(if (spec.index == 1) seeded.copy(p1 = v) else seeded.copy(p2 = v))
-                    })
-            }
-        }
-        if (k.type == KeyType.STEPS) {
-            Row(Modifier.clip(RoundedCornerShape(9.dp)).background(KColors.Surface.copy(alpha = 0.94f))
-                .border(1.dp, KColors.Line, RoundedCornerShape(9.dp)), verticalAlignment = Alignment.CenterVertically) {
-                listOf("End" to 0f, "Start" to 1f).forEach { (label, mode) ->
-                    val on = (k.p2 >= 0.5f) == (mode >= 0.5f)
-                    Box(Modifier.height(28.dp).clip(RoundedCornerShape(9.dp)).background(if (on) KColors.Accent.copy(alpha = 0.2f) else Color.Transparent)
-                        .clickable { onBegin(); onDone(latestKey.copy(p1 = if (latestKey.p1 <= 0f) 5f else latestKey.p1, p2 = mode)) }
-                        .padding(horizontal = 9.dp), contentAlignment = Alignment.Center) {
-                        Text(label, color = if (on) KColors.Accent else KColors.Muted, fontSize = 9.sp, fontWeight = FontWeight.SemiBold)
-                    }
-                }
-            }
-        }
-    }
-}
 
 // ---------------------------------------------------------------------------------------------
 // Presets
@@ -592,11 +576,10 @@ private fun CurveGlyph(key: Keyframe, highlighted: Boolean, modifier: Modifier) 
 // Drawing
 // ---------------------------------------------------------------------------------------------
 
-private const val EASE_LO = -0.5f
-private const val EASE_HI = 1.5f
-
+private 
 private class GraphGeometry(
-    width: Float, height: Float, pad: Float, keys: List<Keyframe>, segment: Int, val mode: GraphMode
+    width: Float, height: Float, pad: Float, val rail: Float, keys: List<Keyframe>, segment: Int,
+    val mode: GraphMode, fixedEase: Pair<Float, Float>?
 ) {
     val left = pad
     val right = width - pad
@@ -606,8 +589,8 @@ private class GraphGeometry(
     val h = (bottom - top).coerceAtLeast(1f)
     var valueLow = 0f
     var valueHigh = 1f
-    var easeLo = EASE_LO
-    var easeHi = EASE_HI
+    var easeLo = -0.25f
+    var easeHi = 1.25f
 
     init {
         if (segment in 0 until keys.lastIndex) {
@@ -616,10 +599,18 @@ private class GraphGeometry(
             val span = (hi - lo).let { if (it < 0.0001f) max(abs(hi) * 0.2f, 1f) else it }
             valueLow = lo - span * 0.25f
             valueHigh = hi + span * 0.25f
-            if (a.type != KeyType.BEZIER && a.type != KeyType.LINEAR && a.type != KeyType.HOLD) {
+            if (fixedEase != null) {
+                easeLo = fixedEase.first; easeHi = fixedEase.second
+            } else {
                 var mn = 0f; var mx = 1f
-                for (i in 0..60) { val y = keyProgress(a, i / 60f); mn = min(mn, y); mx = max(mx, y) }
-                easeLo = min(EASE_LO, mn - 0.1f); easeHi = max(EASE_HI, mx + 0.1f)
+                when (a.type) {
+                    KeyType.BEZIER -> { mn = min(mn, min(a.y1, a.y2)); mx = max(mx, max(a.y1, a.y2)) }
+                    KeyType.LINEAR, KeyType.HOLD -> {}
+                    else -> for (i in 0..80) { val y = keyProgress(a, i / 80f); mn = min(mn, y); mx = max(mx, y) }
+                }
+                // Quantised so the view only rescales when a curve really needs more room.
+                easeLo = kotlin.math.floor((mn - 0.1f) / 0.25f) * 0.25f
+                easeHi = kotlin.math.ceil((mx + 0.1f) / 0.25f) * 0.25f
             }
         }
     }
@@ -628,12 +619,74 @@ private class GraphGeometry(
     fun unY(py: Float) = easeLo + (bottom - py) / h * (easeHi - easeLo)
     fun valuePt(nx: Float, v: Float) = Offset(left + w * nx, bottom - h * ((v - valueLow) / (valueHigh - valueLow)))
     fun unValue(py: Float) = valueLow + ((bottom - py) / h) * (valueHigh - valueLow)
+    fun railPt(nx: Float) = Offset(left + w * nx.coerceIn(0f, 1f), bottom - rail)
 }
 
-private fun DrawScope.drawCurveScene(keys: List<Keyframe>, seg: Int, mode: GraphMode, activeHandle: Int) {
+// ---- parameter handles drawn on the curve (Elastic / Bounce / Wave / Steps) ----------------
+private fun seeded(k: Keyframe): Keyframe =
+    if (k.p1 > 0f) k else { val (p1, p2) = defaultCurveParams(k.type); k.copy(p1 = p1, p2 = if (k.type == KeyType.STEPS) k.p2 else p2) }
+
+private fun bounceApex(n: Int, e: Float): Float {
+    var total = 1f; var h = 1f
+    for (i in 1..n) { h *= e; total += 2f * kotlin.math.sqrt(h) }
+    return (1f + kotlin.math.sqrt(e)) / total
+}
+
+/** [0] = value handle on the curve (green), [1] = count/speed handle on the bottom rail (orange). */
+private fun paramHandles(key: Keyframe, g: GraphGeometry): Array<Offset?> {
+    val k = seeded(key)
+    return when (key.type) {
+        KeyType.ELASTIC -> arrayOf(g.pt(1f / (2f * k.p2 + 1f), 1f + k.p1), g.railPt((k.p2 - 1f) / 9f))
+        KeyType.BOUNCE -> arrayOf(g.pt(bounceApex(k.p1.roundToInt().coerceIn(1, 10), k.p2), 1f - k.p2), g.railPt((k.p1 - 1f) / 9f))
+        KeyType.WAVE -> {
+            val c = ((k.p1 * 2f).roundToInt() / 2f).coerceAtLeast(0.5f)
+            arrayOf(g.pt(1f / (4f * c), 1f / (4f * c) + k.p2), g.railPt((c - 0.5f) / 9.5f))
+        }
+        KeyType.STEPS -> arrayOf(null, g.railPt((k.p1 - 2f) / 22f))
+        else -> arrayOf(null, null)
+    }
+}
+
+private fun dragParam(base: Keyframe, handle: Int, pos: Offset, g: GraphGeometry): Keyframe {
+    val k = seeded(base)
+    val nx = ((pos.x - g.left) / g.w).coerceIn(0f, 1f)
+    val y = g.unY(pos.y)
+    return when (k.type) {
+        KeyType.ELASTIC -> if (handle == 3) k.copy(p1 = y - 1f)
+            else k.copy(p2 = ((1f + nx * 9f) * 20f).roundToInt() / 20f)
+        KeyType.BOUNCE -> if (handle == 3) k.copy(p2 = (1f - y).coerceIn(0.05f, 0.9f))
+            else k.copy(p1 = (1f + nx * 9f).roundToInt().toFloat())
+        KeyType.WAVE -> {
+            if (handle == 3) {
+                val c = ((k.p1 * 2f).roundToInt() / 2f).coerceAtLeast(0.5f)
+                k.copy(p2 = (y - 1f / (4f * c)).coerceIn(0f, 0.5f))
+            } else k.copy(p1 = ((0.5f + nx * 9.5f) * 2f).roundToInt() / 2f)
+        }
+        KeyType.STEPS -> k.copy(p1 = (2f + nx * 22f).roundToInt().toFloat())
+        else -> k
+    }
+}
+
+private fun paramLabels(k: Keyframe): Pair<String, String> {
+    val s = seeded(k)
+    return when (k.type) {
+        KeyType.ELASTIC -> "+${(s.p1 * 100f).roundToInt()}%" to "Oscillations ${fmt2(s.p2)}"
+        KeyType.BOUNCE -> "${(s.p2 * 100f).roundToInt()}%" to "Bounces ${s.p1.roundToInt()}"
+        KeyType.WAVE -> fmt2(s.p2) to "Cycles ${String.format(java.util.Locale.US, "%.1f", s.p1)}"
+        KeyType.STEPS -> "" to "Steps ${s.p1.roundToInt()}"
+        else -> "" to ""
+    }
+}
+
+private val labelPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+    color = 0xFFE9EDF2.toInt()
+    typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
+}
+
+private fun DrawScope.drawCurveScene(keys: List<Keyframe>, seg: Int, mode: GraphMode, activeHandle: Int, fixedRange: Pair<Float, Float>?) {
     if (seg !in 0 until keys.lastIndex) return
     val pad = 16.dp.toPx()
-    val g = GraphGeometry(size.width, size.height, pad, keys, seg, mode)
+    val g = GraphGeometry(size.width, size.height, pad, 14.dp.toPx(), keys, seg, mode, fixedRange)
     val a = keys[seg]; val b = keys[seg + 1]
     val accent = KColors.Accent
 
@@ -709,6 +762,11 @@ private fun DrawScope.drawCurveScene(keys: List<Keyframe>, seg: Int, mode: Graph
             val ghost = if (a.type == KeyType.BEZIER) 1f else 0.55f
             drawHandle(start, c1, GreenHandle, ghost, activeHandle == 1)
             drawHandle(end, c2, OrangeHandle, ghost, activeHandle == 2)
+        } else {
+            val ph = paramHandles(a, g)
+            val labels = paramLabels(a)
+            ph[0]?.let { drawParamDot(it, GreenHandle, labels.first, activeHandle == 3, size.width) }
+            ph[1]?.let { drawParamDot(it, OrangeHandle, labels.second, activeHandle == 4, size.width) }
         }
         drawAnchor(start, accent, true)
         drawAnchor(end, Color.White, false)
@@ -721,6 +779,19 @@ private fun DrawScope.drawCurveScene(keys: List<Keyframe>, seg: Int, mode: Graph
         }
         drawAnchor(s, accent, true)
         drawAnchor(e, Color.White, false)
+    }
+}
+
+private fun DrawScope.drawParamDot(c: Offset, color: Color, label: String, active: Boolean, canvasWidth: Float) {
+    val scale = if (active) 1.25f else 1f
+    drawCircle(color.copy(alpha = if (active) 0.34f else 0.2f), 17.dp.toPx() * scale, c)
+    drawCircle(color, 8.dp.toPx() * scale, c)
+    drawCircle(Color.White, 3.dp.toPx() * scale, c)
+    if (label.isNotEmpty()) {
+        labelPaint.textSize = 10.sp.toPx()
+        val width = labelPaint.measureText(label)
+        val x = if (c.x + 14.dp.toPx() + width > canvasWidth - 6.dp.toPx()) c.x - 14.dp.toPx() - width else c.x + 14.dp.toPx()
+        drawContext.canvas.nativeCanvas.drawText(label, x, c.y + 4.dp.toPx(), labelPaint)
     }
 }
 

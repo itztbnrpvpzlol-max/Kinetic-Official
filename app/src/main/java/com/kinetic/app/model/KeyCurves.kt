@@ -11,7 +11,7 @@ import kotlin.math.sqrt
 
 /** Default type-specific parameters (p1, p2) used when a key is switched to [type]. */
 fun defaultCurveParams(type: KeyType): Pair<Float, Float> = when (type) {
-    KeyType.ELASTIC -> 1f to 3f      // amplitude, oscillation speed (3 = classic elastic-out)
+    KeyType.ELASTIC -> 0.23f to 3f   // overshoot (fraction of the move), oscillations
     KeyType.BOUNCE -> 3f to 0.35f    // bounce count, bounciness (height ratio per bounce)
     KeyType.WAVE -> 2f to 0.18f      // cycles, amplitude
     KeyType.STEPS -> 5f to 0f        // step count, 0 = jump at end / 1 = jump at start
@@ -82,10 +82,17 @@ fun keyProgress(a: Keyframe, u: Float): Float = when (a.type) {
     KeyType.LINEAR -> u
     KeyType.BEZIER -> bezierProgress(u, a.x1, a.y1, a.x2, a.y2)
     KeyType.ELASTIC -> {
-        if (u <= 0f) 0f else if (u >= 1f) 1f else {
-            val amp = if (a.p1 > 0f) a.p1 else 1f
-            val osc = if (a.p2 > 0f) a.p2 else 3f
-            1f + amp * (2.0.pow(-10.0 * u) * sin((u * 10.0 * (osc / 3.0) - 0.75) * (2.0 * PI / 3.0))).toFloat()
+        if (u <= 0f) 0f else if (u >= 1f) 1f
+        else if (a.p1 <= 0f) {
+            // Keys created before elastic had parameters keep their original, longer-ringing curve.
+            1f + (2.0.pow(-10.0 * u) * sin((u * 10.0 - 0.75) * (2.0 * PI / 3.0))).toFloat()
+        } else {
+            // Damped spring: first peak overshoots by `amp`, `osc` oscillations, settles quickly.
+            val amp = a.p1.coerceIn(0.02f, 0.95f)
+            val osc = (if (a.p2 > 0f) a.p2 else 3f).coerceIn(0.5f, 12f)
+            val w = PI * (2.0 * osc + 1.0)
+            val k = -w * kotlin.math.ln(amp.toDouble()) / PI
+            (1.0 - kotlin.math.exp(-k * u) * kotlin.math.cos(w * u)).toFloat()
         }
     }
     KeyType.BOUNCE -> {
