@@ -44,6 +44,33 @@ internal class SequentialVideoFrameDecoder {
 
     fun shouldUseRetrieverFallback(identity: String): Boolean = fallbackIdentity == identity
 
+    private var sharedFrame: Bitmap? = null
+    private var sharedIdentity: String? = null
+    private var sharedEdge = 0
+    private var sharedRequestedUs = 0L
+    private var sharedPresentationUs = 0L
+
+    /**
+     * Like [decodeFrame], but requests that land on a frame already returned (several motion blur
+     * samples inside one source frame) get that same bitmap back instead of consuming the next
+     * frame of the stream. The returned bitmap is shared: callers must not recycle or modify it.
+     */
+    @Synchronized
+    fun decodeFrameShared(context: Context, uri: Uri, identity: String, targetUs: Long, maxEdge: Int): Bitmap? {
+        val target = targetUs.coerceAtLeast(0L)
+        val cached = sharedFrame
+        if (cached != null && !cached.isRecycled && sharedIdentity == identity && sharedEdge == maxEdge &&
+            target >= sharedRequestedUs && target <= sharedPresentationUs
+        ) return cached
+        val frame = decodeFrame(context, uri, identity, targetUs, maxEdge) ?: return null
+        sharedFrame = frame
+        sharedIdentity = identity
+        sharedEdge = maxEdge
+        sharedRequestedUs = target
+        sharedPresentationUs = (session?.lastOutputUs ?: target).coerceAtLeast(target)
+        return frame
+    }
+
     @Synchronized
     fun decodeFrame(context: Context, uri: Uri, identity: String, targetUs: Long, maxEdge: Int): Bitmap? {
         val target = targetUs.coerceAtLeast(0L)

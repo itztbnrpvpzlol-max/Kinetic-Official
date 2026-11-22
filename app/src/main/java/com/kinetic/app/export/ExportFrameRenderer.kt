@@ -132,18 +132,37 @@ internal class ExportFrameRenderer(
         val opacity = (layer.p(PropId.OPACITY).valueAt(frameTime) / 100f).coerceIn(0f, 1f)
         val compositePaint = Paint().apply { xfermode = CompositeSnapshot.blendMode(layer.blendMode) }
         val checkpoint = canvas.saveLayer(null, compositePaint)
+        var reusedFrom: Bitmap? = null
+        var reusedPiece: Piece? = null
         for (index in times.indices) {
             val sampleTime = times[index]
             val raw = fixedRaw ?: rasterFor(layer, sampleTime) ?: continue
-            val piece = fixedEffects ?: applyEffects(
-                layer, raw, if (fixedRaw == null || animatedEffects) sampleTime else frameTime
-            )
+            val canReuse = fixedEffects == null && !animatedEffects && !raw.recycle
+            val piece: Piece
+            if (fixedEffects != null) {
+                piece = fixedEffects
+            } else {
+                val cachedPiece = reusedPiece
+                if (canReuse && cachedPiece != null && reusedFrom === raw.bitmap) {
+                    piece = cachedPiece
+                } else {
+                    val made = applyEffects(layer, raw, if (fixedRaw == null || animatedEffects) sampleTime else frameTime)
+                    if (canReuse) {
+                        if (cachedPiece != null && cachedPiece !== raw && cachedPiece !== made) release(cachedPiece)
+                        reusedFrom = raw.bitmap
+                        reusedPiece = made
+                    }
+                    piece = made
+                }
+            }
             drawPiece(layer, piece, sampleTime, MotionBlur.sampleAlpha(opacity, index, times.size))
-            if (piece !== raw && piece !== fixedEffects) release(piece)
+            val kept = piece === fixedEffects || (canReuse && piece === reusedPiece)
+            if (piece !== raw && !kept) release(piece)
             if (raw !== fixedRaw) release(raw)
         }
         canvas.restoreToCount(checkpoint)
         compositePaint.xfermode = null
+        reusedPiece?.let { if (it.bitmap !== reusedFrom) release(it) }
         if (fixedEffects != null && fixedEffects !== fixedRaw) release(fixedEffects)
         if (fixedRaw != null) release(fixedRaw)
     }
@@ -275,7 +294,7 @@ internal class ExportFrameRenderer(
         val decoder = decoders.getOrPut(key) { SequentialVideoFrameDecoder() }
         val identity = "export:$uri"
         if (!decoder.shouldUseRetrieverFallback(identity)) {
-            decoder.decodeFrame(context, uri, identity, targetUs, targetEdge)?.let { return it }
+            decoder.decodeFrameShared(context, uri, identity, targetUs, targetEdge)?.let { return it }
         }
         // Some files defeat the sequential decoder; the retriever is slower but accepts them.
         val retriever = retrievers.getOrPut(key) { MediaMetadataRetriever().also { it.setDataSource(context, uri) } }
