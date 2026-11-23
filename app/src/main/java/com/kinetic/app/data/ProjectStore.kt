@@ -268,6 +268,19 @@ class ProjectStore(context: Context) {
                 PropId.CAM_ZOOM, PropId.CAM_FOCUS -> com.kinetic.app.model.CAMERA_DEFAULT_ZOOM.toDouble()
                 PropId.CAM_POI_X -> 960.0; PropId.CAM_POI_Y -> 540.0
                 PropId.CAM_BLUR -> 100.0
+                PropId.PARTICLE_RATE -> 60.0
+                PropId.PARTICLE_PREROLL -> 1000.0
+                PropId.PARTICLE_LIFETIME -> 2.0
+                PropId.PARTICLE_LIFE_RANDOM -> 20.0
+                PropId.PARTICLE_VELOCITY -> 80.0
+                PropId.PARTICLE_VELOCITY_RANDOM -> 20.0
+                PropId.PARTICLE_SPREAD -> 28.0
+                PropId.PARTICLE_SIZE -> 6.0
+                PropId.PARTICLE_SIZE_RANDOM -> 30.0
+                PropId.PARTICLE_OPACITY -> 100.0
+                PropId.PARTICLE_TURBULENCE_SPEED -> 1.0
+                PropId.PARTICLE_TAIL_SEGMENTS -> 8.0
+                PropId.PARTICLE_TAIL_WIDTH, PropId.PARTICLE_TAIL_OPACITY -> 100.0
                 PropId.SPEED -> j.optDouble("speed", 1.0)
                 PropId.VOLUME -> j.optDouble("volume", 1.0)
                 else -> com.kinetic.app.model.taDefault(id)?.toDouble() ?: if (id.isVectorPoint) {

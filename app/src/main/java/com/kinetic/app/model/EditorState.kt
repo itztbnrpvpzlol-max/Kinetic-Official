@@ -1074,11 +1074,6 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
             id == PropId.PARTICLE_RATE -> value.coerceIn(0f, 10000f)
             id == PropId.PARTICLE_PREROLL -> value.coerceIn(0f, 10000f)
             id == PropId.PARTICLE_LIFETIME -> value.coerceIn(0.01f, 30f)
-            id == PropId.PARTICLE_LIFE_RANDOM || id == PropId.PARTICLE_VELOCITY_RANDOM ||
-            id == PropId.PARTICLE_SIZE_RANDOM || id == PropId.PARTICLE_OPACITY ||
-            id == PropId.PARTICLE_END_OPACITY -> value.coerceIn(0f, 100f)
-            id == PropId.PARTICLE_SIZE || id == PropId.PARTICLE_END_SIZE -> value.coerceIn(0f, 500f)
-            id == PropId.PARTICLE_SPREAD -> value.coerceIn(0f, 360f)
             id == PropId.PARTICLE_DRAG || id == PropId.PARTICLE_LIFE_RANDOM ||
                 id == PropId.PARTICLE_VELOCITY_RANDOM || id == PropId.PARTICLE_SIZE_RANDOM ||
                 id == PropId.PARTICLE_OPACITY || id == PropId.PARTICLE_END_OPACITY ||
@@ -1088,6 +1083,7 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
             id == PropId.PARTICLE_SIZE || id == PropId.PARTICLE_END_SIZE ||
                 id == PropId.PARTICLE_TAIL_WIDTH -> value.coerceIn(0f, 500f)
             id == PropId.PARTICLE_SPREAD -> value.coerceIn(0f, 360f)
+            id == PropId.PARTICLE_TURBULENCE -> value.coerceIn(0f, 500f)
             id == PropId.PARTICLE_DIRECTION_TILT -> value.coerceIn(-90f, 90f)
             id == PropId.PARTICLE_DIRECTION_SPIN || id == PropId.PARTICLE_ROTATION -> value.coerceIn(-360f, 360f)
             id == PropId.PARTICLE_ROTATION_RANDOM || id == PropId.PARTICLE_SPIN_RANDOM -> value.coerceIn(0f, 720f)
