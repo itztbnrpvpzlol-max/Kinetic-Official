@@ -282,6 +282,7 @@ fun CpuPreviewCanvas(
         while (true) {
             val time = previewClock.timeSec
             val playing = previewClock.playing
+            val effectById = editor.previewLayers.associateBy { it.id }
             for (layer in editor.previewLayers) {
                 if (layer.type != LayerType.TEXT && layer.type != LayerType.SHAPE && layer.type != LayerType.PARTICULAR) continue
                 val stack = EffectStackRunner.pictureEffects(layer.effectStack).take(12)
@@ -302,7 +303,7 @@ fun CpuPreviewCanvas(
                 val maxEdge = if (MediaWorkers.isConstrainedDevice) 320 else 768
                 val maxPixels = if (MediaWorkers.isConstrainedDevice) 1_000_000 else 3_000_000
                 val result = withContext(Dispatchers.Default) {
-                    val raster = LayerRaster.render(layer, time, maxEdge) ?: return@withContext null
+                    val raster = LayerRaster.render(layer, time, maxEdge, byId = effectById) ?: return@withContext null
                     try {
                         EffectStackRunner.processBitmapGrown(
                             raster, stack, time, time - layer.start, editor.compSettings.fps.toFloat(),
@@ -483,7 +484,7 @@ fun CpuPreviewCanvas(
                             paint.alpha = alpha
                             nc.drawBitmap(fx.bitmap, null, RectF(-fx.left, -fx.top, l.width + fx.right, l.height + fx.bottom), paint)
                         } else {
-                            val particles = LayerRaster.render(l, sampleTime, 768)
+                            val particles = LayerRaster.render(l, sampleTime, 768, byId = byId)
                             if (particles != null) {
                                 paint.color = android.graphics.Color.WHITE
                                 paint.alpha = alpha
