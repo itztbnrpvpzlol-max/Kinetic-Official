@@ -801,13 +801,47 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
         }
     }
 
+    /**
+     * 3D reparent (cameras, 3D nulls, 3D layers): re-solves X/Y/Z position at every relevant key time so the
+     * layer stays put in world space instead of jumping to the new parent's space.
+     */
+    private fun reparent3D(layer: Layer, parentId: String?, byId: Map<String, Layer>): Layer {
+        val newParent = parentId?.let { byId[it] }
+        val axes = positionAxes.associateWith { layer.p(it) }
+        val times = mutableListOf<Float>()
+        axes.values.forEach { prop -> times += prop.keys.map { it.t } }
+        fun addAncestors(firstId: String?) {
+            var cur = firstId; var depth = 0
+            while (cur != null && depth++ < 16) {
+                val a = byId[cur] ?: break
+                a.props.filterKeys { it in positionAxes || it == PropId.SCALE_X || it == PropId.SCALE_Y ||
+                    it == PropId.ROTATION || it == PropId.ROTATION_X || it == PropId.ROTATION_Y ||
+                    it == PropId.ANCHOR_X || it == PropId.ANCHOR_Y }.values.forEach { prop -> times += prop.keys.map { it.t } }
+                cur = a.parentId
+            }
+        }
+        addAncestors(layer.parentId); addAncestors(parentId)
+        val keyTimes = times.filter { it.isFinite() && it >= 0f }.distinct().sorted()
+        val sampleTimes = if (keyTimes.isEmpty()) listOf(time) else keyTimes
+        val solved = sampleTimes.map { t -> t to localPositionUnderParent(layer, newParent, t, byId) }
+        val updatedAxes = positionAxes.mapIndexed { index, id ->
+            val prop = axes.getValue(id)
+            if (keyTimes.isEmpty()) id to Prop(solved[0].second[index])
+            else id to prop.copy(base = solved[0].second[index], keys = solved.map { (t, v) ->
+                val template = prop.keys.minByOrNull { abs(it.t - t) }?.takeIf { abs(it.t - t) <= frame / 2f }
+                (template?.copy(t = t) ?: Keyframe(t, 0f)).copy(v = v[index])
+            })
+        }.toMap()
+        return syncPositionKeyframes(layer.copy(parentId = parentId, props = layer.props + updatedAxes))
+    }
+
     /** Reparent without changing the child's current world-space position or keyed motion. */
     fun setParent(childId: String, parentId: String?) {
         val byId = layers.associateBy { it.id }
         if (parentId == childId || parentId?.let { byId[it]?.let { p -> isDescendantOf(p, childId, byId) } } == true) return
         commit { ls ->
             ls.map { layer ->
-                if (layer.id != childId) layer else {
+                if (layer.id != childId) layer else if (layer.is3D) reparent3D(layer, parentId, byId) else {
                     val px = layer.p(PropId.POS_X)
                     val py = layer.p(PropId.POS_Y)
                     val sampleTimes = mutableListOf<Float>()

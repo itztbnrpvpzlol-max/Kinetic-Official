@@ -645,16 +645,15 @@ private fun rotZM(deg: Float): FloatArray {
 fun activeCamera(byId: Map<String, Layer>, t: Float): Layer? =
     byId.values.firstOrNull { it.type == LayerType.CAMERA && it.visible && it.activeAt(t) }
 
-/** Camera-to-world rotation (columns are the camera's x/y/z axes in world space). */
-private fun cameraRotation(cam: Layer, t: Float): FloatArray {
+/** Local (own-space) -> parent-space rotation for a camera, columns are the camera's x/y/z axes. */
+private fun cameraRotationFrom(cam: Layer, t: Float, cx: Float, cy: Float, cz: Float, poiX: Float, poiY: Float, poiZ: Float): FloatArray {
     val rx = cam.p(PropId.ROTATION_X).valueAt(t)
     val ry = cam.p(PropId.ROTATION_Y).valueAt(t)
     val rz = cam.p(PropId.ROTATION).valueAt(t)
     if (!cam.cameraTwoNode) return mulM(rotZM(rz), mulM(rotYM(ry), rotXM(rx)))
-    val cx = cam.p(PropId.POS_X).valueAt(t); val cy = cam.p(PropId.POS_Y).valueAt(t); val cz = cam.p(PropId.POS_Z).valueAt(t)
-    var fx = cam.p(PropId.CAM_POI_X).valueAt(t) - cx
-    var fy = cam.p(PropId.CAM_POI_Y).valueAt(t) - cy
-    var fz = cam.p(PropId.CAM_POI_Z).valueAt(t) - cz
+    var fx = poiX - cx
+    var fy = poiY - cy
+    var fz = poiZ - cz
     val fl = Math.sqrt((fx * fx + fy * fy + fz * fz).toDouble()).toFloat()
     if (fl < 1e-4f) { fx = 0f; fy = 0f; fz = 1f } else { fx /= fl; fy /= fl; fz /= fl }
     // x = normalize(down x forward); falls back when looking straight up/down
@@ -668,32 +667,70 @@ private fun cameraRotation(cam: Layer, t: Float): FloatArray {
     return mulM(base, rotZM(rz))
 }
 
+private fun mulPoint(m: FloatArray, x: Float, y: Float, z: Float): FloatArray = floatArrayOf(
+    m[0] * x + m[1] * y + m[2] * z + m[3],
+    m[4] * x + m[5] * y + m[6] * z + m[7],
+    m[8] * x + m[9] * y + m[10] * z + m[11]
+)
+
+/** Own-space -> parent-space 4x4 for a non-camera layer (anchor, scale, rotation, position). */
+private fun layerLocal4(layer: Layer, t: Float): FloatArray {
+    var local = transM(-layer.transformValue(PropId.ANCHOR_X, t, layer.width / 2f),
+        -layer.transformValue(PropId.ANCHOR_Y, t, layer.height / 2f), 0f)
+    local = mulM(scaleM(layer.transformValue(PropId.SCALE_X, t, 100f) / 100f,
+        layer.transformValue(PropId.SCALE_Y, t, 100f) / 100f), local)
+    local = mulM(rotXM(layer.transformValue(PropId.ROTATION_X, t, 0f)), local)
+    local = mulM(rotYM(layer.transformValue(PropId.ROTATION_Y, t, 0f)), local)
+    local = mulM(rotZM(layer.transformValue(PropId.ROTATION, t, 0f)), local)
+    return mulM(transM(layer.transformValue(PropId.POS_X, t, COMP_W / 2f),
+        layer.transformValue(PropId.POS_Y, t, COMP_H / 2f),
+        layer.transformValue(PropId.POS_Z, t, 0f)), local)
+}
+
+/**
+ * World-space 4x4 of [layer]'s *children space* (origin at the layer's anchor, like After Effects).
+ * Walks the full parent chain in 3D, so 3D nulls, rotated parents and camera parents all carry through.
+ */
+fun childSpaceWorld4(layer: Layer, t: Float, byId: Map<String, Layer>, depth: Int = 0): FloatArray {
+    val world = layerWorld4(layer, t, byId, depth)
+    return if (layer.type == LayerType.CAMERA) world
+    else mulM(world, transM(layer.transformValue(PropId.ANCHOR_X, t, layer.width / 2f),
+        layer.transformValue(PropId.ANCHOR_Y, t, layer.height / 2f), 0f))
+}
+
+/** Own-space -> world-space 4x4 including every ancestor (cameras use position + orientation only). */
+fun layerWorld4(layer: Layer, t: Float, byId: Map<String, Layer>, depth: Int = 0): FloatArray {
+    val parent = layer.parentId?.let { byId[it] }
+    val parentM = if (parent != null && parent.id != layer.id && depth < 16) childSpaceWorld4(parent, t, byId, depth + 1) else null
+    if (layer.type == LayerType.CAMERA) {
+        val cx = layer.p(PropId.POS_X).valueAt(t); val cy = layer.p(PropId.POS_Y).valueAt(t); val cz = layer.p(PropId.POS_Z).valueAt(t)
+        val r = cameraRotationFrom(layer, t, cx, cy, cz,
+            layer.p(PropId.CAM_POI_X).valueAt(t), layer.p(PropId.CAM_POI_Y).valueAt(t), layer.p(PropId.CAM_POI_Z).valueAt(t))
+        val local = mulM(transM(cx, cy, cz), floatArrayOf(r[0], r[1], r[2], 0f,  r[4], r[5], r[6], 0f,  r[8], r[9], r[10], 0f,  0f, 0f, 0f, 1f))
+        return if (parentM != null) mulM(parentM, local) else local
+    }
+    val local = layerLocal4(layer, t)
+    return if (parentM != null) mulM(parentM, local) else local
+}
+
 /**
  * Writes into [out] the layer-plane -> screen homography for a 3D layer seen through [cam].
- * Position/rotation/orientation of the layer and its parent chain are composed in world space.
+ * The layer and the camera each compose their full parent chains in world space, so a camera
+ * parented to a null (or anything else) moves, rotates and scales with it.
  */
 private fun cameraLayerMatrix(layer: Layer, cam: Layer, t: Float, byId: Map<String, Layer>, depth: Int, out: Matrix) {
-    var world = transM(-layer.transformValue(PropId.ANCHOR_X, t, layer.width / 2f),
-        -layer.transformValue(PropId.ANCHOR_Y, t, layer.height / 2f), 0f)
-    world = mulM(scaleM(layer.transformValue(PropId.SCALE_X, t, 100f) / 100f,
-        layer.transformValue(PropId.SCALE_Y, t, 100f) / 100f), world)
-    world = mulM(rotXM(layer.transformValue(PropId.ROTATION_X, t, 0f)), world)
-    world = mulM(rotYM(layer.transformValue(PropId.ROTATION_Y, t, 0f)), world)
-    world = mulM(rotZM(layer.transformValue(PropId.ROTATION, t, 0f)), world)
-    world = mulM(transM(layer.transformValue(PropId.POS_X, t, COMP_W / 2f),
-        layer.transformValue(PropId.POS_Y, t, COMP_H / 2f),
-        layer.transformValue(PropId.POS_Z, t, 0f)), world)
-    val parent = layer.parentId?.let { byId[it] }
-    if (parent != null && parent.id != layer.id && depth < 16) {
-        val pm = Matrix()
-        layerMatrixInto(parent, t, byId.filterValues { it.type != LayerType.CAMERA }, pm, mutableMapOf(), depth + 1)
-        val v = FloatArray(9); pm.getValues(v)
-        val pe = floatArrayOf(v[0], v[1], 0f, v[2],  v[3], v[4], 0f, v[5],  0f, 0f, 1f, 0f,  0f, 0f, 0f, 1f)
-        world = mulM(pe, mulM(transM(parent.transformValue(PropId.ANCHOR_X, t, parent.width / 2f),
-            parent.transformValue(PropId.ANCHOR_Y, t, parent.height / 2f), 0f), world))
-    }
-    val r = cameraRotation(cam, t)
-    val cx = cam.p(PropId.POS_X).valueAt(t); val cy = cam.p(PropId.POS_Y).valueAt(t); val cz = cam.p(PropId.POS_Z).valueAt(t)
+    val world = layerWorld4(layer, t, byId, depth)
+    // camera world pose: position + orientation, with parent scale stripped so the lens stays rigid
+    val cw = layerWorld4(cam, t, byId, 0)
+    val c3 = floatArrayOf(cw[0], cw[4], cw[8],  cw[1], cw[5], cw[9],  cw[2], cw[6], cw[10]) // columns as rows
+    fun colLen(i: Int) = Math.sqrt((c3[i * 3] * c3[i * 3] + c3[i * 3 + 1] * c3[i * 3 + 1] + c3[i * 3 + 2] * c3[i * 3 + 2]).toDouble()).toFloat().coerceAtLeast(1e-6f)
+    val l0 = colLen(0); val l1 = colLen(1); val l2 = colLen(2)
+    val r = floatArrayOf(
+        cw[0] / l0, cw[1] / l1, cw[2] / l2, 0f,
+        cw[4] / l0, cw[5] / l1, cw[6] / l2, 0f,
+        cw[8] / l0, cw[9] / l1, cw[10] / l2, 0f,
+        0f, 0f, 0f, 1f)
+    val cx = cw[3]; val cy = cw[7]; val cz = cw[11]
     // view = R^T * T(-C)
     val rt = floatArrayOf(r[0], r[4], r[8], 0f,  r[1], r[5], r[9], 0f,  r[2], r[6], r[10], 0f,  0f, 0f, 0f, 1f)
     val view = mulM(rt, transM(-cx, -cy, -cz))
@@ -706,6 +743,41 @@ private fun cameraLayerMatrix(layer: Layer, cam: Layer, t: Float, byId: Map<Stri
         m[4], m[5], m[7],
         m[12], m[13], m[15]
     ))
+}
+
+/** Inverse of a general row-major 4x4 (Gauss-Jordan); returns null if singular. */
+fun invert4(m: FloatArray): FloatArray? {
+    val a = DoubleArray(32)
+    for (i in 0 until 4) { for (j in 0 until 4) a[i * 8 + j] = m[i * 4 + j].toDouble(); a[i * 8 + 4 + i] = 1.0 }
+    for (c in 0 until 4) {
+        var piv = c
+        for (r in c + 1 until 4) if (Math.abs(a[r * 8 + c]) > Math.abs(a[piv * 8 + c])) piv = r
+        if (Math.abs(a[piv * 8 + c]) < 1e-9) return null
+        if (piv != c) for (k in 0 until 8) { val t = a[c * 8 + k]; a[c * 8 + k] = a[piv * 8 + k]; a[piv * 8 + k] = t }
+        val d = a[c * 8 + c]
+        for (k in 0 until 8) a[c * 8 + k] /= d
+        for (r in 0 until 4) if (r != c) {
+            val f = a[r * 8 + c]
+            if (f != 0.0) for (k in 0 until 8) a[r * 8 + k] -= f * a[c * 8 + k]
+        }
+    }
+    return FloatArray(16) { a[(it / 4) * 8 + 4 + it % 4].toFloat() }
+}
+
+/** World-space position of a layer's position point (its anchor, or the camera eye) at [t]. */
+fun layerWorldPosition(layer: Layer, t: Float, byId: Map<String, Layer>): FloatArray {
+    val w = layerWorld4(layer, t, byId)
+    if (layer.type == LayerType.CAMERA) return floatArrayOf(w[3], w[7], w[11])
+    return mulPoint(w, layer.transformValue(PropId.ANCHOR_X, t, layer.width / 2f),
+        layer.transformValue(PropId.ANCHOR_Y, t, layer.height / 2f), 0f)
+}
+
+/** Position values that keep [layer] where it is in world space when its parent becomes [newParent]. */
+fun localPositionUnderParent(layer: Layer, newParent: Layer?, t: Float, byId: Map<String, Layer>): FloatArray {
+    val world = layerWorldPosition(layer, t, byId)
+    if (newParent == null) return world
+    val inv = invert4(childSpaceWorld4(newParent, t, byId)) ?: return world
+    return mulPoint(inv, world[0], world[1], world[2])
 }
 
 /**
