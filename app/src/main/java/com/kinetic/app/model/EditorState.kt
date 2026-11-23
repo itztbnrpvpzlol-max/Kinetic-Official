@@ -439,7 +439,7 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
                 "Rain", "Snow" -> ParticleSettings(preset, 0xFFDDF4FF.toInt(), 0x00B8DFFF)
                 "Fireworks" -> ParticleSettings(preset, 0xFFFFE28A.toInt(), 0x00FF6B38)
                 "Bokeh" -> ParticleSettings(preset, 0xFFFFE8B0.toInt(), 0x00FFFFFF)
-                else -> layer.particleSettings.copy(preset = preset)
+                else -> (layer.particleSettings ?: ParticleSettings()).copy(preset = preset)
             }
             layer.copy(props = nextProps, particleSettings = palette)
         }
