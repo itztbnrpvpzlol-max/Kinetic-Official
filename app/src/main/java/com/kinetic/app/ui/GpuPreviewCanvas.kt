@@ -627,6 +627,19 @@ private fun GpuCompositionPreviewCanvas(
         }
         val bitmap = when (layer.type) {
             LayerType.IMAGE, LayerType.VIDEO -> sourceBitmap
+            LayerType.PARTICULAR -> {
+                activeTextTextureIds.add(layer.id)
+                val signature = ((layer.particleSettings.hashCode() * 31 +
+                    layer.props.filterKeys { it.isParticleProp }.hashCode()) * 31 +
+                    (editor.time * editor.fps).toInt())
+                val cached = textTextures[layer.id]
+                if (cached == null || cached.first != signature || cached.second.isRecycled) {
+                    val edge = if (MediaWorkers.isConstrainedDevice) 320 else 768
+                    val generated = LayerRaster.render(layer, editor.time, edge)
+                    if (generated != null) textTextures[layer.id] = signature to generated
+                    generated
+                } else cached.second
+            }
             LayerType.TEXT, LayerType.SHAPE -> {
                 activeTextTextureIds.add(layer.id)
                 val logicalWidth = layer.width.toInt().coerceIn(1, 4096)
@@ -687,7 +700,7 @@ private fun GpuCompositionPreviewCanvas(
             else -> null
         } ?: continue
         val opacity = (layer.p(PropId.OPACITY).valueAt(editor.time) / 100f).coerceIn(0f, 1f)
-        val effected = if (layer.type == LayerType.TEXT || layer.type == LayerType.SHAPE)
+        val effected = if (layer.type == LayerType.TEXT || layer.type == LayerType.SHAPE || layer.type == LayerType.PARTICULAR)
             effectedFrames[layer.id]?.takeIf { !it.isRecycled } else null
         val drawBitmap = effected ?: bitmap
         // Effects may paint beyond the layer (glow, shadow, tiling): draw the enlarged result,
