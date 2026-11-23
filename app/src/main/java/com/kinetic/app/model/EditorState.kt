@@ -993,7 +993,9 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
         if (parentId == childId || parentId?.let { byId[it]?.let { p -> isDescendantOf(p, childId, byId) } } == true) return
         commit { ls ->
             ls.map { layer ->
-                if (layer.id != childId) layer else if (layer.is3D) reparent3D(layer, parentId, byId) else {
+                if (layer.id != childId) layer else if (
+                    layer.is3D || layer.type == LayerType.CAMERA || layer.type == LayerType.PARTICULAR
+                ) reparent3D(layer, parentId, byId) else {
                     val px = layer.p(PropId.POS_X)
                     val py = layer.p(PropId.POS_Y)
                     val sampleTimes = mutableListOf<Float>()
