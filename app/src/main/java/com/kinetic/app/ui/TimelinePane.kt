@@ -101,6 +101,7 @@ fun clipColor(t: LayerType): Color = when (t) {
     LayerType.NULL -> Color(0xFF8C3E3E)
     LayerType.PRECOMP -> Color(0xFF7563B7)
     LayerType.CAMERA -> Color(0xFF3F7DB5)
+    LayerType.PARTICULAR -> Color(0xFF239D69)
 }
 
 fun typeIcon(t: LayerType): IconKind = when (t) {
@@ -113,6 +114,7 @@ fun typeIcon(t: LayerType): IconKind = when (t) {
     LayerType.NULL -> IconKind.NULL
     LayerType.PRECOMP -> IconKind.LAYERS
     LayerType.CAMERA -> IconKind.CAMERA
+    LayerType.PARTICULAR -> IconKind.EFFECTS
 }
 
 @OptIn(kotlinx.coroutines.FlowPreview::class)
