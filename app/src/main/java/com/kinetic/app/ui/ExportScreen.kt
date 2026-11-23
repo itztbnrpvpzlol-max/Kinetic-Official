@@ -81,7 +81,7 @@ private enum class ExportStage { SETTINGS, RENDERING, DONE, FAILED }
 
 /** Full-screen export flow: choose settings and check the result, render with live progress, then share. */
 @Composable
-fun ExportScreen(editor: EditorState, onClose: () -> Unit) {
+fun ExportScreen(editor: EditorState, onClose: () -> Unit, backTick: Int = 0) {
     val ctx = LocalContext.current
     val view = LocalView.current
     val scope = rememberCoroutineScope()
@@ -103,7 +103,10 @@ fun ExportScreen(editor: EditorState, onClose: () -> Unit) {
         view.keepScreenOn = stage == ExportStage.RENDERING
         onDispose { view.keepScreenOn = false }
     }
-    BackHandler { if (stage == ExportStage.RENDERING) confirmCancel = true else onClose() }
+    // Back presses arrive from the hosting dialog as ticks (a dialog window consumes them before Compose handlers run).
+    androidx.compose.runtime.LaunchedEffect(backTick) {
+        if (backTick > 0) { if (stage == ExportStage.RENDERING) confirmCancel = true else onClose() }
+    }
 
     fun startExport() {
         editor.playing = false

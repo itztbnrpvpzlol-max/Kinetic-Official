@@ -83,7 +83,6 @@ private val effectCategories = listOf(
     EffectCategory("PROCEDURAL", IconKind.GRID, Color(0xFFB5A4FF), Color(0xFF252238), R.drawable.cat_procedural),
     EffectCategory("BLUR", IconKind.FILTER, Color(0xFF8BC8FF), Color(0xFF1D2B39), R.drawable.cat_blur),
     EffectCategory("3D", IconKind.SHAPES, Color(0xFFFF987C), Color(0xFF332326), R.drawable.cat_three_d),
-    EffectCategory("TEXT", IconKind.TEXT, Color(0xFFFFD77A), Color(0xFF332B1F), R.drawable.cat_text),
     EffectCategory("AUDIO", IconKind.WAVEFORM, Color(0xFF79D8A7), Color(0xFF1B302A), R.drawable.cat_audio),
     EffectCategory("OTHER", IconKind.MORE, Color(0xFFB2C0D6), Color(0xFF242B37), R.drawable.cat_other)
 )
@@ -96,12 +95,23 @@ fun EffectsBrowserScreen(layerType: LayerType?, onClose: () -> Unit, onAddEffect
     }
     var query by remember { mutableStateOf("") }
     val allEffects = EffectCatalog.effects
-    val catalogEffects = remember(layerType, allEffects) { allEffects.filter { effectFitsLayer(it, layerType) } }
+    // Text effects were retired from the browser (text now has its own Edit / Animate panels).
+    val catalogEffects = remember(layerType, allEffects) {
+        allEffects.filter { it.category != EffectCategories.TEXT && effectFitsLayer(it, layerType) }
+    }
     val ctx = LocalContext.current
     var favs by remember { mutableStateOf(EffectPrefs.favourites(ctx)) }
     val recentIds = remember { EffectPrefs.recent(ctx) }
     val counts = remember { EffectPrefs.counts(ctx) }
     val toggleFav: (String) -> Unit = { id -> favs = EffectPrefs.toggleFavourite(ctx, id) }
+    // Back steps out one level at a time: category -> search -> browser.
+    androidx.activity.compose.BackHandler {
+        when {
+            selectedCategory != null -> selectedCategory = null
+            query.isNotBlank() -> query = ""
+            else -> onClose()
+        }
+    }
 
     Column(Modifier.fillMaxSize().background(KColors.Bg).statusBarsPadding().navigationBarsPadding()) {
         Row(Modifier.fillMaxWidth().padding(start = 18.dp, end = 18.dp, top = 12.dp, bottom = 14.dp),
@@ -145,7 +155,7 @@ fun EffectsBrowserScreen(layerType: LayerType?, onClose: () -> Unit, onAddEffect
                 }
             }
             query.isNotBlank() -> {
-                val results = remember(query, catalogEffects) { EffectCatalog.search(query).filter { effectFitsLayer(it, layerType) } }
+                val results = remember(query, catalogEffects) { EffectCatalog.search(query).filter { it.category != EffectCategories.TEXT && effectFitsLayer(it, layerType) } }
                 Text("${results.size} result${if (results.size == 1) "" else "s"}", color = KColors.Muted,
                     fontSize = 12.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 18.dp))
                 EffectGrid(results, KColors.Accent, favs, toggleFav, onAddEffect)

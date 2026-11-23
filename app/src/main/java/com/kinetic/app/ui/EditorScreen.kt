@@ -126,6 +126,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
     var showCameraDialog by remember { mutableStateOf(false) }
     var pendingTextTool by remember { mutableStateOf<String?>(null) }
     var toolGraphOpen by remember { mutableStateOf(false) }
+    var exportBackTick by remember { mutableIntStateOf(0) }
     var openCameraPanelOnSelect by remember { mutableStateOf(false) }
     var showShapePanel by remember { mutableStateOf(false) }
     var maskTool by remember { mutableStateOf("Pen") }
@@ -150,7 +151,6 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
             // Selection and panel visibility are deliberately independent.
             dockTool = if (editVectorId != null && editVectorId == editor.selectedId) "Masking" else "Properties"
             if (editor.selected?.type == LayerType.TEXT) {
-                dockTool = "Edit"
                 pendingTextTool?.let { t ->
                     pendingTextTool = null
                     dockTool = t
@@ -175,7 +175,16 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
     fun togglePlayback() {
         editor.playing = !editor.playing
     }
+    // Back-button priority, lowest to highest (the last registered handler wins):
+    // leave project < deselect layer < close open panel < exit vector editing < collapse preview.
+    // Screens opened later (effects browser, export...) register their own handlers above these.
     BackHandler { leave() }
+    BackHandler(enabled = editor.selectedId != null) { editor.select(null) }
+    BackHandler(enabled = showPropertiesPanel || showToolPanel || showShapePanel) {
+        showPropertiesPanel = false
+        showToolPanel = false
+        showShapePanel = false
+    }
     BackHandler(enabled = editVectorId != null) { closeVector() }
     BackHandler(enabled = previewExpanded) { previewExpanded = false }
 
@@ -611,12 +620,12 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
     if (showRenderMenu) PreRenderDialog(editor) { showRenderMenu = false }
     if (showExport) {
         androidx.compose.ui.window.Dialog(
-            onDismissRequest = {},
+            onDismissRequest = { exportBackTick++ },
             properties = androidx.compose.ui.window.DialogProperties(
-                dismissOnBackPress = false, dismissOnClickOutside = false,
+                dismissOnBackPress = true, dismissOnClickOutside = false,
                 usePlatformDefaultWidth = false, decorFitsSystemWindows = false
             )
-        ) { ExportScreen(editor = editor, onClose = { showExport = false }) }
+        ) { ExportScreen(editor = editor, onClose = { showExport = false }, backTick = exportBackTick) }
     }
     if (showLeave) {
         AlertDialog(
@@ -680,8 +689,10 @@ private fun FloatingEditingDock(active: String, hasSelection: Boolean, cameraSel
     // Keep Import inside the capsule, but visually separate it from the tools.
     val tools = if (textSelected) {
         listOf(
+            "Properties" to IconKind.SLIDERS,
             "Edit" to IconKind.EDIT,
             "Animate" to IconKind.MOTION,
+            "Effects" to IconKind.EFFECTS,
             "Masking" to IconKind.MASK
         )
     } else if (cameraSelected) {
