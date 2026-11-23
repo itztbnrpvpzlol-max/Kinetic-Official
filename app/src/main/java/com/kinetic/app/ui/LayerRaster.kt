@@ -77,6 +77,7 @@ internal object LayerRaster {
         byId: Map<String, Layer>?
     ) {
         val settings = layer.particles
+        if (!settings.showLayer) return
         fun value(id: com.kinetic.app.model.PropId, fallback: Float = 0f) =
             layer.p(id).valueAt(time).takeIf { it.isFinite() } ?: fallback
 
@@ -94,12 +95,20 @@ internal object LayerRaster {
         val velocityBase = value(com.kinetic.app.model.PropId.PARTICLE_VELOCITY, 80f)
         val velocityRandom = value(com.kinetic.app.model.PropId.PARTICLE_VELOCITY_RANDOM, 20f) / 100f
         val spread = Math.toRadians(value(com.kinetic.app.model.PropId.PARTICLE_SPREAD, 28f).toDouble()).toFloat()
-        val gravity = value(com.kinetic.app.model.PropId.PARTICLE_GRAVITY, 0f)
+        val directionTilt = Math.toRadians(value(com.kinetic.app.model.PropId.PARTICLE_DIRECTION_TILT).toDouble()).toFloat()
+        val directionSpin = Math.toRadians(value(com.kinetic.app.model.PropId.PARTICLE_DIRECTION_SPIN).toDouble()).toFloat()
+        val gravity = value(com.kinetic.app.model.PropId.PARTICLE_GRAVITY)
+        val windX = value(com.kinetic.app.model.PropId.PARTICLE_WIND_X)
+        val windY = value(com.kinetic.app.model.PropId.PARTICLE_WIND_Y)
+        val windZ = value(com.kinetic.app.model.PropId.PARTICLE_WIND_Z)
         val baseSize = value(com.kinetic.app.model.PropId.PARTICLE_SIZE, 6f).coerceAtLeast(0f)
         val sizeRandom = value(com.kinetic.app.model.PropId.PARTICLE_SIZE_RANDOM, 30f) / 100f
         val endSize = value(com.kinetic.app.model.PropId.PARTICLE_END_SIZE, 0f).coerceAtLeast(0f)
         val startOpacity = value(com.kinetic.app.model.PropId.PARTICLE_OPACITY, 100f).coerceIn(0f, 100f)
         val endOpacity = value(com.kinetic.app.model.PropId.PARTICLE_END_OPACITY, 0f).coerceIn(0f, 100f)
+        val fadeIn = value(com.kinetic.app.model.PropId.PARTICLE_FADE_IN).coerceIn(0f, 100f) / 100f
+        val fadeOut = value(com.kinetic.app.model.PropId.PARTICLE_FADE_OUT).coerceIn(0f, 100f) / 100f
+        val feather = value(com.kinetic.app.model.PropId.PARTICLE_FEATHER).coerceIn(0f, 100f) / 100f
         val emitterX = width * 0.5f + value(com.kinetic.app.model.PropId.PARTICLE_POS_X)
         val emitterY = height * 0.5f + value(com.kinetic.app.model.PropId.PARTICLE_POS_Y)
         val emitterW = value(com.kinetic.app.model.PropId.PARTICLE_EMITTER_SIZE_X)
@@ -107,14 +116,46 @@ internal object LayerRaster {
         val emitterD = value(com.kinetic.app.model.PropId.PARTICLE_EMITTER_SIZE_Z)
         val emitterZ = value(com.kinetic.app.model.PropId.PARTICLE_POS_Z)
         val turbulence = value(com.kinetic.app.model.PropId.PARTICLE_TURBULENCE)
+        val turbulenceSpeed = value(com.kinetic.app.model.PropId.PARTICLE_TURBULENCE_SPEED, 1f).coerceIn(0f, 20f)
         val drag = value(com.kinetic.app.model.PropId.PARTICLE_DRAG).coerceIn(0f, 100f) / 100f
-        val rotationSpeed = value(com.kinetic.app.model.PropId.PARTICLE_ROTATION_SPEED)
-        val seed = layer.id.hashCode()
+        val rotation = value(com.kinetic.app.model.PropId.PARTICLE_ROTATION)
+        val rotationRandom = value(com.kinetic.app.model.PropId.PARTICLE_ROTATION_RANDOM)
+        val spin = value(com.kinetic.app.model.PropId.PARTICLE_SPIN) + value(com.kinetic.app.model.PropId.PARTICLE_ROTATION_SPEED)
+        val spinRandom = value(com.kinetic.app.model.PropId.PARTICLE_SPIN_RANDOM)
+        val motionStretch = value(com.kinetic.app.model.PropId.PARTICLE_MOTION_STRETCH).coerceIn(0f, 1000f)
+        val tailLength = value(com.kinetic.app.model.PropId.PARTICLE_TAIL_LENGTH).coerceIn(0f, 10000f) / 1000f
+        val tailSegments = value(com.kinetic.app.model.PropId.PARTICLE_TAIL_SEGMENTS, 8f).toInt().coerceIn(1, 32)
+        val tailWidth = value(com.kinetic.app.model.PropId.PARTICLE_TAIL_WIDTH, 100f).coerceIn(0f, 500f) / 100f
+        val tailTaper = value(com.kinetic.app.model.PropId.PARTICLE_TAIL_TAPER).coerceIn(0f, 100f) / 100f
+        val tailOpacity = value(com.kinetic.app.model.PropId.PARTICLE_TAIL_OPACITY, 100f).coerceIn(0f, 100f) / 100f
+        val seedValue = value(com.kinetic.app.model.PropId.PARTICLE_RANDOM_SEED).toInt()
+        val seed = if (seedValue == 0) layer.id.hashCode() else seedValue
         val projectionInverse = if (byId != null && com.kinetic.app.model.activeCamera(byId, time) != null) {
             Matrix().let { inverse ->
                 if (com.kinetic.app.model.layerMatrix(layer, time, byId).invert(inverse)) inverse else null
             }
         } else null
+        val spriteLayer = settings.spriteLayerId?.let { byId?.get(it) }
+            ?.takeIf { it.type == LayerType.TEXT || it.type == LayerType.SHAPE }
+        val spriteBitmap = spriteLayer?.let { render(it, time, 256, byId = byId) }
+
+        fun project(x: Float, y: Float, z: Float): FloatArray? {
+            if (projectionInverse == null || byId == null) return floatArrayOf(x, y, 1f)
+            val projected = com.kinetic.app.model.projectLayerPoint(layer, x, y, z, time, byId) ?: return null
+            val point = floatArrayOf(projected.x, projected.y)
+            projectionInverse.mapPoints(point)
+            return floatArrayOf(point[0], point[1], projected.sizeScale)
+        }
+
+        val motionStep = 1f / 30f
+        val motionVelocityX = if (settings.velocityFromMotion) {
+            (layer.p(com.kinetic.app.model.PropId.POS_X).valueAt(time) -
+                layer.p(com.kinetic.app.model.PropId.POS_X).valueAt((time - motionStep).coerceAtLeast(layer.start))) / motionStep
+        } else 0f
+        val motionVelocityY = if (settings.velocityFromMotion) {
+            (layer.p(com.kinetic.app.model.PropId.POS_Y).valueAt(time) -
+                layer.p(com.kinetic.app.model.PropId.POS_Y).valueAt((time - motionStep).coerceAtLeast(layer.start))) / motionStep
+        } else 0f
 
         for (index in firstEmitted until firstEmitted + emitted) {
             val r0 = random01(seed, index, 0)
@@ -127,60 +168,130 @@ internal object LayerRaster {
             val life = (lifeBase * (1f + (r0 * 2f - 1f) * lifeRandom)).coerceAtLeast(0.05f)
             if (age < 0f || age > life) continue
             val progress = (age / life).coerceIn(0f, 1f)
-            val angle = (-Math.PI / 2.0).toFloat() + (r1 * 2f - 1f) * spread
+            val angle = (-Math.PI / 2.0).toFloat() + directionSpin + (r1 * 2f - 1f) * spread
             val velocity = velocityBase * (1f + (r2 * 2f - 1f) * velocityRandom)
-            val damping = kotlin.math.exp((-drag * age * 1.8f).toDouble()).toFloat()
-            val depth = emitterZ + (r4 - 0.5f) * emitterD
-            val x = emitterX + (r2 - 0.5f) * emitterW +
-                kotlin.math.sin(angle) * velocity * age * damping +
-                kotlin.math.sin(age * 4.2f + r3 * 6.28f) * turbulence * age * 0.12f
-            val y = emitterY + (r3 - 0.5f) * emitterH -
-                kotlin.math.cos(angle) * velocity * age * damping + 0.5f * gravity * age * age
-            var drawX = x
-            var drawY = y
-            var cameraScale = 1f
-            if (projectionInverse != null && byId != null) {
-                val projected = com.kinetic.app.model.projectLayerPoint(layer, x, y, depth, time, byId)
-                    ?: continue
-                val localPoint = floatArrayOf(projected.x, projected.y)
-                projectionInverse.mapPoints(localPoint)
-                drawX = localPoint[0]
-                drawY = localPoint[1]
-                cameraScale = projected.sizeScale
+            val horizontalVelocity = velocity * kotlin.math.cos(directionTilt)
+            val verticalVelocity = velocity * kotlin.math.sin(directionTilt)
+            val sphereRadius = kotlin.math.cbrt(r2).toFloat()
+            val sphereY = (r0 * 2f - 1f)
+            val sphereRing = kotlin.math.sqrt((1f - sphereY * sphereY).coerceAtLeast(0f))
+            val sphereAngle = r1 * (Math.PI.toFloat() * 2f)
+            val sphereXOffset = kotlin.math.cos(sphereAngle) * sphereRing * sphereRadius * emitterW * 0.5f
+            val sphereYOffset = sphereY * sphereRadius * emitterH * 0.5f
+            val sphereZOffset = kotlin.math.sin(sphereAngle) * sphereRing * sphereRadius * emitterD * 0.5f
+            val emitterOffsetX = if (settings.emitterMotion == "Leave Trail") {
+                layer.p(com.kinetic.app.model.PropId.POS_X).valueAt(birth) -
+                    layer.p(com.kinetic.app.model.PropId.POS_X).valueAt(time)
+            } else 0f
+            val emitterOffsetY = if (settings.emitterMotion == "Leave Trail") {
+                layer.p(com.kinetic.app.model.PropId.POS_Y).valueAt(birth) -
+                    layer.p(com.kinetic.app.model.PropId.POS_Y).valueAt(time)
+            } else 0f
+            val originX = emitterX + emitterOffsetX + if (settings.sphereEmitter) sphereXOffset else (r2 - 0.5f) * emitterW
+            val originY = emitterY + emitterOffsetY + if (settings.sphereEmitter) sphereYOffset else (r3 - 0.5f) * emitterH
+            val depth = emitterZ + if (settings.sphereEmitter) sphereZOffset else (r4 - 0.5f) * emitterD
+
+            fun positionAt(sampleAge: Float): FloatArray {
+                val damping = kotlin.math.exp((-drag * sampleAge * 1.8f).toDouble()).toFloat()
+                val turbulenceOffset = kotlin.math.sin(sampleAge * turbulenceSpeed * 6.283185f + r3 * 6.28f) *
+                    turbulence * sampleAge * 0.12f
+                val x = originX + kotlin.math.sin(angle) * horizontalVelocity * sampleAge * damping +
+                    motionVelocityX * sampleAge + 0.5f * windX * sampleAge * sampleAge + turbulenceOffset
+                val y = originY - kotlin.math.cos(angle) * horizontalVelocity * sampleAge * damping +
+                    motionVelocityY * sampleAge + 0.5f * (gravity + windY) * sampleAge * sampleAge -
+                    turbulenceOffset * 0.35f
+                val z = depth + verticalVelocity * sampleAge * damping + 0.5f * windZ * sampleAge * sampleAge
+                return floatArrayOf(x, y, z)
             }
-            val depthScale = (1f / (1f + kotlin.math.abs(depth) / 1400f)).coerceIn(0.35f, 1.4f)
+
+            val currentPosition = positionAt(age)
+            val point = project(currentPosition[0], currentPosition[1], currentPosition[2]) ?: continue
+            val drawX = point[0]
+            val drawY = point[1]
+            val depthScale = (1f / (1f + kotlin.math.abs(currentPosition[2]) / 1400f)).coerceIn(0.35f, 1.4f)
             val size = (baseSize * (1f + (r0 - 0.5f) * 2f * sizeRandom) *
-                (1f + ((endSize / baseSize.coerceAtLeast(0.1f)) - 1f) * progress) * depthScale * cameraScale).coerceAtLeast(0.35f)
-            val opacity = (startOpacity + (endOpacity - startOpacity) * progress).coerceIn(0f, 100f)
+                (1f + ((endSize / baseSize.coerceAtLeast(0.1f)) - 1f) * progress) * depthScale * point[2]).coerceAtLeast(0.35f)
+            val fadeInAmount = if (fadeIn <= 0f) 1f else (progress / fadeIn).coerceIn(0f, 1f)
+            val fadeOutAmount = if (fadeOut <= 0f) 1f else ((1f - progress) / fadeOut).coerceIn(0f, 1f)
+            val fadeEnvelope = minOf(fadeInAmount, fadeOutAmount).let {
+                if (feather <= 0f) it else it.toDouble().pow(1.0 + feather * 3.0).toFloat()
+            }
+            val opacity = (startOpacity + (endOpacity - startOpacity) * progress).coerceIn(0f, 100f) * fadeEnvelope
             paint.color = mixColor(settings.color, settings.endColor, progress)
             paint.alpha = (opacity * 2.55f).toInt().coerceIn(0, 255)
             paint.style = Paint.Style.FILL
-            val rotation = rotationSpeed * age + r1 * 360f
+            paint.xfermode = if (settings.additive) android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.ADD) else null
+
+            if (settings.tailEnabled && tailLength > 0f && tailOpacity > 0f) {
+                paint.style = Paint.Style.STROKE
+                paint.strokeCap = Paint.Cap.ROUND
+                for (segment in 0 until tailSegments) {
+                    val f0 = segment.toFloat() / tailSegments
+                    val f1 = (segment + 1f) / tailSegments
+                    val p0Age = (age - tailLength * f0).coerceAtLeast(0f)
+                    val p1Age = (age - tailLength * f1).coerceAtLeast(0f)
+                    val p0 = positionAt(p0Age)
+                    val p1 = positionAt(p1Age)
+                    val a = project(p0[0], p0[1], p0[2]) ?: continue
+                    val b = project(p1[0], p1[1], p1[2]) ?: continue
+                    val taper = (1f - tailTaper * f0).coerceAtLeast(0.05f)
+                    paint.strokeWidth = (size * tailWidth * taper).coerceAtLeast(0.5f)
+                    paint.alpha = (opacity * tailOpacity * (1f - f0 * 0.55f) * 2.55f).toInt().coerceIn(0, 255)
+                    canvas.drawLine(a[0], a[1], b[0], b[1], paint)
+                }
+                paint.style = Paint.Style.FILL
+                paint.alpha = (opacity * 2.55f).toInt().coerceIn(0, 255)
+            }
+
+            val randomRotation = (r4 * 2f - 1f) * rotationRandom
+            val randomSpin = (r0 * 2f - 1f) * spinRandom
+            val velocityAngle = Math.toDegrees(kotlin.math.atan2(
+                -kotlin.math.cos(angle) * horizontalVelocity + motionVelocityY,
+                kotlin.math.sin(angle) * horizontalVelocity + motionVelocityX
+            ).toDouble()).toFloat() + 90f
+            val particleRotation = rotation + randomRotation + (spin + randomSpin) * age +
+                if (settings.orientToMotion) velocityAngle else 0f
+            val stretch = 1f + (motionStretch / 1000f) * (kotlin.math.abs(velocity) / 200f).coerceAtMost(5f)
             canvas.save()
-            canvas.rotate(rotation, drawX, drawY)
-            when (settings.shape) {
-                "Square" -> canvas.drawRect(drawX - size / 2f, drawY - size / 2f, drawX + size / 2f, drawY + size / 2f, paint)
-                "Diamond" -> {
-                    val path = android.graphics.Path().apply {
-                        moveTo(drawX, drawY - size); lineTo(drawX + size, drawY); lineTo(drawX, drawY + size); lineTo(drawX - size, drawY); close()
+            canvas.rotate(particleRotation, drawX, drawY)
+            canvas.scale(1f, stretch, drawX, drawY)
+            if (spriteBitmap != null) {
+                paint.colorFilter = if (settings.spriteTint) {
+                    android.graphics.PorterDuffColorFilter(paint.color, android.graphics.PorterDuff.Mode.SRC_IN)
+                } else null
+                val half = size * 0.5f
+                canvas.drawBitmap(spriteBitmap, null,
+                    android.graphics.RectF(drawX - half, drawY - half, drawX + half, drawY + half), paint)
+                paint.colorFilter = null
+            } else {
+                when (settings.shape) {
+                    "Square" -> canvas.drawRect(drawX - size / 2f, drawY - size / 2f, drawX + size / 2f, drawY + size / 2f, paint)
+                    "Diamond" -> {
+                        val path = android.graphics.Path().apply {
+                            moveTo(drawX, drawY - size); lineTo(drawX + size, drawY); lineTo(drawX, drawY + size); lineTo(drawX - size, drawY); close()
+                        }
+                        canvas.drawPath(path, paint)
                     }
-                    canvas.drawPath(path, paint)
-                }
-                "Star" -> {
-                    val path = android.graphics.Path()
-                    for (point in 0 until 10) {
-                        val radius = if (point % 2 == 0) size else size * 0.42f
-                        val a = -Math.PI / 2.0 + point * Math.PI / 5.0
-                        val px = drawX + kotlin.math.cos(a).toFloat() * radius
-                        val py = drawY + kotlin.math.sin(a).toFloat() * radius
-                        if (point == 0) path.moveTo(px, py) else path.lineTo(px, py)
+                    "Star" -> {
+                        val path = android.graphics.Path()
+                        for (pointIndex in 0 until 10) {
+                            val radius = if (pointIndex % 2 == 0) size else size * 0.42f
+                            val a = -Math.PI / 2.0 + pointIndex * Math.PI / 5.0
+                            val px = drawX + kotlin.math.cos(a).toFloat() * radius
+                            val py = drawY + kotlin.math.sin(a).toFloat() * radius
+                            if (pointIndex == 0) path.moveTo(px, py) else path.lineTo(px, py)
+                        }
+                        path.close()
+                        canvas.drawPath(path, paint)
                     }
-                    path.close()
-                    canvas.drawPath(path, paint)
+                    else -> canvas.drawCircle(drawX, drawY, size / 2f, paint)
                 }
-                else -> canvas.drawCircle(drawX, drawY, size / 2f, paint)
             }
             canvas.restore()
         }
+        paint.xfermode = null
+        paint.colorFilter = null
+        paint.style = Paint.Style.FILL
+        paint.alpha = 255
     }
 }
