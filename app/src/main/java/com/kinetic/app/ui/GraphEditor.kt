@@ -576,7 +576,6 @@ private fun CurveGlyph(key: Keyframe, highlighted: Boolean, modifier: Modifier) 
 // Drawing
 // ---------------------------------------------------------------------------------------------
 
-private 
 private class GraphGeometry(
     width: Float, height: Float, pad: Float, val rail: Float, keys: List<Keyframe>, segment: Int,
     val mode: GraphMode, fixedEase: Pair<Float, Float>?
@@ -652,7 +651,7 @@ private fun dragParam(base: Keyframe, handle: Int, pos: Offset, g: GraphGeometry
     val nx = ((pos.x - g.left) / g.w).coerceIn(0f, 1f)
     val y = g.unY(pos.y)
     return when (k.type) {
-        KeyType.ELASTIC -> if (handle == 3) k.copy(p1 = y - 1f)
+        KeyType.ELASTIC -> if (handle == 3) k.copy(p1 = (y - 1f).coerceIn(0.02f, 0.95f))
             else k.copy(p2 = ((1f + nx * 9f) * 20f).roundToInt() / 20f)
         KeyType.BOUNCE -> if (handle == 3) k.copy(p2 = (1f - y).coerceIn(0.05f, 0.9f))
             else k.copy(p1 = (1f + nx * 9f).roundToInt().toFloat())
