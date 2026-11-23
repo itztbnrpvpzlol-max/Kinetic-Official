@@ -153,6 +153,14 @@ fun ParticularPanel(editor: EditorState, layer: Layer) {
             ParticleValueRow(editor, layer, "Tail Opacity", PropId.PARTICLE_TAIL_OPACITY, 0f, 100f, 0.2f, "%.0f%%")
         }
 
+        SectionLabel("PARTICLE TYPE")
+        ParticularChoiceRow("Type", settings.particleType,
+            listOf("Sphere", "Glow Sphere", "Star", "Cloudlet", "Streaklet", "Sprite")) { type ->
+            editor.updateLayer(layer.id, push = true) {
+                it.copy(particleSettings = it.particles.copy(particleType = type))
+            }
+        }
+
         SectionLabel("RENDER")
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
             listOf("Circle", "Square", "Diamond", "Star").forEach { shape ->

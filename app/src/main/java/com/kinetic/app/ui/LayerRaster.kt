@@ -262,7 +262,7 @@ internal object LayerRaster {
             canvas.save()
             canvas.rotate(particleRotation, drawX, drawY)
             canvas.scale(1f, stretch, drawX, drawY)
-            if (spriteBitmap != null) {
+            if (spriteBitmap != null && settings.particleType == "Sprite") {
                 paint.colorFilter = if (settings.spriteTint) {
                     android.graphics.PorterDuffColorFilter(paint.color, android.graphics.PorterDuff.Mode.SRC_IN)
                 } else null
@@ -271,13 +271,39 @@ internal object LayerRaster {
                     android.graphics.RectF(drawX - half, drawY - half, drawX + half, drawY + half), paint)
                 paint.colorFilter = null
             } else {
-                when (settings.shape) {
-                    "Square" -> canvas.drawRect(drawX - size / 2f, drawY - size / 2f, drawX + size / 2f, drawY + size / 2f, paint)
-                    "Diamond" -> {
-                        val path = android.graphics.Path().apply {
-                            moveTo(drawX, drawY - size); lineTo(drawX + size, drawY); lineTo(drawX, drawY + size); lineTo(drawX - size, drawY); close()
+                when (settings.particleType) {
+                    "Glow Sphere" -> {
+                        val coreAlpha = paint.alpha
+                        paint.alpha = (coreAlpha * 0.22f).toInt()
+                        canvas.drawCircle(drawX, drawY, size * 1.45f, paint)
+                        paint.alpha = (coreAlpha * 0.42f).toInt()
+                        canvas.drawCircle(drawX, drawY, size * 0.92f, paint)
+                        paint.alpha = coreAlpha
+                        canvas.drawCircle(drawX, drawY, size * 0.5f, paint)
+                    }
+                    "Cloudlet" -> {
+                        val alpha = paint.alpha
+                        val radius = size * 0.38f
+                        val offsets = arrayOf(
+                            floatArrayOf(-0.30f, -0.10f), floatArrayOf(0.25f, -0.24f),
+                            floatArrayOf(0.34f, 0.18f), floatArrayOf(-0.18f, 0.28f),
+                            floatArrayOf(0.02f, 0.02f)
+                        )
+                        offsets.forEachIndexed { cloudIndex, offset ->
+                            paint.alpha = (alpha * if (cloudIndex == 4) 0.68f else 0.34f).toInt()
+                            val jitter = 0.72f + random01(seed, index, cloudIndex + 20) * 0.52f
+                            canvas.drawCircle(drawX + offset[0] * size, drawY + offset[1] * size, radius * jitter, paint)
                         }
-                        canvas.drawPath(path, paint)
+                        paint.alpha = alpha
+                    }
+                    "Streaklet" -> {
+                        val alpha = paint.alpha
+                        paint.alpha = (alpha * 0.32f).toInt()
+                        canvas.drawOval(android.graphics.RectF(drawX - size * 0.22f, drawY - size * 1.15f,
+                            drawX + size * 0.22f, drawY + size * 1.15f), paint)
+                        paint.alpha = alpha
+                        canvas.drawOval(android.graphics.RectF(drawX - size * 0.12f, drawY - size * 0.8f,
+                            drawX + size * 0.12f, drawY + size * 0.8f), paint)
                     }
                     "Star" -> {
                         val path = android.graphics.Path()
@@ -291,7 +317,28 @@ internal object LayerRaster {
                         path.close()
                         canvas.drawPath(path, paint)
                     }
-                    else -> canvas.drawCircle(drawX, drawY, size / 2f, paint)
+                    else -> when (settings.shape) {
+                        "Square" -> canvas.drawRect(drawX - size / 2f, drawY - size / 2f, drawX + size / 2f, drawY + size / 2f, paint)
+                        "Diamond" -> {
+                            val path = android.graphics.Path().apply {
+                                moveTo(drawX, drawY - size); lineTo(drawX + size, drawY); lineTo(drawX, drawY + size); lineTo(drawX - size, drawY); close()
+                            }
+                            canvas.drawPath(path, paint)
+                        }
+                        "Star" -> {
+                            val path = android.graphics.Path()
+                            for (pointIndex in 0 until 10) {
+                                val radius = if (pointIndex % 2 == 0) size else size * 0.42f
+                                val a = -Math.PI / 2.0 + pointIndex * Math.PI / 5.0
+                                val px = drawX + kotlin.math.cos(a).toFloat() * radius
+                                val py = drawY + kotlin.math.sin(a).toFloat() * radius
+                                if (pointIndex == 0) path.moveTo(px, py) else path.lineTo(px, py)
+                            }
+                            path.close()
+                            canvas.drawPath(path, paint)
+                        }
+                        else -> canvas.drawCircle(drawX, drawY, size / 2f, paint)
+                    }
                 }
             }
             canvas.restore()

@@ -397,54 +397,170 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
 
     fun applyParticlePreset(layerId: String, preset: String) {
         val values = when (preset) {
-            "Rain" -> mapOf(PropId.PARTICLE_RATE to 120f, PropId.PARTICLE_LIFETIME to 1.6f,
-                PropId.PARTICLE_VELOCITY to 360f, PropId.PARTICLE_SPREAD to 7f,
-                PropId.PARTICLE_GRAVITY to 24f, PropId.PARTICLE_SIZE to 2.5f,
-                PropId.PARTICLE_END_SIZE to 1f, PropId.PARTICLE_END_OPACITY to 35f)
-            "Snow" -> mapOf(PropId.PARTICLE_RATE to 70f, PropId.PARTICLE_LIFETIME to 4f,
-                PropId.PARTICLE_VELOCITY to 28f, PropId.PARTICLE_SPREAD to 38f,
-                PropId.PARTICLE_GRAVITY to 3f, PropId.PARTICLE_SIZE to 4f,
-                PropId.PARTICLE_SIZE_RANDOM to 65f, PropId.PARTICLE_END_OPACITY to 20f)
-            "Fire" -> mapOf(PropId.PARTICLE_RATE to 110f, PropId.PARTICLE_LIFETIME to 1.2f,
-                PropId.PARTICLE_VELOCITY to 115f, PropId.PARTICLE_SPREAD to 34f,
-                PropId.PARTICLE_GRAVITY to -65f, PropId.PARTICLE_SIZE to 8f,
-                PropId.PARTICLE_END_SIZE to 1f, PropId.PARTICLE_TURBULENCE to 22f)
-            "Fireworks" -> mapOf(PropId.PARTICLE_RATE to 160f, PropId.PARTICLE_LIFETIME to 2.4f,
-                PropId.PARTICLE_VELOCITY to 190f, PropId.PARTICLE_SPREAD to 180f,
-                PropId.PARTICLE_GRAVITY to 48f, PropId.PARTICLE_SIZE to 3.5f,
-                PropId.PARTICLE_END_SIZE to 0.5f, PropId.PARTICLE_END_OPACITY to 0f)
-            "Dust" -> mapOf(PropId.PARTICLE_RATE to 34f, PropId.PARTICLE_LIFETIME to 5f,
-                PropId.PARTICLE_VELOCITY to 12f, PropId.PARTICLE_SPREAD to 70f,
-                PropId.PARTICLE_GRAVITY to 0f, PropId.PARTICLE_SIZE to 2f,
-                PropId.PARTICLE_SIZE_RANDOM to 90f, PropId.PARTICLE_TURBULENCE to 15f)
-            "Bokeh" -> mapOf(PropId.PARTICLE_RATE to 18f, PropId.PARTICLE_LIFETIME to 5f,
-                PropId.PARTICLE_VELOCITY to 5f, PropId.PARTICLE_SPREAD to 360f,
-                PropId.PARTICLE_GRAVITY to 0f, PropId.PARTICLE_SIZE to 18f,
-                PropId.PARTICLE_SIZE_RANDOM to 70f, PropId.PARTICLE_END_OPACITY to 10f)
-            "Trail" -> mapOf(PropId.PARTICLE_RATE to 90f, PropId.PARTICLE_LIFETIME to 1.8f,
-                PropId.PARTICLE_VELOCITY to 42f, PropId.PARTICLE_SPREAD to 10f,
-                PropId.PARTICLE_GRAVITY to 0f, PropId.PARTICLE_SIZE to 5f,
-                PropId.PARTICLE_END_SIZE to 0f, PropId.PARTICLE_END_OPACITY to 0f)
-            "Comet" -> mapOf(PropId.PARTICLE_RATE to 150f, PropId.PARTICLE_LIFETIME to 1.4f,
-                PropId.PARTICLE_VELOCITY to 100f, PropId.PARTICLE_SPREAD to 5f,
-                PropId.PARTICLE_GRAVITY to 0f, PropId.PARTICLE_SIZE to 7f,
-                PropId.PARTICLE_END_SIZE to 0f, PropId.PARTICLE_END_OPACITY to 0f)
-            else -> mapOf(PropId.PARTICLE_RATE to 60f, PropId.PARTICLE_LIFETIME to 2f,
-                PropId.PARTICLE_VELOCITY to 80f, PropId.PARTICLE_SPREAD to 28f,
-                PropId.PARTICLE_GRAVITY to 0f, PropId.PARTICLE_SIZE to 6f)
+            "Rain" -> mapOf(
+                PropId.PARTICLE_RATE to 145f, PropId.PARTICLE_PREROLL to 1200f,
+                PropId.PARTICLE_LIFETIME to 1.35f, PropId.PARTICLE_LIFE_RANDOM to 18f,
+                PropId.PARTICLE_VELOCITY to 430f, PropId.PARTICLE_VELOCITY_RANDOM to 22f,
+                PropId.PARTICLE_SPREAD to 5f, PropId.PARTICLE_DIRECTION_SPIN to 270f,
+                PropId.PARTICLE_GRAVITY to 38f, PropId.PARTICLE_WIND_X to 12f,
+                PropId.PARTICLE_DRAG to 4f, PropId.PARTICLE_TURBULENCE to 2f,
+                PropId.PARTICLE_TURBULENCE_SPEED to 0.7f, PropId.PARTICLE_SIZE to 2.2f,
+                PropId.PARTICLE_SIZE_RANDOM to 35f, PropId.PARTICLE_END_SIZE to 1.2f,
+                PropId.PARTICLE_OPACITY to 82f, PropId.PARTICLE_END_OPACITY to 12f,
+                PropId.PARTICLE_FADE_OUT to 24f, PropId.PARTICLE_MOTION_STRETCH to 520f,
+                PropId.PARTICLE_EMITTER_SIZE_X to 1500f, PropId.PARTICLE_EMITTER_SIZE_Y to 120f,
+                PropId.PARTICLE_EMITTER_SIZE_Z to 80f, PropId.PARTICLE_TAIL_LENGTH to 110f,
+                PropId.PARTICLE_TAIL_SEGMENTS to 5f, PropId.PARTICLE_TAIL_WIDTH to 30f,
+                PropId.PARTICLE_TAIL_TAPER to 82f, PropId.PARTICLE_TAIL_OPACITY to 65f
+            )
+            "Snow" -> mapOf(
+                PropId.PARTICLE_RATE to 78f, PropId.PARTICLE_PREROLL to 1800f,
+                PropId.PARTICLE_LIFETIME to 4.8f, PropId.PARTICLE_LIFE_RANDOM to 38f,
+                PropId.PARTICLE_VELOCITY to 34f, PropId.PARTICLE_VELOCITY_RANDOM to 48f,
+                PropId.PARTICLE_SPREAD to 24f, PropId.PARTICLE_DIRECTION_SPIN to 270f,
+                PropId.PARTICLE_GRAVITY to 8f, PropId.PARTICLE_WIND_X to 9f,
+                PropId.PARTICLE_DRAG to 22f, PropId.PARTICLE_TURBULENCE to 18f,
+                PropId.PARTICLE_TURBULENCE_SPEED to 0.42f, PropId.PARTICLE_SIZE to 4.2f,
+                PropId.PARTICLE_SIZE_RANDOM to 72f, PropId.PARTICLE_END_SIZE to 3.4f,
+                PropId.PARTICLE_OPACITY to 86f, PropId.PARTICLE_END_OPACITY to 8f,
+                PropId.PARTICLE_FADE_IN to 8f, PropId.PARTICLE_FADE_OUT to 26f,
+                PropId.PARTICLE_FEATHER to 72f, PropId.PARTICLE_EMITTER_SIZE_X to 1500f,
+                PropId.PARTICLE_EMITTER_SIZE_Y to 100f, PropId.PARTICLE_EMITTER_SIZE_Z to 300f,
+                PropId.PARTICLE_ROTATION_RANDOM to 180f
+            )
+            "Fire" -> mapOf(
+                PropId.PARTICLE_RATE to 132f, PropId.PARTICLE_PREROLL to 700f,
+                PropId.PARTICLE_LIFETIME to 1.55f, PropId.PARTICLE_LIFE_RANDOM to 32f,
+                PropId.PARTICLE_VELOCITY to 86f, PropId.PARTICLE_VELOCITY_RANDOM to 42f,
+                PropId.PARTICLE_SPREAD to 34f, PropId.PARTICLE_DIRECTION_SPIN to 90f,
+                PropId.PARTICLE_GRAVITY to -74f, PropId.PARTICLE_WIND_Y to -8f,
+                PropId.PARTICLE_DRAG to 12f, PropId.PARTICLE_TURBULENCE to 38f,
+                PropId.PARTICLE_TURBULENCE_SPEED to 1.65f, PropId.PARTICLE_SIZE to 11f,
+                PropId.PARTICLE_SIZE_RANDOM to 58f, PropId.PARTICLE_END_SIZE to 1.2f,
+                PropId.PARTICLE_OPACITY to 92f, PropId.PARTICLE_END_OPACITY to 0f,
+                PropId.PARTICLE_FADE_IN to 8f, PropId.PARTICLE_FADE_OUT to 44f,
+                PropId.PARTICLE_FEATHER to 88f, PropId.PARTICLE_EMITTER_SIZE_X to 150f,
+                PropId.PARTICLE_EMITTER_SIZE_Y to 35f, PropId.PARTICLE_EMITTER_SIZE_Z to 80f,
+                PropId.PARTICLE_ROTATION_RANDOM to 360f, PropId.PARTICLE_SPIN to 75f
+            )
+            "Sparks" -> mapOf(
+                PropId.PARTICLE_RATE to 96f, PropId.PARTICLE_PREROLL to 900f,
+                PropId.PARTICLE_LIFETIME to 1.7f, PropId.PARTICLE_LIFE_RANDOM to 42f,
+                PropId.PARTICLE_VELOCITY to 185f, PropId.PARTICLE_VELOCITY_RANDOM to 68f,
+                PropId.PARTICLE_SPREAD to 72f, PropId.PARTICLE_DIRECTION_SPIN to 90f,
+                PropId.PARTICLE_GRAVITY to 46f, PropId.PARTICLE_DRAG to 8f,
+                PropId.PARTICLE_TURBULENCE to 9f, PropId.PARTICLE_TURBULENCE_SPEED to 1.2f,
+                PropId.PARTICLE_SIZE to 3.2f, PropId.PARTICLE_SIZE_RANDOM to 65f,
+                PropId.PARTICLE_END_SIZE to 0.45f, PropId.PARTICLE_OPACITY to 100f,
+                PropId.PARTICLE_END_OPACITY to 0f, PropId.PARTICLE_FADE_OUT to 38f,
+                PropId.PARTICLE_EMITTER_SIZE_X to 12f, PropId.PARTICLE_EMITTER_SIZE_Y to 12f,
+                PropId.PARTICLE_EMITTER_SIZE_Z to 12f, PropId.PARTICLE_ROTATION_RANDOM to 360f,
+                PropId.PARTICLE_SPIN to 130f
+            )
+            "Fireworks" -> mapOf(
+                PropId.PARTICLE_RATE to 190f, PropId.PARTICLE_PREROLL to 900f,
+                PropId.PARTICLE_LIFETIME to 2.8f, PropId.PARTICLE_LIFE_RANDOM to 28f,
+                PropId.PARTICLE_VELOCITY to 205f, PropId.PARTICLE_VELOCITY_RANDOM to 36f,
+                PropId.PARTICLE_SPREAD to 180f, PropId.PARTICLE_DIRECTION_SPIN to 90f,
+                PropId.PARTICLE_GRAVITY to 52f, PropId.PARTICLE_DRAG to 10f,
+                PropId.PARTICLE_TURBULENCE to 5f, PropId.PARTICLE_TURBULENCE_SPEED to 0.8f,
+                PropId.PARTICLE_SIZE to 3.8f, PropId.PARTICLE_SIZE_RANDOM to 48f,
+                PropId.PARTICLE_END_SIZE to 0.35f, PropId.PARTICLE_OPACITY to 100f,
+                PropId.PARTICLE_END_OPACITY to 0f, PropId.PARTICLE_FADE_OUT to 35f,
+                PropId.PARTICLE_EMITTER_SIZE_X to 8f, PropId.PARTICLE_EMITTER_SIZE_Y to 8f,
+                PropId.PARTICLE_EMITTER_SIZE_Z to 8f, PropId.PARTICLE_ROTATION_RANDOM to 360f,
+                PropId.PARTICLE_SPIN to 110f
+            )
+            "Dust" -> mapOf(
+                PropId.PARTICLE_RATE to 42f, PropId.PARTICLE_PREROLL to 2000f,
+                PropId.PARTICLE_LIFETIME to 5.5f, PropId.PARTICLE_LIFE_RANDOM to 55f,
+                PropId.PARTICLE_VELOCITY to 13f, PropId.PARTICLE_VELOCITY_RANDOM to 85f,
+                PropId.PARTICLE_SPREAD to 150f, PropId.PARTICLE_DIRECTION_SPIN to 90f,
+                PropId.PARTICLE_GRAVITY to 1.5f, PropId.PARTICLE_WIND_X to 8f,
+                PropId.PARTICLE_WIND_Y to -1f, PropId.PARTICLE_DRAG to 38f,
+                PropId.PARTICLE_TURBULENCE to 24f, PropId.PARTICLE_TURBULENCE_SPEED to 0.3f,
+                PropId.PARTICLE_SIZE to 2.5f, PropId.PARTICLE_SIZE_RANDOM to 92f,
+                PropId.PARTICLE_END_SIZE to 4f, PropId.PARTICLE_OPACITY to 38f,
+                PropId.PARTICLE_END_OPACITY to 0f, PropId.PARTICLE_FADE_IN to 22f,
+                PropId.PARTICLE_FADE_OUT to 38f, PropId.PARTICLE_FEATHER to 95f,
+                PropId.PARTICLE_EMITTER_SIZE_X to 1300f, PropId.PARTICLE_EMITTER_SIZE_Y to 700f,
+                PropId.PARTICLE_EMITTER_SIZE_Z to 500f
+            )
+            "Bokeh" -> mapOf(
+                PropId.PARTICLE_RATE to 22f, PropId.PARTICLE_PREROLL to 2500f,
+                PropId.PARTICLE_LIFETIME to 6f, PropId.PARTICLE_LIFE_RANDOM to 48f,
+                PropId.PARTICLE_VELOCITY to 3.5f, PropId.PARTICLE_VELOCITY_RANDOM to 100f,
+                PropId.PARTICLE_SPREAD to 360f, PropId.PARTICLE_GRAVITY to 0f,
+                PropId.PARTICLE_DRAG to 55f, PropId.PARTICLE_TURBULENCE to 3f,
+                PropId.PARTICLE_TURBULENCE_SPEED to 0.18f, PropId.PARTICLE_SIZE to 22f,
+                PropId.PARTICLE_SIZE_RANDOM to 78f, PropId.PARTICLE_END_SIZE to 30f,
+                PropId.PARTICLE_OPACITY to 42f, PropId.PARTICLE_END_OPACITY to 0f,
+                PropId.PARTICLE_FADE_IN to 28f, PropId.PARTICLE_FADE_OUT to 42f,
+                PropId.PARTICLE_FEATHER to 100f, PropId.PARTICLE_EMITTER_SIZE_X to 1400f,
+                PropId.PARTICLE_EMITTER_SIZE_Y to 900f, PropId.PARTICLE_EMITTER_SIZE_Z to 900f
+            )
+            "Trail" -> mapOf(
+                PropId.PARTICLE_RATE to 108f, PropId.PARTICLE_PREROLL to 1000f,
+                PropId.PARTICLE_LIFETIME to 1.9f, PropId.PARTICLE_LIFE_RANDOM to 16f,
+                PropId.PARTICLE_VELOCITY to 18f, PropId.PARTICLE_VELOCITY_RANDOM to 22f,
+                PropId.PARTICLE_SPREAD to 9f, PropId.PARTICLE_DIRECTION_SPIN to 90f,
+                PropId.PARTICLE_GRAVITY to 0f, PropId.PARTICLE_DRAG to 16f,
+                PropId.PARTICLE_TURBULENCE to 3f, PropId.PARTICLE_TURBULENCE_SPEED to 0.7f,
+                PropId.PARTICLE_SIZE to 5.5f, PropId.PARTICLE_SIZE_RANDOM to 30f,
+                PropId.PARTICLE_END_SIZE to 0.15f, PropId.PARTICLE_OPACITY to 100f,
+                PropId.PARTICLE_END_OPACITY to 0f, PropId.PARTICLE_FADE_OUT to 45f,
+                PropId.PARTICLE_EMITTER_SIZE_X to 4f, PropId.PARTICLE_EMITTER_SIZE_Y to 4f,
+                PropId.PARTICLE_EMITTER_SIZE_Z to 4f, PropId.PARTICLE_TAIL_LENGTH to 180f,
+                PropId.PARTICLE_TAIL_SEGMENTS to 9f, PropId.PARTICLE_TAIL_WIDTH to 70f,
+                PropId.PARTICLE_TAIL_TAPER to 92f, PropId.PARTICLE_TAIL_OPACITY to 92f,
+                PropId.PARTICLE_SPIN to 45f
+            )
+            "Comet" -> mapOf(
+                PropId.PARTICLE_RATE to 175f, PropId.PARTICLE_PREROLL to 1000f,
+                PropId.PARTICLE_LIFETIME to 1.55f, PropId.PARTICLE_LIFE_RANDOM to 12f,
+                PropId.PARTICLE_VELOCITY to 52f, PropId.PARTICLE_VELOCITY_RANDOM to 16f,
+                PropId.PARTICLE_SPREAD to 4f, PropId.PARTICLE_DIRECTION_SPIN to 90f,
+                PropId.PARTICLE_GRAVITY to 0f, PropId.PARTICLE_DRAG to 8f,
+                PropId.PARTICLE_TURBULENCE to 1.5f, PropId.PARTICLE_TURBULENCE_SPEED to 0.8f,
+                PropId.PARTICLE_SIZE to 9f, PropId.PARTICLE_SIZE_RANDOM to 22f,
+                PropId.PARTICLE_END_SIZE to 0.1f, PropId.PARTICLE_OPACITY to 100f,
+                PropId.PARTICLE_END_OPACITY to 0f, PropId.PARTICLE_FADE_OUT to 42f,
+                PropId.PARTICLE_EMITTER_SIZE_X to 3f, PropId.PARTICLE_EMITTER_SIZE_Y to 3f,
+                PropId.PARTICLE_EMITTER_SIZE_Z to 3f, PropId.PARTICLE_TAIL_LENGTH to 260f,
+                PropId.PARTICLE_TAIL_SEGMENTS to 12f, PropId.PARTICLE_TAIL_WIDTH to 100f,
+                PropId.PARTICLE_TAIL_TAPER to 96f, PropId.PARTICLE_TAIL_OPACITY to 100f,
+                PropId.PARTICLE_MOTION_STRETCH to 340f
+            )
+            else -> return
+        }
+        val current = layers.firstOrNull { it.id == layerId } ?: return
+        val currentSettings = current.particles
+        val presetSettings = when (preset) {
+            "Rain" -> currentSettings.copy(preset = preset, color = 0xFFDDF4FF.toInt(),
+                endColor = 0x00B8DFFF, particleType = "Streaklet", additive = false, tailEnabled = true)
+            "Snow" -> currentSettings.copy(preset = preset, color = 0xFFEAF7FF.toInt(),
+                endColor = 0x00B8DFFF, particleType = "Cloudlet", additive = false, tailEnabled = false)
+            "Fire" -> currentSettings.copy(preset = preset, color = 0xFFFFC15C.toInt(),
+                endColor = 0x00E92D00, particleType = "Cloudlet", additive = true, tailEnabled = false)
+            "Sparks" -> currentSettings.copy(preset = preset, color = 0xFFFFE2A0.toInt(),
+                endColor = 0x00FF6A24, particleType = "Glow Sphere", additive = true, tailEnabled = true)
+            "Fireworks" -> currentSettings.copy(preset = preset, color = 0xFFFFE28A.toInt(),
+                endColor = 0x00FF6B38, particleType = "Star", additive = true, tailEnabled = false)
+            "Dust" -> currentSettings.copy(preset = preset, color = 0xFFC9BBA6.toInt(),
+                endColor = 0x00A79A88, particleType = "Cloudlet", additive = false, tailEnabled = false)
+            "Bokeh" -> currentSettings.copy(preset = preset, color = 0xFFFFE8B0.toInt(),
+                endColor = 0x00FFFFFF, particleType = "Glow Sphere", additive = true, tailEnabled = false)
+            "Trail" -> currentSettings.copy(preset = preset, color = 0xFF79D8FF.toInt(),
+                endColor = 0x001D6DFF, particleType = "Glow Sphere", additive = true, tailEnabled = true)
+            "Comet" -> currentSettings.copy(preset = preset, color = 0xFFFFE7B0.toInt(),
+                endColor = 0x00FF6B28, particleType = "Streaklet", additive = true, tailEnabled = true)
+            else -> currentSettings
         }
         updateLayer(layerId, push = true) { layer ->
             val nextProps = values.entries.fold(layer.props) { acc, entry ->
                 acc + (entry.key to Prop(entry.value))
             }
-            val palette = when (preset) {
-                "Fire", "Comet" -> ParticleSettings(preset, 0xFFFFB347.toInt(), 0x00FF2A00)
-                "Rain", "Snow" -> ParticleSettings(preset, 0xFFDDF4FF.toInt(), 0x00B8DFFF)
-                "Fireworks" -> ParticleSettings(preset, 0xFFFFE28A.toInt(), 0x00FF6B38)
-                "Bokeh" -> ParticleSettings(preset, 0xFFFFE8B0.toInt(), 0x00FFFFFF)
-                else -> (layer.particleSettings ?: ParticleSettings()).copy(preset = preset)
-            }
-            layer.copy(props = nextProps, particleSettings = palette)
+            layer.copy(props = nextProps, particleSettings = presetSettings)
         }
     }
     fun addSolid(color: Int = 0xFFFFFFFF.toInt()) {

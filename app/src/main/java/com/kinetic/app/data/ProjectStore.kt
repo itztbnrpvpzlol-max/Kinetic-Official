@@ -249,7 +249,7 @@ class ProjectStore(context: Context) {
                     .put("emitterMotion", particle.emitterMotion).put("velocityFromMotion", particle.velocityFromMotion)
                     .put("spriteLayerId", particle.spriteLayerId).put("spriteTint", particle.spriteTint)
                     .put("orientToMotion", particle.orientToMotion).put("tailEnabled", particle.tailEnabled)
-                    .put("showLayer", particle.showLayer)
+                    .put("showLayer", particle.showLayer).put("particleType", particle.particleType)
             } ?: JSONObject.NULL)
             .put("vectorPoints", JSONArray().also { points -> l.vectorPoints.forEach { point -> points.put(JSONObject().put("x", point.x.toDouble()).put("y", point.y.toDouble())) } })
             .put("vectorSmooth", JSONArray().also { a -> l.vectorSmooth.forEach { a.put(it) } })
@@ -346,7 +346,8 @@ class ProjectStore(context: Context) {
                 spriteTint = particle.optBoolean("spriteTint", true),
                 orientToMotion = particle.optBoolean("orientToMotion", false),
                 tailEnabled = particle.optBoolean("tailEnabled", false),
-                showLayer = particle.optBoolean("showLayer", true)
+                showLayer = particle.optBoolean("showLayer", true),
+                particleType = particle.optString("particleType", "Sphere")
             )
         }
         val srcLength = j.optDouble("srcLength", -1.0).toFloat().let { if (it < 0f) Float.POSITIVE_INFINITY else it }

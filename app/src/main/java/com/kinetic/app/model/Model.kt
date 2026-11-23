@@ -528,7 +528,8 @@ data class ParticleSettings(
     val spriteTint: Boolean = true,
     val orientToMotion: Boolean = false,
     val tailEnabled: Boolean = false,
-    val showLayer: Boolean = true
+    val showLayer: Boolean = true,
+    val particleType: String = "Sphere"
 )
 
 data class Layer(
