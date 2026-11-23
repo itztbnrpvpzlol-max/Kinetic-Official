@@ -1079,7 +1079,26 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
             id == PropId.PARTICLE_END_OPACITY -> value.coerceIn(0f, 100f)
             id == PropId.PARTICLE_SIZE || id == PropId.PARTICLE_END_SIZE -> value.coerceIn(0f, 500f)
             id == PropId.PARTICLE_SPREAD -> value.coerceIn(0f, 360f)
-            id == PropId.PARTICLE_DRAG -> value.coerceIn(0f, 100f)
+            id == PropId.PARTICLE_DRAG || id == PropId.PARTICLE_LIFE_RANDOM ||
+                id == PropId.PARTICLE_VELOCITY_RANDOM || id == PropId.PARTICLE_SIZE_RANDOM ||
+                id == PropId.PARTICLE_OPACITY || id == PropId.PARTICLE_END_OPACITY ||
+                id == PropId.PARTICLE_FADE_IN || id == PropId.PARTICLE_FADE_OUT ||
+                id == PropId.PARTICLE_FEATHER || id == PropId.PARTICLE_TAIL_TAPER ||
+                id == PropId.PARTICLE_TAIL_OPACITY -> value.coerceIn(0f, 100f)
+            id == PropId.PARTICLE_SIZE || id == PropId.PARTICLE_END_SIZE ||
+                id == PropId.PARTICLE_TAIL_WIDTH -> value.coerceIn(0f, 500f)
+            id == PropId.PARTICLE_SPREAD -> value.coerceIn(0f, 360f)
+            id == PropId.PARTICLE_DIRECTION_TILT -> value.coerceIn(-90f, 90f)
+            id == PropId.PARTICLE_DIRECTION_SPIN || id == PropId.PARTICLE_ROTATION -> value.coerceIn(-360f, 360f)
+            id == PropId.PARTICLE_ROTATION_RANDOM || id == PropId.PARTICLE_SPIN_RANDOM -> value.coerceIn(0f, 720f)
+            id == PropId.PARTICLE_SPIN -> value.coerceIn(-720f, 720f)
+            id == PropId.PARTICLE_TURBULENCE_SPEED -> value.coerceIn(0f, 20f)
+            id == PropId.PARTICLE_TAIL_LENGTH -> value.coerceIn(0f, 10000f)
+            id == PropId.PARTICLE_TAIL_SEGMENTS -> value.coerceIn(1f, 32f)
+            id == PropId.PARTICLE_RANDOM_SEED -> value.coerceIn(0f, 100000f)
+            id == PropId.PARTICLE_MOTION_STRETCH -> value.coerceIn(0f, 1000f)
+            id == PropId.PARTICLE_WIND_X || id == PropId.PARTICLE_WIND_Y || id == PropId.PARTICLE_WIND_Z ||
+                id == PropId.PARTICLE_GRAVITY -> value.coerceIn(-1000f, 1000f)
             taClamp(id, value) != null -> taClamp(id, value)!!
             else -> value
         }

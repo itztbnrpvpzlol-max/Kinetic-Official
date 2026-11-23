@@ -187,6 +187,26 @@ enum class PropId(
     PARTICLE_ROTATION_SPEED("Rotation Speed", 0.15f),
     PARTICLE_TURBULENCE("Turbulence", 0.1f),
     PARTICLE_DRAG("Air Resistance", 0.05f),
+    PARTICLE_DIRECTION_TILT("Direction Tilt", 0.15f),
+    PARTICLE_DIRECTION_SPIN("Direction Spin", 0.15f),
+    PARTICLE_WIND_X("Wind X", 0.15f),
+    PARTICLE_WIND_Y("Wind Y", 0.15f),
+    PARTICLE_WIND_Z("Wind Z", 0.15f),
+    PARTICLE_TURBULENCE_SPEED("Turbulence Speed", 0.05f),
+    PARTICLE_FADE_IN("Fade In", 0.1f),
+    PARTICLE_FADE_OUT("Fade Out", 0.1f),
+    PARTICLE_FEATHER("Feather", 0.1f),
+    PARTICLE_ROTATION("Rotation", 0.15f),
+    PARTICLE_ROTATION_RANDOM("Rotation Random", 0.1f),
+    PARTICLE_SPIN("Spin (°/sec)", 0.15f),
+    PARTICLE_SPIN_RANDOM("Spin Random", 0.1f),
+    PARTICLE_MOTION_STRETCH("Motion Stretch", 0.1f),
+    PARTICLE_TAIL_LENGTH("Tail Length (ms)", 1f),
+    PARTICLE_TAIL_SEGMENTS("Tail Segments", 0.1f),
+    PARTICLE_TAIL_WIDTH("Tail Width", 0.1f),
+    PARTICLE_TAIL_TAPER("Tail Taper", 0.1f),
+    PARTICLE_TAIL_OPACITY("Tail Opacity", 0.1f),
+    PARTICLE_RANDOM_SEED("Random Seed", 1f),
     MASK_OPACITY("Mask Opacity", 0.12f),
     MASK_FEATHER("Mask Feather", 0.08f),
     MASK_EXPANSION("Mask Expansion", 0.08f),
@@ -500,7 +520,15 @@ data class ParticleSettings(
     val color: Int = 0xFFFFFFFF.toInt(),
     val endColor: Int = 0x00FFFFFF,
     val shape: String = "Circle",
-    val additive: Boolean = true
+    val additive: Boolean = true,
+    val sphereEmitter: Boolean = false,
+    val emitterMotion: String = "Leave Trail",
+    val velocityFromMotion: Boolean = false,
+    val spriteLayerId: String? = null,
+    val spriteTint: Boolean = true,
+    val orientToMotion: Boolean = false,
+    val tailEnabled: Boolean = false,
+    val showLayer: Boolean = true
 )
 
 data class Layer(
@@ -574,6 +602,21 @@ data class Layer(
             PropId.PARTICLE_END_SIZE -> 0f
             PropId.PARTICLE_OPACITY -> 100f
             PropId.PARTICLE_END_OPACITY -> 0f
+            PropId.PARTICLE_DIRECTION_TILT -> 0f
+            PropId.PARTICLE_DIRECTION_SPIN -> 0f
+            PropId.PARTICLE_WIND_X, PropId.PARTICLE_WIND_Y, PropId.PARTICLE_WIND_Z -> 0f
+            PropId.PARTICLE_TURBULENCE_SPEED -> 1f
+            PropId.PARTICLE_FADE_IN -> 0f
+            PropId.PARTICLE_FADE_OUT -> 0f
+            PropId.PARTICLE_FEATHER -> 0f
+            PropId.PARTICLE_ROTATION, PropId.PARTICLE_ROTATION_RANDOM, PropId.PARTICLE_SPIN, PropId.PARTICLE_SPIN_RANDOM -> 0f
+            PropId.PARTICLE_MOTION_STRETCH -> 0f
+            PropId.PARTICLE_TAIL_LENGTH -> 0f
+            PropId.PARTICLE_TAIL_SEGMENTS -> 8f
+            PropId.PARTICLE_TAIL_WIDTH -> 100f
+            PropId.PARTICLE_TAIL_TAPER -> 0f
+            PropId.PARTICLE_TAIL_OPACITY -> 100f
+            PropId.PARTICLE_RANDOM_SEED -> 0f
             else -> taDefault(id) ?: if (id.isVectorPoint) 0.5f else 0f
         }
     )
@@ -678,7 +721,27 @@ fun newParticular(name: String, start: Float, duration: Float): Layer {
         PropId.PARTICLE_END_OPACITY to Prop(0f),
         PropId.PARTICLE_ROTATION_SPEED to Prop(0f),
         PropId.PARTICLE_TURBULENCE to Prop(0f),
-        PropId.PARTICLE_DRAG to Prop(0f)
+        PropId.PARTICLE_DRAG to Prop(0f),
+        PropId.PARTICLE_DIRECTION_TILT to Prop(0f),
+        PropId.PARTICLE_DIRECTION_SPIN to Prop(0f),
+        PropId.PARTICLE_WIND_X to Prop(0f),
+        PropId.PARTICLE_WIND_Y to Prop(0f),
+        PropId.PARTICLE_WIND_Z to Prop(0f),
+        PropId.PARTICLE_TURBULENCE_SPEED to Prop(1f),
+        PropId.PARTICLE_FADE_IN to Prop(0f),
+        PropId.PARTICLE_FADE_OUT to Prop(0f),
+        PropId.PARTICLE_FEATHER to Prop(0f),
+        PropId.PARTICLE_ROTATION to Prop(0f),
+        PropId.PARTICLE_ROTATION_RANDOM to Prop(0f),
+        PropId.PARTICLE_SPIN to Prop(0f),
+        PropId.PARTICLE_SPIN_RANDOM to Prop(0f),
+        PropId.PARTICLE_MOTION_STRETCH to Prop(0f),
+        PropId.PARTICLE_TAIL_LENGTH to Prop(0f),
+        PropId.PARTICLE_TAIL_SEGMENTS to Prop(8f),
+        PropId.PARTICLE_TAIL_WIDTH to Prop(100f),
+        PropId.PARTICLE_TAIL_TAPER to Prop(0f),
+        PropId.PARTICLE_TAIL_OPACITY to Prop(100f),
+        PropId.PARTICLE_RANDOM_SEED to Prop(0f)
     )
     return base.copy(is3D = true, particleSettings = ParticleSettings(), props = base.props + particleProps)
 }

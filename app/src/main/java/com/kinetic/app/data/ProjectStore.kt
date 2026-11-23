@@ -14,6 +14,7 @@ import com.kinetic.app.model.MaskStroke
 import com.kinetic.app.model.LayerType
 import com.kinetic.app.model.Prop
 import com.kinetic.app.model.PropId
+import com.kinetic.app.model.ParticleSettings
 import com.kinetic.app.model.VectorPoint
 import org.json.JSONArray
 import org.json.JSONObject
@@ -241,6 +242,15 @@ class ProjectStore(context: Context) {
             .put("speed", l.p(PropId.SPEED).base.toDouble()).put("volume", l.p(PropId.VOLUME).base.toDouble())
             .put("maskEnabled", l.maskEnabled).put("blendMode", l.blendMode)
             .put("shapeKind", l.shapeKind)
+            .put("particleSettings", l.particleSettings?.let { particle ->
+                JSONObject().put("preset", particle.preset).put("color", particle.color)
+                    .put("endColor", particle.endColor).put("shape", particle.shape)
+                    .put("additive", particle.additive).put("sphereEmitter", particle.sphereEmitter)
+                    .put("emitterMotion", particle.emitterMotion).put("velocityFromMotion", particle.velocityFromMotion)
+                    .put("spriteLayerId", particle.spriteLayerId).put("spriteTint", particle.spriteTint)
+                    .put("orientToMotion", particle.orientToMotion).put("tailEnabled", particle.tailEnabled)
+                    .put("showLayer", particle.showLayer)
+            } ?: JSONObject.NULL)
             .put("vectorPoints", JSONArray().also { points -> l.vectorPoints.forEach { point -> points.put(JSONObject().put("x", point.x.toDouble()).put("y", point.y.toDouble())) } })
             .put("vectorSmooth", JSONArray().also { a -> l.vectorSmooth.forEach { a.put(it) } })
             .put("vectorClosed", l.vectorClosed)
@@ -308,6 +318,24 @@ class ProjectStore(context: Context) {
                 strokes = strokes, frozen = mask.optBoolean("frozen", false)
             )
         }
+        val particleJson = j.optJSONObject("particleSettings")
+        val particleSettings = particleJson?.let { particle ->
+            ParticleSettings(
+                preset = particle.optString("preset", "Sparks"),
+                color = particle.optInt("color", 0xFFFFFFFF.toInt()),
+                endColor = particle.optInt("endColor", 0x00FFFFFF),
+                shape = particle.optString("shape", "Circle"),
+                additive = particle.optBoolean("additive", true),
+                sphereEmitter = particle.optBoolean("sphereEmitter", false),
+                emitterMotion = particle.optString("emitterMotion", "Leave Trail"),
+                velocityFromMotion = particle.optBoolean("velocityFromMotion", false),
+                spriteLayerId = particle.optString("spriteLayerId").takeIf { it.isNotBlank() && it != "null" },
+                spriteTint = particle.optBoolean("spriteTint", true),
+                orientToMotion = particle.optBoolean("orientToMotion", false),
+                tailEnabled = particle.optBoolean("tailEnabled", false),
+                showLayer = particle.optBoolean("showLayer", true)
+            )
+        }
         val srcLength = j.optDouble("srcLength", -1.0).toFloat().let { if (it < 0f) Float.POSITIVE_INFINITY else it }
         return Layer(id = j.optString("id", UUID.randomUUID().toString()),
             type = runCatching { LayerType.valueOf(j.optString("type", "SHAPE")) }.getOrDefault(LayerType.SHAPE),
@@ -321,7 +349,7 @@ class ProjectStore(context: Context) {
             scaleLinked = j.optBoolean("scaleLinked", false), text = j.optString("text", "Text"),
             textStyle = com.kinetic.app.model.textStyleFromJson(j.optJSONObject("textStyle")),
             textAnimators = com.kinetic.app.model.textAnimatorsFromJson(j.optJSONArray("textAnimators")),
-            color = j.optInt("color", 0xFF8D8BA3.toInt()), props = props,
+            color = j.optInt("color", 0xFF8D8BA3.toInt()), particleSettings = particleSettings, props = props,
             effects = (j.optJSONArray("effects") ?: JSONArray()).let { a -> (0 until a.length()).map { a.optString(it) } },
             effectStack = (j.optJSONArray("effectStack") ?: JSONArray()).let { array ->
                 (0 until array.length()).mapNotNull { index ->
