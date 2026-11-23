@@ -182,7 +182,19 @@ jobs:
           echo "KINETIC_KEYSTORE_PASSWORD=${KINETIC_KEYSTORE_PASSWORD}" >> "${GITHUB_ENV}"
 
       - name: Build debug APK
-        run: gradle assembleDebug --no-daemon -PKINETIC_VERSION_CODE="${KINETIC_VERSION_CODE}" -PKINETIC_VERSION_NAME="${KINETIC_VERSION_NAME}"
+        shell: bash
+        run: |
+          set -o pipefail
+          STATUS=0
+          gradle assembleDebug --no-daemon -PKINETIC_VERSION_CODE="${KINETIC_VERSION_CODE}" -PKINETIC_VERSION_NAME="${KINETIC_VERSION_NAME}" 2>&1 | tee build.log || STATUS=$?
+          if [ "${STATUS}" -ne 0 ]; then
+            # Surface compiler errors as annotations so they are readable without opening the raw log.
+            ERRORS=$(grep -E '^e: ' build.log | head -25 | sed -E 's#file:///[^ ]*/com/kinetic/app/##' | paste -sd '~' - || true)
+            WENT_WRONG=$(grep -A6 'What went wrong' build.log | head -8 | paste -sd '~' - || true)
+            echo "::error title=Kotlin errors::${ERRORS}"
+            echo "::error title=Gradle::${WENT_WRONG}"
+          fi
+          exit "${STATUS}"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
