@@ -504,7 +504,7 @@ data class ParticleSettings(
 )
 
 data class Layer(
-    val id: String = UUID.randomUUID(),
+    val id: String = UUID.randomUUID().toString(),
     val type: LayerType,
     val name: String,
     val uri: String? = null,
