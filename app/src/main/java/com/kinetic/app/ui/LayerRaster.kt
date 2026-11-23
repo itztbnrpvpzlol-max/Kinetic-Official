@@ -71,7 +71,7 @@ internal object LayerRaster {
     private fun drawParticles(
         canvas: Canvas, layer: Layer, time: Float, width: Float, height: Float, paint: Paint
     ) {
-        val settings = layer.particleSettings
+        val settings = layer.particles
         fun value(id: com.kinetic.app.model.PropId, fallback: Float = 0f) =
             layer.p(id).valueAt(time).takeIf { it.isFinite() } ?: fallback
 
@@ -96,6 +96,7 @@ internal object LayerRaster {
         val emitterW = value(com.kinetic.app.model.PropId.PARTICLE_EMITTER_SIZE_X)
         val emitterH = value(com.kinetic.app.model.PropId.PARTICLE_EMITTER_SIZE_Y)
         val emitterD = value(com.kinetic.app.model.PropId.PARTICLE_EMITTER_SIZE_Z)
+        val emitterZ = value(com.kinetic.app.model.PropId.PARTICLE_POS_Z)
         val turbulence = value(com.kinetic.app.model.PropId.PARTICLE_TURBULENCE)
         val drag = value(com.kinetic.app.model.PropId.PARTICLE_DRAG).coerceIn(0f, 100f) / 100f
         val rotationSpeed = value(com.kinetic.app.model.PropId.PARTICLE_ROTATION_SPEED)
@@ -114,8 +115,8 @@ internal object LayerRaster {
             val progress = (age / life).coerceIn(0f, 1f)
             val angle = (-Math.PI / 2.0).toFloat() + (r1 * 2f - 1f) * spread
             val velocity = velocityBase * (1f + (r2 * 2f - 1f) * velocityRandom)
-            val damping = kotlin.math.exp(-drag * age * 1.8f)
-            val depth = (r4 - 0.5f) * emitterD
+            val damping = kotlin.math.exp((-drag * age * 1.8f).toDouble()).toFloat()
+            val depth = emitterZ + (r4 - 0.5f) * emitterD
             val x = emitterX + (r2 - 0.5f) * emitterW +
                 kotlin.math.sin(angle) * velocity * age * damping +
                 kotlin.math.sin(age * 4.2f + r3 * 6.28f) * turbulence * age * 0.12f
