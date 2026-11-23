@@ -631,7 +631,7 @@ private fun GpuCompositionPreviewCanvas(
                 activeTextTextureIds.add(layer.id)
                 val signature = ((layer.particles.hashCode() * 31 +
                     layer.props.filterKeys { it.isParticleProp }.hashCode()) * 31 +
-                    (editor.time * editor.fps).toInt())
+                    byId.hashCode()) * 31 + (editor.time * editor.fps).toInt())
                 val cached = textTextures[layer.id]
                 if (cached == null || cached.first != signature || cached.second.isRecycled) {
                     val edge = if (MediaWorkers.isConstrainedDevice) 320 else 768
