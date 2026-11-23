@@ -180,14 +180,20 @@ internal object LayerRaster {
             val sphereXOffset = kotlin.math.cos(sphereAngle) * sphereRing * sphereRadius * emitterW * 0.5f
             val sphereYOffset = sphereY * sphereRadius * emitterH * 0.5f
             val sphereZOffset = kotlin.math.sin(sphereAngle) * sphereRing * sphereRadius * emitterD * 0.5f
-            val emitterOffsetX = if (settings.emitterMotion == "Leave Trail") {
-                layer.p(com.kinetic.app.model.PropId.POS_X).valueAt(birth) -
+            val emitterOffsetX = when (settings.emitterMotion) {
+                "Stationary" -> layer.p(com.kinetic.app.model.PropId.POS_X).valueAt(layer.start) -
                     layer.p(com.kinetic.app.model.PropId.POS_X).valueAt(time)
-            } else 0f
-            val emitterOffsetY = if (settings.emitterMotion == "Leave Trail") {
-                layer.p(com.kinetic.app.model.PropId.POS_Y).valueAt(birth) -
+                "Leave Trail" -> layer.p(com.kinetic.app.model.PropId.POS_X).valueAt(birth) -
+                    layer.p(com.kinetic.app.model.PropId.POS_X).valueAt(time)
+                else -> 0f
+            }
+            val emitterOffsetY = when (settings.emitterMotion) {
+                "Stationary" -> layer.p(com.kinetic.app.model.PropId.POS_Y).valueAt(layer.start) -
                     layer.p(com.kinetic.app.model.PropId.POS_Y).valueAt(time)
-            } else 0f
+                "Leave Trail" -> layer.p(com.kinetic.app.model.PropId.POS_Y).valueAt(birth) -
+                    layer.p(com.kinetic.app.model.PropId.POS_Y).valueAt(time)
+                else -> 0f
+            }
             val originX = emitterX + emitterOffsetX + if (settings.sphereEmitter) sphereXOffset else (r2 - 0.5f) * emitterW
             val originY = emitterY + emitterOffsetY + if (settings.sphereEmitter) sphereYOffset else (r3 - 0.5f) * emitterH
             val depth = emitterZ + if (settings.sphereEmitter) sphereZOffset else (r4 - 0.5f) * emitterD
