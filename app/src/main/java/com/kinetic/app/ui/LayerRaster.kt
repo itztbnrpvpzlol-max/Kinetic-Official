@@ -110,8 +110,8 @@ internal object LayerRaster {
         val rotationSpeed = value(com.kinetic.app.model.PropId.PARTICLE_ROTATION_SPEED)
         val seed = layer.id.hashCode()
         val projectionInverse = if (byId != null && com.kinetic.app.model.activeCamera(byId, time) != null) {
-            Matrix().also { inverse ->
-                if (!com.kinetic.app.model.layerMatrix(layer, time, byId).invert(inverse)) inverse.reset()
+            Matrix().let { inverse ->
+                if (com.kinetic.app.model.layerMatrix(layer, time, byId).invert(inverse)) inverse else null
             }
         } else null
 
