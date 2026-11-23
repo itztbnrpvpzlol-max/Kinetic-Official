@@ -850,6 +850,47 @@ fun invert4(m: FloatArray): FloatArray? {
     return FloatArray(16) { a[(it / 4) * 8 + 4 + it % 4].toFloat() }
 }
 
+data class ProjectedLayerPoint(val x: Float, val y: Float, val sizeScale: Float)
+
+/** Project an individual 3D particle through the active camera into composition coordinates. */
+fun projectLayerPoint(
+    layer: Layer, x: Float, y: Float, z: Float, t: Float, byId: Map<String, Layer>
+): ProjectedLayerPoint? {
+    val cam = activeCamera(byId, t) ?: return null
+    val world = layerWorld4(layer, t, byId)
+    val particleWorld = mulPoint(world, x, y, z)
+    val planeWorld = mulPoint(world, x, y, 0f)
+    val cameraWorld = layerWorld4(cam, t, byId)
+    fun length(a: Float, b: Float, c: Float) =
+        Math.sqrt((a * a + b * b + c * c).toDouble()).toFloat().coerceAtLeast(1e-6f)
+    val l0 = length(cameraWorld[0], cameraWorld[4], cameraWorld[8])
+    val l1 = length(cameraWorld[1], cameraWorld[5], cameraWorld[9])
+    val l2 = length(cameraWorld[2], cameraWorld[6], cameraWorld[10])
+    val rotation = floatArrayOf(
+        cameraWorld[0] / l0, cameraWorld[1] / l1, cameraWorld[2] / l2, 0f,
+        cameraWorld[4] / l0, cameraWorld[5] / l1, cameraWorld[6] / l2, 0f,
+        cameraWorld[8] / l0, cameraWorld[9] / l1, cameraWorld[10] / l2, 0f,
+        0f, 0f, 0f, 1f
+    )
+    val cx = cameraWorld[3]; val cy = cameraWorld[7]; val cz = cameraWorld[11]
+    val inverseRotation = floatArrayOf(
+        rotation[0], rotation[4], rotation[8], 0f,
+        rotation[1], rotation[5], rotation[9], 0f,
+        rotation[2], rotation[6], rotation[10], 0f,
+        0f, 0f, 0f, 1f
+    )
+    val view = mulM(inverseRotation, transM(-cx, -cy, -cz))
+    val cameraPoint = mulPoint(view, particleWorld[0], particleWorld[1], particleWorld[2])
+    val planePoint = mulPoint(view, planeWorld[0], planeWorld[1], planeWorld[2])
+    val depth = cameraPoint[2]
+    if (!depth.isFinite() || depth <= 0.001f) return null
+    val zoom = cam.p(PropId.CAM_ZOOM).valueAt(t).coerceAtLeast(1f)
+    val screenX = zoom * cameraPoint[0] / depth + COMP_W / 2f
+    val screenY = zoom * cameraPoint[1] / depth + COMP_H / 2f
+    val sizeScale = (planePoint[2] / depth).takeIf { it.isFinite() && it > 0f }?.coerceIn(0.05f, 20f) ?: 1f
+    return ProjectedLayerPoint(screenX, screenY, sizeScale)
+}
+
 /** World-space position of a layer's position point (its anchor, or the camera eye) at [t]. */
 fun layerWorldPosition(layer: Layer, t: Float, byId: Map<String, Layer>): FloatArray {
     val w = layerWorld4(layer, t, byId)
