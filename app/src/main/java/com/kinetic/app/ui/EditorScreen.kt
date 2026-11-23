@@ -396,7 +396,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                     )
                 } else if (!compactHeight && (showPropertiesPanel || showToolPanel)) {
                     // Every dock tool shares the Properties panel shell and workspace footprint.
-                    val adaptivePanelHeight = if (dockTool == "Masking") (windowMaxHeight.value * 0.43f).coerceIn(280f, 390f) else (windowMaxHeight.value * 0.27f).coerceIn(180f, 228f)
+                    val adaptivePanelHeight = if (dockTool == "Masking" || dockTool == "Particles") (windowMaxHeight.value * 0.43f).coerceIn(280f, 390f) else (windowMaxHeight.value * 0.27f).coerceIn(180f, 228f)
                     if (showPropertiesPanel) {
                         EditPanel(editor, activeLayer, panelTab, { panelTab = it }, { showPropertiesPanel = false },
                             onRename = { renameTarget = activeLayer }, onParent = { parentPicker = true },
@@ -436,12 +436,20 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                 dockTool,
                 activeLayer != null,
                 activeLayer?.type == LayerType.CAMERA,
-                activeLayer?.type == LayerType.TEXT
+                activeLayer?.type == LayerType.TEXT,
+                activeLayer?.type == LayerType.PARTICULAR
             ) { tool ->
                 dockTool = tool
                 when (tool) {
                     "Select" -> { editor.select(null); showShapePanel = false; showToolPanel = false }
                     "Properties" -> if (activeLayer != null) { showToolPanel = false; showShapePanel = false; panelTab = 0; showPropertiesPanel = true }
+                    "3D Particles" -> { dockTool = "Select"; editor.addParticular() }
+                    "Particles" -> if (activeLayer?.type == LayerType.PARTICULAR) {
+                        showPropertiesPanel = false
+                        showShapePanel = false
+                        showToolPanel = true
+                        editor.selectProp(PropId.PARTICLE_RATE)
+                    }
                     "Extract audio" -> {
                         if (activeLayer?.type == LayerType.VIDEO) {
                             showPropertiesPanel = false
@@ -677,7 +685,7 @@ private fun TopBar(
 
 
 @Composable
-private fun FloatingEditingDock(active: String, hasSelection: Boolean, cameraSelected: Boolean, textSelected: Boolean, onSelect: (String) -> Unit) {
+private fun FloatingEditingDock(active: String, hasSelection: Boolean, cameraSelected: Boolean, textSelected: Boolean, particleSelected: Boolean, onSelect: (String) -> Unit) {
     // Keep Import inside the capsule, but visually separate it from the tools.
     val tools = if (textSelected) {
         listOf(
@@ -691,6 +699,13 @@ private fun FloatingEditingDock(active: String, hasSelection: Boolean, cameraSel
         listOf(
             "Camera" to IconKind.CAMERA,
             "Properties" to IconKind.SLIDERS
+        )
+    } else if (particleSelected) {
+        listOf(
+            "Properties" to IconKind.SLIDERS,
+            "Particles" to IconKind.EFFECTS,
+            "Effects" to IconKind.EFFECTS,
+            "Masking" to IconKind.MASK
         )
     } else if (hasSelection) {
         listOf(
@@ -711,7 +726,8 @@ private fun FloatingEditingDock(active: String, hasSelection: Boolean, cameraSel
             "Null" to IconKind.NULL,
             "Shapes" to IconKind.SHAPES,
             "Vector" to IconKind.VECTOR,
-            "Camera" to IconKind.CAMERA
+            "Camera" to IconKind.CAMERA,
+            "3D Particles" to IconKind.EFFECTS
         )
     }
     val shape = RoundedCornerShape(32.dp)
@@ -797,6 +813,7 @@ private fun ToolEditPanel(
         "Volume" -> PropId.VOLUME
         "Blending" -> PropId.OPACITY
         "Camera" -> editor.selectedProp
+        "Particles" -> editor.selectedProp?.takeIf { it.isParticleProp } ?: PropId.PARTICLE_RATE
         "Edit", "Animate" -> editor.selectedProp?.takeIf { it.isTextProp }
         else -> null
     }
@@ -885,9 +902,9 @@ private fun ToolPanelControls(tool: String, editor: EditorState, layer: Layer, d
     val textTool = tool == "Edit" || tool == "Animate"
     Column(
         Modifier.fillMaxSize().background(KColors.Surface).then(
-            if (tool == "Effects" || textTool) Modifier else Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
+            if (tool == "Effects" || tool == "Particles" || textTool) Modifier else Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
         ),
-        verticalArrangement = if (tool == "Effects" || textTool) Arrangement.spacedBy(0.dp)
+        verticalArrangement = if (tool == "Effects" || tool == "Particles" || textTool) Arrangement.spacedBy(0.dp)
             else Arrangement.spacedBy(5.dp)
     ) {
         when (tool) {
@@ -915,6 +932,7 @@ private fun ToolPanelControls(tool: String, editor: EditorState, layer: Layer, d
                 EffectControlsPanel(editor, layer, onOpenEffects)
             }
             "Camera" -> CameraControls(editor, layer)
+            "Particles" -> ParticularPanel(editor, layer)
             "Edit", "Animate" -> TextEditorPanel(editor, layer, textTab, onOpenMasking)
             "Blend modes" -> {
                 Text("BLEND MODE", color = KColors.Muted, fontSize = 9.sp, fontWeight = FontWeight.Bold)
