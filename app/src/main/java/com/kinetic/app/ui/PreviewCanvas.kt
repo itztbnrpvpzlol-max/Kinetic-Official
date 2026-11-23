@@ -276,7 +276,7 @@ fun CpuPreviewCanvas(
     val vectorSignature = editor.previewLayers.filter {
         it.type == LayerType.TEXT || it.type == LayerType.SHAPE || it.type == LayerType.PARTICULAR
     }.map {
-        "${it.id}|${it.text}|${it.textStyle.hashCode()}|${it.textAnimators.hashCode()}|${it.textPropsHash()}|${it.color}|${it.width}|${it.height}|${it.shapeKind}|${it.vectorClosed}|${it.vectorPoints.hashCode()}|${it.particleSettings.hashCode()}|${it.props.filterKeys { id -> id.isParticleProp }.hashCode()}|${if (it.type == LayerType.PARTICULAR) (previewClock.timeSec * editor.fps).toInt() else 0}|${it.visible}|${it.start}|${it.duration}|${it.effectStack.hashCode()}"
+        "${it.id}|${it.text}|${it.textStyle.hashCode()}|${it.textAnimators.hashCode()}|${it.textPropsHash()}|${it.color}|${it.width}|${it.height}|${it.shapeKind}|${it.vectorClosed}|${it.vectorPoints.hashCode()}|${it.particles.hashCode()}|${it.props.filterKeys { id -> id.isParticleProp }.hashCode()}|${if (it.type == LayerType.PARTICULAR) (previewClock.timeSec * editor.fps).toInt() else 0}|${it.visible}|${it.start}|${it.duration}|${it.effectStack.hashCode()}"
     }
     LaunchedEffect(vectorSignature) {
         while (true) {
