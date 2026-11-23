@@ -11,6 +11,7 @@ import com.kinetic.app.model.VECTOR_STROKE
 import com.kinetic.app.model.VectorPoint
 import com.kinetic.app.model.buildVectorPath
 import kotlin.math.roundToInt
+import kotlin.math.pow
 
 /** Rasterizes a text or shape layer so picture effects can run on it like on any clip. */
 internal object LayerRaster {
