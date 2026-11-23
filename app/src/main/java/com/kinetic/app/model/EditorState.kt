@@ -942,19 +942,21 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
                     ?: arrayOf(floatArrayOf(1f, 0f, 0f), floatArrayOf(0f, 1f, 0f), floatArrayOf(0f, 0f, 1f))
                 val localRotation = Array(3) { row ->
                     FloatArray(3) { col ->
-                        (0..2).sumOf { k -> parentRotation[k][row] * worldRotation[k][col] }
+                        parentRotation[0][row] * worldRotation[0][col] +
+                            parentRotation[1][row] * worldRotation[1][col] +
+                            parentRotation[2][row] * worldRotation[2][col]
                     }
                 }
-                val yAngle = kotlin.math.asin((-localRotation[2][0]).coerceIn(-1f, 1f))
-                val cosY = kotlin.math.cos(yAngle)
+                val yAngle = Math.asin((-localRotation[2][0]).coerceIn(-1f, 1f).toDouble()).toFloat()
+                val cosY = Math.cos(yAngle.toDouble()).toFloat()
                 val xAngle: Float
                 val zAngle: Float
                 if (kotlin.math.abs(cosY) > 1e-5f) {
-                    xAngle = kotlin.math.atan2(localRotation[2][1], localRotation[2][2])
-                    zAngle = kotlin.math.atan2(localRotation[1][0], localRotation[0][0])
+                    xAngle = Math.atan2(localRotation[2][1].toDouble(), localRotation[2][2].toDouble()).toFloat()
+                    zAngle = Math.atan2(localRotation[1][0].toDouble(), localRotation[0][0].toDouble()).toFloat()
                 } else {
                     xAngle = 0f
-                    zAngle = kotlin.math.atan2(-localRotation[0][1], localRotation[1][1])
+                    zAngle = Math.atan2((-localRotation[0][1]).toDouble(), localRotation[1][1].toDouble()).toFloat()
                 }
                 floatArrayOf(
                     Math.toDegrees(xAngle.toDouble()).toFloat(),
