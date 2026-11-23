@@ -81,7 +81,10 @@ internal object LayerRaster {
         val lifeRandom = value(com.kinetic.app.model.PropId.PARTICLE_LIFE_RANDOM, 20f) / 100f
         val preRoll = value(com.kinetic.app.model.PropId.PARTICLE_PREROLL, 1000f) / 1000f
         val elapsed = (time - layer.start + preRoll).coerceAtLeast(0f)
-        val emitted = (elapsed * rate).toInt().coerceIn(0, 1200)
+        val maxLife = lifeBase * (1f + lifeRandom)
+        val lastEmitted = (elapsed * rate).toInt().coerceAtLeast(0)
+        val firstEmitted = ((elapsed - maxLife).coerceAtLeast(0f) * rate).toInt().coerceAtLeast(0)
+        val emitted = (lastEmitted - firstEmitted).coerceIn(0, 1200)
         val velocityBase = value(com.kinetic.app.model.PropId.PARTICLE_VELOCITY, 80f)
         val velocityRandom = value(com.kinetic.app.model.PropId.PARTICLE_VELOCITY_RANDOM, 20f) / 100f
         val spread = Math.toRadians(value(com.kinetic.app.model.PropId.PARTICLE_SPREAD, 28f).toDouble()).toFloat()
@@ -102,7 +105,7 @@ internal object LayerRaster {
         val rotationSpeed = value(com.kinetic.app.model.PropId.PARTICLE_ROTATION_SPEED)
         val seed = layer.id.hashCode()
 
-        for (index in 0 until emitted) {
+        for (index in firstEmitted until firstEmitted + emitted) {
             val r0 = random01(seed, index, 0)
             val r1 = random01(seed, index, 1)
             val r2 = random01(seed, index, 2)
