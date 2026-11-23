@@ -127,6 +127,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
     var pendingTextTool by remember { mutableStateOf<String?>(null) }
     var exportBackTick by remember { mutableIntStateOf(0) }
     var openCameraPanelOnSelect by remember { mutableStateOf(false) }
+    var openParticlePanelOnSelect by remember { mutableStateOf(false) }
     var showShapePanel by remember { mutableStateOf(false) }
     var maskTool by remember { mutableStateOf("Pen") }
     var rotoForeground by remember { mutableStateOf(true) }
@@ -160,6 +161,13 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                 openCameraPanelOnSelect = false
                 dockTool = "Camera"
                 showToolPanel = true
+            }
+            if (openParticlePanelOnSelect && editor.selected?.type == LayerType.PARTICULAR) {
+                openParticlePanelOnSelect = false
+                showPropertiesPanel = false
+                dockTool = "Particles"
+                showToolPanel = true
+                editor.selectProp(PropId.PARTICLE_RATE)
             }
         }
     }
@@ -443,7 +451,11 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                 when (tool) {
                     "Select" -> { editor.select(null); showShapePanel = false; showToolPanel = false }
                     "Properties" -> if (activeLayer != null) { showToolPanel = false; showShapePanel = false; panelTab = 0; showPropertiesPanel = true }
-                    "3D Particles" -> { dockTool = "Select"; editor.addParticular() }
+                    "3D Particles" -> {
+                        dockTool = "Select"
+                        openParticlePanelOnSelect = true
+                        editor.addParticular()
+                    }
                     "Particles" -> if (activeLayer?.type == LayerType.PARTICULAR) {
                         showPropertiesPanel = false
                         showShapePanel = false

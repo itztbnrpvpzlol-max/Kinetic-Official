@@ -758,7 +758,8 @@ fun newCamera(name: String, start: Float, duration: Float, twoNode: Boolean, zoo
         PropId.CAM_APERTURE to Prop(0f),
         PropId.CAM_BLUR to Prop(100f)
     )
-    return base.copy(props = props, cameraTwoNode = twoNode, is3D = true)
+    // Cameras are top-level composition objects by default; users can explicitly parent them later.
+    return base.copy(props = props, cameraTwoNode = twoNode, is3D = true, parentId = null)
 }
 
 // ---------- 3D camera (After Effects style) ----------
