@@ -253,7 +253,7 @@ internal class ExportFrameRenderer(
     private fun rasterFor(layer: Layer, time: Float): Piece? {
         val target = max(layer.width * sx, layer.height * sy).toInt().coerceIn(64, MAX_EDGE)
         return when (layer.type) {
-            LayerType.TEXT, LayerType.SHAPE ->
+            LayerType.TEXT, LayerType.SHAPE, LayerType.PARTICULAR ->
                 LayerRaster.render(layer, time, target, allowUpscale = true)
                     ?.let { Piece(it, RectF(0f, 0f, layer.width, layer.height), recycle = true) }
             LayerType.IMAGE -> {
