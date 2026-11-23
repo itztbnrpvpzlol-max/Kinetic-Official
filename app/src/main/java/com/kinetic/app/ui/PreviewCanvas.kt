@@ -473,6 +473,15 @@ fun CpuPreviewCanvas(
                         // Never paint a gray placeholder over the clip: it can
                         // persist through animated transforms and transitions.
                     }
+                    LayerType.PARTICULAR -> {
+                        val particles = LayerRaster.render(l, sampleTime, 768)
+                        if (particles != null) {
+                            paint.color = android.graphics.Color.WHITE
+                            paint.alpha = alpha
+                            nc.drawBitmap(particles, null, RectF(0f, 0f, l.width, l.height), paint)
+                            particles.recycle()
+                        }
+                    }
                     LayerType.SHAPE, LayerType.TEXT -> {
                         val fx = vectorEffected[l.id]?.takeIf { !it.bitmap.isRecycled }
                         if (fx != null) {
