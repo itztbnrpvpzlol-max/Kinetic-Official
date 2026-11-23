@@ -110,7 +110,7 @@ fun ParticularPanel(editor: EditorState, layer: Layer) {
         ParticleValueRow(editor, layer, "Turbulence Speed", PropId.PARTICLE_TURBULENCE_SPEED, 0f, 20f, 0.05f, "%.2f")
 
         SectionLabel("PARTICLE")
-        ParticleValueRow(editor, layer, "Life", PropId.PARTICLE_LIFETIME, 0.01f, 30f, 0.02f, "%.2f s")
+        ParticleValueRow(editor, layer, "Life (ms)", PropId.PARTICLE_LIFETIME, 10f, 30000f, 20f, "%.0f ms", displayMultiplier = 1000f)
         ParticleValueRow(editor, layer, "Life Random", PropId.PARTICLE_LIFE_RANDOM, 0f, 100f, 0.2f, "%.0f%%")
         ParticleValueRow(editor, layer, "Size", PropId.PARTICLE_SIZE, 0f, 500f, 0.1f, "%.1f px")
         ParticleValueRow(editor, layer, "Size Random", PropId.PARTICLE_SIZE_RANDOM, 0f, 100f, 0.2f, "%.0f%%")
@@ -265,9 +265,9 @@ private fun ParticularChoiceRow(label: String, value: String, options: List<Stri
 @Composable
 private fun ParticleValueRow(
     editor: EditorState, layer: Layer, label: String, id: PropId,
-    min: Float, max: Float, step: Float, format: String
+    min: Float, max: Float, step: Float, format: String, displayMultiplier: Float = 1f
 ) {
-    val value = layer.p(id).valueAt(editor.time)
+    val value = layer.p(id).valueAt(editor.time) * displayMultiplier
     Row(Modifier.fillMaxWidth().height(34.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(label, color = if (editor.selectedProp == id) KColors.Accent else KColors.Text,
             fontSize = 10.sp, fontWeight = FontWeight.Medium, modifier = Modifier.width(108.dp))
@@ -278,7 +278,7 @@ private fun ParticleValueRow(
             onScrubStart = { editor.selectProp(id); editor.beginEdit() }
         ) { next ->
             editor.selectProp(id)
-            editor.setPropValue(layer.id, id, next)
+            editor.setPropValue(layer.id, id, next / displayMultiplier)
         }
     }
 }

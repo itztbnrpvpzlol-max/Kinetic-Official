@@ -253,7 +253,10 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
     }
 
     fun toggleLayer3D(id: String) {
-        updateLayer(id) { it.copy(is3D = !it.is3D) }
+        updateLayer(id) { layer ->
+            if (layer.type == LayerType.PARTICULAR || layer.type == LayerType.CAMERA) layer
+            else layer.copy(is3D = !layer.is3D)
+        }
     }
 
     fun toggleMotionBlur(id: String) {
