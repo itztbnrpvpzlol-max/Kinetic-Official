@@ -867,13 +867,20 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
         val times = mutableListOf<Float>()
         axes.values.forEach { prop -> times += prop.keys.map { it.t } }
         poiAxes.forEach { id -> times += layer.p(id).keys.map { it.t } }
+        if (layer.type == LayerType.CAMERA) {
+            listOf(PropId.ROTATION_X, PropId.ROTATION_Y, PropId.ROTATION).forEach { id ->
+                times += layer.p(id).keys.map { it.t }
+            }
+        }
         fun addAncestors(firstId: String?) {
             var cur = firstId; var depth = 0
             while (cur != null && depth++ < 16) {
                 val a = byId[cur] ?: break
                 a.props.filterKeys { it in positionAxes || it == PropId.SCALE_X || it == PropId.SCALE_Y ||
                     it == PropId.ROTATION || it == PropId.ROTATION_X || it == PropId.ROTATION_Y ||
-                    it == PropId.ANCHOR_X || it == PropId.ANCHOR_Y }.values.forEach { prop -> times += prop.keys.map { it.t } }
+                    it == PropId.ANCHOR_X || it == PropId.ANCHOR_Y ||
+                    it == PropId.CAM_POI_X || it == PropId.CAM_POI_Y || it == PropId.CAM_POI_Z
+                }.values.forEach { prop -> times += prop.keys.map { it.t } }
                 cur = a.parentId
             }
         }
@@ -915,7 +922,64 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
                 id to updated
             }.toMap()
         }
-        return syncPositionKeyframes(layer.copy(parentId = parentId, props = layer.props + updatedAxes + updatedPoiAxes))
+        val updatedCameraRotation = if (layer.type != LayerType.CAMERA || layer.cameraTwoNode) emptyMap() else {
+            fun rotationOnly(matrix: FloatArray): Array<FloatArray> {
+                fun len(x: Float, y: Float, z: Float) =
+                    kotlin.math.sqrt((x * x + y * y + z * z).toDouble()).toFloat().coerceAtLeast(1e-6f)
+                val sx = len(matrix[0], matrix[4], matrix[8])
+                val sy = len(matrix[1], matrix[5], matrix[9])
+                val sz = len(matrix[2], matrix[6], matrix[10])
+                return arrayOf(
+                    floatArrayOf(matrix[0] / sx, matrix[1] / sy, matrix[2] / sz),
+                    floatArrayOf(matrix[4] / sx, matrix[5] / sy, matrix[6] / sz),
+                    floatArrayOf(matrix[8] / sx, matrix[9] / sy, matrix[10] / sz)
+                )
+            }
+            val rotationIds = listOf(PropId.ROTATION_X, PropId.ROTATION_Y, PropId.ROTATION)
+            val solvedRotations = sampleTimes.map { t ->
+                val worldRotation = rotationOnly(layerWorld4(layer, t, byId))
+                val parentRotation = newParent?.let { rotationOnly(childSpaceWorld4(it, t, byId)) }
+                    ?: arrayOf(floatArrayOf(1f, 0f, 0f), floatArrayOf(0f, 1f, 0f), floatArrayOf(0f, 0f, 1f))
+                val localRotation = Array(3) { row ->
+                    FloatArray(3) { col ->
+                        (0..2).sumOf { k -> parentRotation[k][row] * worldRotation[k][col] }
+                    }
+                }
+                val yAngle = kotlin.math.asin((-localRotation[2][0]).coerceIn(-1f, 1f))
+                val cosY = kotlin.math.cos(yAngle)
+                val xAngle: Float
+                val zAngle: Float
+                if (kotlin.math.abs(cosY) > 1e-5f) {
+                    xAngle = kotlin.math.atan2(localRotation[2][1], localRotation[2][2])
+                    zAngle = kotlin.math.atan2(localRotation[1][0], localRotation[0][0])
+                } else {
+                    xAngle = 0f
+                    zAngle = kotlin.math.atan2(-localRotation[0][1], localRotation[1][1])
+                }
+                floatArrayOf(
+                    Math.toDegrees(xAngle.toDouble()).toFloat(),
+                    Math.toDegrees(yAngle.toDouble()).toFloat(),
+                    Math.toDegrees(zAngle.toDouble()).toFloat()
+                )
+            }
+            rotationIds.mapIndexed { index, id ->
+                val prop = layer.p(id)
+                val updated = if (keyTimes.isEmpty()) Prop(solvedRotations.first()[index]) else prop.copy(
+                    base = solvedRotations.first()[index],
+                    keys = sampleTimes.mapIndexed { sampleIndex, t ->
+                        val template = prop.keys.minByOrNull { abs(it.t - t) }
+                            ?.takeIf { abs(it.t - t) <= frame / 2f }
+                        (template?.copy(t = t) ?: Keyframe(t, solvedRotations[sampleIndex][index]))
+                            .copy(v = solvedRotations[sampleIndex][index])
+                    }
+                )
+                id to updated
+            }.toMap()
+        }
+        return syncPositionKeyframes(layer.copy(
+            parentId = parentId,
+            props = layer.props + updatedAxes + updatedPoiAxes + updatedCameraRotation
+        ))
     }
 
     /** Reparent without changing the child's current world-space position or keyed motion. */
