@@ -390,6 +390,60 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
     }
 
     fun addNull() = addLayer(newLayer(LayerType.NULL, nextName("Null"), time, remaining(), 100f, 100f))
+    fun addParticular() = addLayer(newParticular("Particular", time, remaining()))
+
+    fun applyParticlePreset(layerId: String, preset: String) {
+        val values = when (preset) {
+            "Rain" -> mapOf(PropId.PARTICLE_RATE to 120f, PropId.PARTICLE_LIFETIME to 1.6f,
+                PropId.PARTICLE_VELOCITY to 360f, PropId.PARTICLE_SPREAD to 7f,
+                PropId.PARTICLE_GRAVITY to 24f, PropId.PARTICLE_SIZE to 2.5f,
+                PropId.PARTICLE_END_SIZE to 1f, PropId.PARTICLE_END_OPACITY to 35f)
+            "Snow" -> mapOf(PropId.PARTICLE_RATE to 70f, PropId.PARTICLE_LIFETIME to 4f,
+                PropId.PARTICLE_VELOCITY to 28f, PropId.PARTICLE_SPREAD to 38f,
+                PropId.PARTICLE_GRAVITY to 3f, PropId.PARTICLE_SIZE to 4f,
+                PropId.PARTICLE_SIZE_RANDOM to 65f, PropId.PARTICLE_END_OPACITY to 20f)
+            "Fire" -> mapOf(PropId.PARTICLE_RATE to 110f, PropId.PARTICLE_LIFETIME to 1.2f,
+                PropId.PARTICLE_VELOCITY to 115f, PropId.PARTICLE_SPREAD to 34f,
+                PropId.PARTICLE_GRAVITY to -65f, PropId.PARTICLE_SIZE to 8f,
+                PropId.PARTICLE_END_SIZE to 1f, PropId.PARTICLE_TURBULENCE to 22f)
+            "Fireworks" -> mapOf(PropId.PARTICLE_RATE to 160f, PropId.PARTICLE_LIFETIME to 2.4f,
+                PropId.PARTICLE_VELOCITY to 190f, PropId.PARTICLE_SPREAD to 180f,
+                PropId.PARTICLE_GRAVITY to 48f, PropId.PARTICLE_SIZE to 3.5f,
+                PropId.PARTICLE_END_SIZE to 0.5f, PropId.PARTICLE_END_OPACITY to 0f)
+            "Dust" -> mapOf(PropId.PARTICLE_RATE to 34f, PropId.PARTICLE_LIFETIME to 5f,
+                PropId.PARTICLE_VELOCITY to 12f, PropId.PARTICLE_SPREAD to 70f,
+                PropId.PARTICLE_GRAVITY to 0f, PropId.PARTICLE_SIZE to 2f,
+                PropId.PARTICLE_SIZE_RANDOM to 90f, PropId.PARTICLE_TURBULENCE to 15f)
+            "Bokeh" -> mapOf(PropId.PARTICLE_RATE to 18f, PropId.PARTICLE_LIFETIME to 5f,
+                PropId.PARTICLE_VELOCITY to 5f, PropId.PARTICLE_SPREAD to 360f,
+                PropId.PARTICLE_GRAVITY to 0f, PropId.PARTICLE_SIZE to 18f,
+                PropId.PARTICLE_SIZE_RANDOM to 70f, PropId.PARTICLE_END_OPACITY to 10f)
+            "Trail" -> mapOf(PropId.PARTICLE_RATE to 90f, PropId.PARTICLE_LIFETIME to 1.8f,
+                PropId.PARTICLE_VELOCITY to 42f, PropId.PARTICLE_SPREAD to 10f,
+                PropId.PARTICLE_GRAVITY to 0f, PropId.PARTICLE_SIZE to 5f,
+                PropId.PARTICLE_END_SIZE to 0f, PropId.PARTICLE_END_OPACITY to 0f)
+            "Comet" -> mapOf(PropId.PARTICLE_RATE to 150f, PropId.PARTICLE_LIFETIME to 1.4f,
+                PropId.PARTICLE_VELOCITY to 100f, PropId.PARTICLE_SPREAD to 5f,
+                PropId.PARTICLE_GRAVITY to 0f, PropId.PARTICLE_SIZE to 7f,
+                PropId.PARTICLE_END_SIZE to 0f, PropId.PARTICLE_END_OPACITY to 0f)
+            else -> mapOf(PropId.PARTICLE_RATE to 60f, PropId.PARTICLE_LIFETIME to 2f,
+                PropId.PARTICLE_VELOCITY to 80f, PropId.PARTICLE_SPREAD to 28f,
+                PropId.PARTICLE_GRAVITY to 0f, PropId.PARTICLE_SIZE to 6f)
+        }
+        updateLayer(layerId, push = true) { layer ->
+            val nextProps = values.entries.fold(layer.props) { acc, entry ->
+                acc + (entry.key to Prop(entry.value))
+            }
+            val palette = when (preset) {
+                "Fire", "Comet" -> ParticleSettings(preset, 0xFFFFB347.toInt(), 0x00FF2A00)
+                "Rain", "Snow" -> ParticleSettings(preset, 0xFFDDF4FF.toInt(), 0x00B8DFFF)
+                "Fireworks" -> ParticleSettings(preset, 0xFFFFE28A.toInt(), 0x00FF6B38)
+                "Bokeh" -> ParticleSettings(preset, 0xFFFFE8B0.toInt(), 0x00FFFFFF)
+                else -> layer.particleSettings.copy(preset = preset)
+            }
+            layer.copy(props = nextProps, particleSettings = palette)
+        }
+    }
     fun addSolid(color: Int = 0xFFFFFFFF.toInt()) {
         val base = newLayer(LayerType.SHAPE, nextName("Solid"), time, remaining(), COMP_W, COMP_H, color = color)
         addLayer(base.copy(shapeKind = "Solid"))
@@ -808,8 +862,11 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
     private fun reparent3D(layer: Layer, parentId: String?, byId: Map<String, Layer>): Layer {
         val newParent = parentId?.let { byId[it] }
         val axes = positionAxes.associateWith { layer.p(it) }
+        val poiAxes = if (layer.type == LayerType.CAMERA)
+            listOf(PropId.CAM_POI_X, PropId.CAM_POI_Y, PropId.CAM_POI_Z) else emptyList()
         val times = mutableListOf<Float>()
         axes.values.forEach { prop -> times += prop.keys.map { it.t } }
+        poiAxes.forEach { id -> times += layer.p(id).keys.map { it.t } }
         fun addAncestors(firstId: String?) {
             var cur = firstId; var depth = 0
             while (cur != null && depth++ < 16) {
@@ -832,7 +889,33 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
                 (template?.copy(t = t) ?: Keyframe(t, 0f)).copy(v = v[index])
             })
         }.toMap()
-        return syncPositionKeyframes(layer.copy(parentId = parentId, props = layer.props + updatedAxes))
+        val updatedPoiAxes = if (poiAxes.isEmpty()) emptyMap() else {
+            val oldParent = layer.parentId?.let { byId[it] }
+            poiAxes.mapIndexed { index, id ->
+                val prop = layer.p(id)
+                val solvedPoi = sampleTimes.map { t ->
+                    val poi = poiAxes.map { layer.p(it).valueAt(t) }
+                    val worldPoi = if (oldParent != null) {
+                        val oldSpace = childSpaceWorld4(oldParent, t, byId)
+                        transformPoint4(oldSpace, poi[0], poi[1], poi[2])
+                    } else floatArrayOf(poi[0], poi[1], poi[2])
+                    val inverse = newParent?.let { invert4(childSpaceWorld4(it, t, byId)) }
+                    val localPoi = if (inverse != null)
+                        transformPoint4(inverse, worldPoi[0], worldPoi[1], worldPoi[2]) else worldPoi
+                    t to localPoi[index]
+                }
+                val updated = if (keyTimes.isEmpty()) Prop(solvedPoi.first().second) else prop.copy(
+                    base = solvedPoi.first().second,
+                    keys = solvedPoi.map { (t, value) ->
+                        val template = prop.keys.minByOrNull { abs(it.t - t) }
+                            ?.takeIf { abs(it.t - t) <= frame / 2f }
+                        (template?.copy(t = t) ?: Keyframe(t, value)).copy(v = value)
+                    }
+                )
+                id to updated
+            }.toMap()
+        }
+        return syncPositionKeyframes(layer.copy(parentId = parentId, props = layer.props + updatedAxes + updatedPoiAxes))
     }
 
     /** Reparent without changing the child's current world-space position or keyed motion. */
@@ -922,6 +1005,15 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
             id == PropId.CAM_FOCUS -> value.coerceAtLeast(0f)
             id == PropId.CAM_APERTURE -> value.coerceAtLeast(0f)
             id == PropId.CAM_BLUR -> value.coerceIn(0f, 1000f)
+            id == PropId.PARTICLE_RATE -> value.coerceIn(0f, 10000f)
+            id == PropId.PARTICLE_PREROLL -> value.coerceIn(0f, 10000f)
+            id == PropId.PARTICLE_LIFETIME -> value.coerceIn(0.01f, 30f)
+            id == PropId.PARTICLE_LIFE_RANDOM, id == PropId.PARTICLE_VELOCITY_RANDOM,
+            id == PropId.PARTICLE_SIZE_RANDOM, id == PropId.PARTICLE_OPACITY,
+            id == PropId.PARTICLE_END_OPACITY -> value.coerceIn(0f, 100f)
+            id == PropId.PARTICLE_SIZE, id == PropId.PARTICLE_END_SIZE -> value.coerceIn(0f, 500f)
+            id == PropId.PARTICLE_SPREAD -> value.coerceIn(0f, 360f)
+            id == PropId.PARTICLE_DRAG -> value.coerceIn(0f, 100f)
             taClamp(id, value) != null -> taClamp(id, value)!!
             else -> value
         }
