@@ -25,7 +25,7 @@ fun fmt(f: String, vararg a: Any): String = String.format(Locale.US, f, *a)
 
 enum class LayerType(val label: String) {
     VIDEO("Video"), IMAGE("Image"), AUDIO("Audio"), TEXT("Text"),
-    SHAPE("Shape"), ADJUSTMENT("Adjustment"), NULL("Null"), PRECOMP("Pre-comp"), CAMERA("Camera")
+    SHAPE("Shape"), ADJUSTMENT("Adjustment"), NULL("Null"), PRECOMP("Pre-comp"), CAMERA("Camera"), PARTICULAR("3D Particles")
 }
 
 /** Transform properties, in After Effects order. scrubStep = value change per dp dragged. */
@@ -165,6 +165,28 @@ enum class PropId(
     TA5_WIG_ROT("Anim 6 · Wiggle Rot", 0.5f),
     TA5_WIG_SPEED("Anim 6 · Speed", 0.05f),
     TA5_HOLD("Anim 6 · Hold", 0.5f),
+    PARTICLE_RATE("Particles / sec", 0.5f),
+    PARTICLE_PREROLL("Pre-roll (ms)", 1f),
+    PARTICLE_POS_X("Emitter Position X", 0.15f),
+    PARTICLE_POS_Y("Emitter Position Y", 0.15f),
+    PARTICLE_POS_Z("Emitter Position Z", 0.15f),
+    PARTICLE_EMITTER_SIZE_X("Emitter Size X", 0.15f),
+    PARTICLE_EMITTER_SIZE_Y("Emitter Size Y", 0.15f),
+    PARTICLE_EMITTER_SIZE_Z("Emitter Size Z", 0.15f),
+    PARTICLE_LIFETIME("Life (sec)", 0.02f),
+    PARTICLE_LIFE_RANDOM("Life Random", 0.05f),
+    PARTICLE_VELOCITY("Velocity", 0.2f),
+    PARTICLE_VELOCITY_RANDOM("Velocity Random", 0.1f),
+    PARTICLE_SPREAD("Direction Spread", 0.15f),
+    PARTICLE_GRAVITY("Gravity", 0.2f),
+    PARTICLE_SIZE("Size", 0.08f),
+    PARTICLE_SIZE_RANDOM("Size Random", 0.05f),
+    PARTICLE_END_SIZE("End Size", 0.08f),
+    PARTICLE_OPACITY("Opacity", 0.12f),
+    PARTICLE_END_OPACITY("End Opacity", 0.12f),
+    PARTICLE_ROTATION_SPEED("Rotation Speed", 0.15f),
+    PARTICLE_TURBULENCE("Turbulence", 0.1f),
+    PARTICLE_DRAG("Air Resistance", 0.05f),
     MASK_OPACITY("Mask Opacity", 0.12f),
     MASK_FEATHER("Mask Feather", 0.08f),
     MASK_EXPANSION("Mask Expansion", 0.08f),
@@ -279,10 +301,19 @@ enum class PropId(
     }
 
     val isVectorPoint: Boolean get() = vectorPointIndex >= 0
+    val isParticleProp: Boolean get() = name.startsWith("PARTICLE_")
 
     fun format(v: Float): String = taFormat(this, v) ?: when (this) {
         ANCHOR_X, ANCHOR_Y, POS_X, POS_Y, POS_Z, CAM_ZOOM, CAM_POI_X, CAM_POI_Y, CAM_POI_Z, CAM_FOCUS, CAM_APERTURE -> fmt("%.1f px", v)
         CAM_BLUR -> fmt("%.0f%%", v)
+        PARTICLE_POS_X, PARTICLE_POS_Y, PARTICLE_POS_Z,
+        PARTICLE_EMITTER_SIZE_X, PARTICLE_EMITTER_SIZE_Y, PARTICLE_EMITTER_SIZE_Z -> fmt("%.1f px", v)
+        PARTICLE_PREROLL -> fmt("%.0f ms", v)
+        PARTICLE_LIFETIME -> fmt("%.2f s", v)
+        PARTICLE_OPACITY, PARTICLE_END_OPACITY -> fmt("%.0f%%", v)
+        PARTICLE_RATE, PARTICLE_LIFE_RANDOM, PARTICLE_VELOCITY, PARTICLE_VELOCITY_RANDOM,
+        PARTICLE_SPREAD, PARTICLE_GRAVITY, PARTICLE_SIZE, PARTICLE_SIZE_RANDOM,
+        PARTICLE_END_SIZE, PARTICLE_ROTATION_SPEED, PARTICLE_TURBULENCE, PARTICLE_DRAG -> fmt("%.1f", v)
         SCALE_X, SCALE_Y -> fmt("%.1f%%", v)
         ROTATION, ROTATION_X, ROTATION_Y -> fmt("%.1f\u00B0", v)
         OPACITY -> fmt("%.0f%%", v)
@@ -464,8 +495,16 @@ fun effectFitsLayer(effect: com.kinetic.app.engine.EcEffect, type: LayerType?): 
 fun effectFitsLayer(effectId: String, type: LayerType?): Boolean =
     EffectCatalog.find(effectId)?.let { effectFitsLayer(it, type) } ?: false
 
+data class ParticleSettings(
+    val preset: String = "Sparks",
+    val color: Int = 0xFFFFFFFF.toInt(),
+    val endColor: Int = 0x00FFFFFF,
+    val shape: String = "Circle",
+    val additive: Boolean = true
+)
+
 data class Layer(
-    val id: String = UUID.randomUUID().toString(),
+    val id: String = UUID.randomUUID(),
     val type: LayerType,
     val name: String,
     val uri: String? = null,
@@ -487,6 +526,7 @@ data class Layer(
     val textStyle: TextStyle = TextStyle(),
     val textAnimators: List<TextAnimator> = emptyList(),
     val color: Int = 0xFF8D8BA3.toInt(),
+    val particleSettings: ParticleSettings = ParticleSettings(),
     val props: Map<PropId, Prop>,
     /** Legacy simple layer flags (for example Grayscale). */
     val effects: List<String> = emptyList(),
@@ -520,6 +560,19 @@ data class Layer(
             PropId.CAM_POI_X -> COMP_W / 2f
             PropId.CAM_POI_Y -> COMP_H / 2f
             PropId.CAM_BLUR -> 100f
+            PropId.PARTICLE_RATE -> 60f
+            PropId.PARTICLE_PREROLL -> 1000f
+            PropId.PARTICLE_LIFETIME -> 2f
+            PropId.PARTICLE_LIFE_RANDOM -> 20f
+            PropId.PARTICLE_VELOCITY -> 80f
+            PropId.PARTICLE_VELOCITY_RANDOM -> 20f
+            PropId.PARTICLE_SPREAD -> 28f
+            PropId.PARTICLE_GRAVITY -> 0f
+            PropId.PARTICLE_SIZE -> 6f
+            PropId.PARTICLE_SIZE_RANDOM -> 30f
+            PropId.PARTICLE_END_SIZE -> 0f
+            PropId.PARTICLE_OPACITY -> 100f
+            PropId.PARTICLE_END_OPACITY -> 0f
             else -> taDefault(id) ?: if (id.isVectorPoint) 0.5f else 0f
         }
     )
@@ -600,6 +653,35 @@ fun newLayer(
     )
 }
 
+fun newParticular(name: String, start: Float, duration: Float): Layer {
+    val base = newLayer(LayerType.PARTICULAR, name, start, duration, COMP_W, COMP_H)
+    val particleProps = mapOf(
+        PropId.PARTICLE_RATE to Prop(60f),
+        PropId.PARTICLE_PREROLL to Prop(1000f),
+        PropId.PARTICLE_POS_X to Prop(0f),
+        PropId.PARTICLE_POS_Y to Prop(0f),
+        PropId.PARTICLE_POS_Z to Prop(0f),
+        PropId.PARTICLE_EMITTER_SIZE_X to Prop(0f),
+        PropId.PARTICLE_EMITTER_SIZE_Y to Prop(0f),
+        PropId.PARTICLE_EMITTER_SIZE_Z to Prop(0f),
+        PropId.PARTICLE_LIFETIME to Prop(2f),
+        PropId.PARTICLE_LIFE_RANDOM to Prop(20f),
+        PropId.PARTICLE_VELOCITY to Prop(80f),
+        PropId.PARTICLE_VELOCITY_RANDOM to Prop(20f),
+        PropId.PARTICLE_SPREAD to Prop(28f),
+        PropId.PARTICLE_GRAVITY to Prop(0f),
+        PropId.PARTICLE_SIZE to Prop(6f),
+        PropId.PARTICLE_SIZE_RANDOM to Prop(30f),
+        PropId.PARTICLE_END_SIZE to Prop(0f),
+        PropId.PARTICLE_OPACITY to Prop(100f),
+        PropId.PARTICLE_END_OPACITY to Prop(0f),
+        PropId.PARTICLE_ROTATION_SPEED to Prop(0f),
+        PropId.PARTICLE_TURBULENCE to Prop(0f),
+        PropId.PARTICLE_DRAG to Prop(0f)
+    )
+    return base.copy(is3D = true, particleSettings = ParticleSettings(), props = base.props + particleProps)
+}
+
 fun newCamera(name: String, start: Float, duration: Float, twoNode: Boolean, zoom: Float = CAMERA_DEFAULT_ZOOM): Layer {
     val base = newLayer(LayerType.CAMERA, name, start, duration, COMP_W, COMP_H)
     val props = base.props + mapOf(
@@ -672,6 +754,9 @@ private fun mulPoint(m: FloatArray, x: Float, y: Float, z: Float): FloatArray = 
     m[4] * x + m[5] * y + m[6] * z + m[7],
     m[8] * x + m[9] * y + m[10] * z + m[11]
 )
+
+fun transformPoint4(matrix: FloatArray, x: Float, y: Float, z: Float): FloatArray =
+    mulPoint(matrix, x, y, z)
 
 /** Own-space -> parent-space 4x4 for a non-camera layer (anchor, scale, rotation, position). */
 private fun layerLocal4(layer: Layer, t: Float): FloatArray {
