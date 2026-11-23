@@ -108,7 +108,7 @@ fun ParticularPanel(editor: EditorState, layer: Layer) {
             }
         }
         Text("Particular is a 3D layer. Its emitter plane follows the composition camera and its parent chain.",
-            color = KColors.Muted, fontSize = 9.sp, lineHeight = 13.sp, modifier = Modifier.padding(top = 3.dp, bottom = 4.dp))
+            color = KColors.Muted, fontSize = 9.sp, modifier = Modifier.padding(top = 3.dp, bottom = 4.dp))
     }
 }
 
