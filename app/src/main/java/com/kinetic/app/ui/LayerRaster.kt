@@ -88,8 +88,9 @@ internal object LayerRaster {
         val elapsed = (time - layer.start + preRoll).coerceAtLeast(0f)
         val maxLife = lifeBase * (1f + lifeRandom)
         val lastEmitted = (elapsed * rate).toInt().coerceAtLeast(0)
-        val firstEmitted = ((elapsed - maxLife).coerceAtLeast(0f) * rate).toInt().coerceAtLeast(0)
-        val emitted = (lastEmitted - firstEmitted).coerceIn(0, 1200)
+        val firstAlive = ((elapsed - maxLife).coerceAtLeast(0f) * rate).toInt().coerceAtLeast(0)
+        val firstEmitted = maxOf(firstAlive, lastEmitted - 1200)
+        val emitted = (lastEmitted - firstEmitted).coerceAtLeast(0)
         val velocityBase = value(com.kinetic.app.model.PropId.PARTICLE_VELOCITY, 80f)
         val velocityRandom = value(com.kinetic.app.model.PropId.PARTICLE_VELOCITY_RANDOM, 20f) / 100f
         val spread = Math.toRadians(value(com.kinetic.app.model.PropId.PARTICLE_SPREAD, 28f).toDouble()).toFloat()
