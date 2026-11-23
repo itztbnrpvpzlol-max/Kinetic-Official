@@ -273,15 +273,17 @@ fun CpuPreviewCanvas(
     // Text and shape layers take effects too: rasterize, process, and draw the result in place
     // of the plain vector drawing. Old results are left to the GC rather than recycled, because
     // the draw pass may still hold them.
-    val vectorSignature = editor.previewLayers.filter { it.type == LayerType.TEXT || it.type == LayerType.SHAPE }.map {
-        "${it.id}|${it.text}|${it.textStyle.hashCode()}|${it.textAnimators.hashCode()}|${it.textPropsHash()}|${it.color}|${it.width}|${it.height}|${it.shapeKind}|${it.vectorClosed}|${it.vectorPoints.hashCode()}|${it.visible}|${it.start}|${it.duration}|${it.effectStack.hashCode()}"
+    val vectorSignature = editor.previewLayers.filter {
+        it.type == LayerType.TEXT || it.type == LayerType.SHAPE || it.type == LayerType.PARTICULAR
+    }.map {
+        "${it.id}|${it.text}|${it.textStyle.hashCode()}|${it.textAnimators.hashCode()}|${it.textPropsHash()}|${it.color}|${it.width}|${it.height}|${it.shapeKind}|${it.vectorClosed}|${it.vectorPoints.hashCode()}|${it.particleSettings.hashCode()}|${it.props.filterKeys { id -> id.isParticleProp }.hashCode()}|${if (it.type == LayerType.PARTICULAR) (previewClock.timeSec * editor.fps).toInt() else 0}|${it.visible}|${it.start}|${it.duration}|${it.effectStack.hashCode()}"
     }
     LaunchedEffect(vectorSignature) {
         while (true) {
             val time = previewClock.timeSec
             val playing = previewClock.playing
             for (layer in editor.previewLayers) {
-                if (layer.type != LayerType.TEXT && layer.type != LayerType.SHAPE) continue
+                if (layer.type != LayerType.TEXT && layer.type != LayerType.SHAPE && layer.type != LayerType.PARTICULAR) continue
                 val stack = EffectStackRunner.pictureEffects(layer.effectStack).take(12)
                 if (stack.isEmpty() || !layer.visible || !layer.activeAt(time)) {
                     vectorEffected.remove(layer.id)
@@ -289,11 +291,12 @@ fun CpuPreviewCanvas(
                     continue
                 }
                 val timeDependent = playing || EffectStackRunner.isTimeDependent(stack)
-                val bucket = if (timeDependent || layer.textIsAnimated) (time * 24).toInt() else 0
+                val bucket = if (layer.type == LayerType.PARTICULAR || timeDependent || layer.textIsAnimated) (time * 24).toInt() else 0
                 var key = layer.text.hashCode().toLong() * 31L + layer.textStyle.hashCode() * 17L + layer.textAnimators.hashCode() + layer.textPropsHash()
                 if (layer.textStyle.pathOnMask) key = key * 31L + layer.maskPath.hashCode()
                 key = key * 31L + layer.color + layer.width.hashCode() + layer.height.hashCode() + layer.shapeKind.hashCode()
                 key = key * 31L + layer.vectorPointsAt(time).hashCode() + layer.vectorClosed.hashCode()
+                key = key * 31L + layer.particleSettings.hashCode() + layer.props.filterKeys { it.isParticleProp }.hashCode()
                 key = key * 31L + stack.hashCode() + bucket
                 if (vectorKeys[layer.id] == key) continue
                 val maxEdge = if (MediaWorkers.isConstrainedDevice) 320 else 768
@@ -474,12 +477,19 @@ fun CpuPreviewCanvas(
                         // persist through animated transforms and transitions.
                     }
                     LayerType.PARTICULAR -> {
-                        val particles = LayerRaster.render(l, sampleTime, 768)
-                        if (particles != null) {
+                        val fx = vectorEffected[l.id]?.takeIf { !it.bitmap.isRecycled }
+                        if (fx != null) {
                             paint.color = android.graphics.Color.WHITE
                             paint.alpha = alpha
-                            nc.drawBitmap(particles, null, RectF(0f, 0f, l.width, l.height), paint)
-                            particles.recycle()
+                            nc.drawBitmap(fx.bitmap, null, RectF(-fx.left, -fx.top, l.width + fx.right, l.height + fx.bottom), paint)
+                        } else {
+                            val particles = LayerRaster.render(l, sampleTime, 768)
+                            if (particles != null) {
+                                paint.color = android.graphics.Color.WHITE
+                                paint.alpha = alpha
+                                nc.drawBitmap(particles, null, RectF(0f, 0f, l.width, l.height), paint)
+                                particles.recycle()
+                            }
                         }
                     }
                     LayerType.SHAPE, LayerType.TEXT -> {
