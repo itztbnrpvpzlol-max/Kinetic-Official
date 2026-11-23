@@ -3,6 +3,7 @@ package com.kinetic.app.ui
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
+import android.graphics.Matrix
 import android.graphics.Typeface
 import com.kinetic.app.model.Layer
 import com.kinetic.app.model.LayerType
@@ -14,7 +15,10 @@ import kotlin.math.roundToInt
 /** Rasterizes a text or shape layer so picture effects can run on it like on any clip. */
 internal object LayerRaster {
     /** [allowUpscale] renders larger than the layer's logical size, for export at high resolution. */
-    fun render(layer: Layer, time: Float, maxEdge: Int, allowUpscale: Boolean = false): Bitmap? {
+    fun render(
+        layer: Layer, time: Float, maxEdge: Int, allowUpscale: Boolean = false,
+        byId: Map<String, Layer>? = null
+    ): Bitmap? {
         if (layer.type != LayerType.TEXT && layer.type != LayerType.SHAPE && layer.type != LayerType.PARTICULAR) return null
         val logicalWidth = layer.width.toInt().coerceIn(1, 4096)
         val logicalHeight = layer.height.toInt().coerceIn(1, 4096)
@@ -43,7 +47,7 @@ internal object LayerRaster {
                     canvas.drawPath(path, paint)
                 }
             }
-            LayerType.PARTICULAR -> drawParticles(canvas, layer, time, logicalWidth.toFloat(), logicalHeight.toFloat(), paint)
+            LayerType.PARTICULAR -> drawParticles(canvas, layer, time, logicalWidth.toFloat(), logicalHeight.toFloat(), paint, byId)
             else -> Unit
         }
         return bitmap
@@ -69,7 +73,8 @@ internal object LayerRaster {
     }
 
     private fun drawParticles(
-        canvas: Canvas, layer: Layer, time: Float, width: Float, height: Float, paint: Paint
+        canvas: Canvas, layer: Layer, time: Float, width: Float, height: Float, paint: Paint,
+        byId: Map<String, Layer>?
     ) {
         val settings = layer.particles
         fun value(id: com.kinetic.app.model.PropId, fallback: Float = 0f) =
@@ -104,6 +109,11 @@ internal object LayerRaster {
         val drag = value(com.kinetic.app.model.PropId.PARTICLE_DRAG).coerceIn(0f, 100f) / 100f
         val rotationSpeed = value(com.kinetic.app.model.PropId.PARTICLE_ROTATION_SPEED)
         val seed = layer.id.hashCode()
+        val projectionInverse = if (byId != null && com.kinetic.app.model.activeCamera(byId, time) != null) {
+            Matrix().also { inverse ->
+                if (!com.kinetic.app.model.layerMatrix(layer, time, byId).invert(inverse)) inverse.reset()
+            }
+        } else null
 
         for (index in firstEmitted until firstEmitted + emitted) {
             val r0 = random01(seed, index, 0)
@@ -125,21 +135,33 @@ internal object LayerRaster {
                 kotlin.math.sin(age * 4.2f + r3 * 6.28f) * turbulence * age * 0.12f
             val y = emitterY + (r3 - 0.5f) * emitterH -
                 kotlin.math.cos(angle) * velocity * age * damping + 0.5f * gravity * age * age
+            var drawX = x
+            var drawY = y
+            var cameraScale = 1f
+            if (projectionInverse != null && byId != null) {
+                val projected = com.kinetic.app.model.projectLayerPoint(layer, x, y, depth, time, byId)
+                    ?: continue
+                val localPoint = floatArrayOf(projected.x, projected.y)
+                projectionInverse.mapPoints(localPoint)
+                drawX = localPoint[0]
+                drawY = localPoint[1]
+                cameraScale = projected.sizeScale
+            }
             val depthScale = (1f / (1f + kotlin.math.abs(depth) / 1400f)).coerceIn(0.35f, 1.4f)
             val size = (baseSize * (1f + (r0 - 0.5f) * 2f * sizeRandom) *
-                (1f + ((endSize / baseSize.coerceAtLeast(0.1f)) - 1f) * progress) * depthScale).coerceAtLeast(0.35f)
+                (1f + ((endSize / baseSize.coerceAtLeast(0.1f)) - 1f) * progress) * depthScale * cameraScale).coerceAtLeast(0.35f)
             val opacity = (startOpacity + (endOpacity - startOpacity) * progress).coerceIn(0f, 100f)
             paint.color = mixColor(settings.color, settings.endColor, progress)
             paint.alpha = (opacity * 2.55f).toInt().coerceIn(0, 255)
             paint.style = Paint.Style.FILL
             val rotation = rotationSpeed * age + r1 * 360f
             canvas.save()
-            canvas.rotate(rotation, x, y)
+            canvas.rotate(rotation, drawX, drawY)
             when (settings.shape) {
-                "Square" -> canvas.drawRect(x - size / 2f, y - size / 2f, x + size / 2f, y + size / 2f, paint)
+                "Square" -> canvas.drawRect(drawX - size / 2f, drawY - size / 2f, drawX + size / 2f, drawY + size / 2f, paint)
                 "Diamond" -> {
                     val path = android.graphics.Path().apply {
-                        moveTo(x, y - size); lineTo(x + size, y); lineTo(x, y + size); lineTo(x - size, y); close()
+                        moveTo(drawX, drawY - size); lineTo(drawX + size, drawY); lineTo(drawX, drawY + size); lineTo(drawX - size, drawY); close()
                     }
                     canvas.drawPath(path, paint)
                 }
@@ -148,14 +170,14 @@ internal object LayerRaster {
                     for (point in 0 until 10) {
                         val radius = if (point % 2 == 0) size else size * 0.42f
                         val a = -Math.PI / 2.0 + point * Math.PI / 5.0
-                        val px = x + kotlin.math.cos(a).toFloat() * radius
-                        val py = y + kotlin.math.sin(a).toFloat() * radius
+                        val px = drawX + kotlin.math.cos(a).toFloat() * radius
+                        val py = drawY + kotlin.math.sin(a).toFloat() * radius
                         if (point == 0) path.moveTo(px, py) else path.lineTo(px, py)
                     }
                     path.close()
                     canvas.drawPath(path, paint)
                 }
-                else -> canvas.drawCircle(x, y, size / 2f, paint)
+                else -> canvas.drawCircle(drawX, drawY, size / 2f, paint)
             }
             canvas.restore()
         }
