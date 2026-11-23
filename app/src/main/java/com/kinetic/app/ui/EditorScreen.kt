@@ -476,7 +476,13 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                         showShapePanel = false
                         showToolPanel = true
                     }
-                    "Masking", "Vector" -> if (activeLayer?.type == LayerType.TEXT) {
+                    "Masking", "Vector" -> if (activeLayer?.type == LayerType.PARTICULAR) {
+                        showPropertiesPanel = false
+                        showShapePanel = false
+                        editor.playing = false
+                        dockTool = "Masking"
+                        showToolPanel = true
+                    } else if (activeLayer?.type == LayerType.TEXT) {
                         showPropertiesPanel = false
                         showShapePanel = false
                         editor.playing = false
