@@ -234,9 +234,14 @@ internal object LayerRaster {
             val point = project(currentPosition[0], currentPosition[1], currentPosition[2]) ?: continue
             val drawX = point[0]
             val drawY = point[1]
-            val depthScale = (1f / (1f + kotlin.math.abs(currentPosition[2]) / 1400f)).coerceIn(0.35f, 1.4f)
+            // With a camera, perspective is already applied to the projected billboard
+            // corners below. Do not multiply by a second approximate depth factor here.
+            val depthScale = if (billboardAxes == null)
+                (1f / (1f + kotlin.math.abs(currentPosition[2]) / 1400f)).coerceIn(0.35f, 1.4f)
+            else 1f
             val size = (baseSize * (1f + (r0 - 0.5f) * 2f * sizeRandom) *
-                (1f + ((endSize / baseSize.coerceAtLeast(0.1f)) - 1f) * progress) * depthScale * point[2]).coerceAtLeast(0.35f)
+                (1f + ((endSize / baseSize.coerceAtLeast(0.1f)) - 1f) * progress) *
+                depthScale * if (billboardAxes == null) point[2] else 1f).coerceAtLeast(0.35f)
             // Perspective-project the four corners of a camera-facing particle quad.
             // The inverse layer homography stores those projected corners in this
             // raster so the normal layer transform reproduces the exact camera result.
