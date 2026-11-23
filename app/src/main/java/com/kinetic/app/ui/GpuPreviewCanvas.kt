@@ -629,7 +629,7 @@ private fun GpuCompositionPreviewCanvas(
             LayerType.IMAGE, LayerType.VIDEO -> sourceBitmap
             LayerType.PARTICULAR -> {
                 activeTextTextureIds.add(layer.id)
-                val signature = ((layer.particleSettings.hashCode() * 31 +
+                val signature = ((layer.particles.hashCode() * 31 +
                     layer.props.filterKeys { it.isParticleProp }.hashCode()) * 31 +
                     (editor.time * editor.fps).toInt())
                 val cached = textTextures[layer.id]
