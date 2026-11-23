@@ -254,7 +254,7 @@ internal class ExportFrameRenderer(
         val target = max(layer.width * sx, layer.height * sy).toInt().coerceIn(64, MAX_EDGE)
         return when (layer.type) {
             LayerType.TEXT, LayerType.SHAPE, LayerType.PARTICULAR ->
-                LayerRaster.render(layer, time, target, allowUpscale = true)
+                LayerRaster.render(layer, time, target, allowUpscale = true, byId = byId)
                     ?.let { Piece(it, RectF(0f, 0f, layer.width, layer.height), recycle = true) }
             LayerType.IMAGE -> {
                 val uri = layer.uri ?: return null
