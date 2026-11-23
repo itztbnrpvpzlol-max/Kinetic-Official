@@ -136,6 +136,25 @@ internal object LayerRaster {
                 if (com.kinetic.app.model.layerMatrix(layer, time, byId).invert(inverse)) inverse else null
             }
         } else null
+        // Convert the active camera's right/up axes into emitter-local space.
+        // Each particle is then drawn as its own camera-facing billboard rather than
+        // as a circle baked into the emitter's flat layer plane.
+        val billboardAxes = if (byId != null && projectionInverse != null) runCatching {
+            val cameraLayer = com.kinetic.app.model.activeCamera(byId, time)!!
+            val emitterWorld = com.kinetic.app.model.layerWorld4(layer, time, byId)
+            val inverseWorld = com.kinetic.app.model.invert4(emitterWorld)!!
+            val cameraWorld = com.kinetic.app.model.layerWorld4(cameraLayer, time, byId)
+            fun localDirection(wx: Float, wy: Float, wz: Float): FloatArray {
+                val x = inverseWorld[0] * wx + inverseWorld[1] * wy + inverseWorld[2] * wz
+                val y = inverseWorld[4] * wx + inverseWorld[5] * wy + inverseWorld[6] * wz
+                val z = inverseWorld[8] * wx + inverseWorld[9] * wy + inverseWorld[10] * wz
+                val length = kotlin.math.sqrt(x * x + y * y + z * z).coerceAtLeast(1e-6f)
+                return floatArrayOf(x / length, y / length, z / length)
+            }
+            val right = localDirection(cameraWorld[0], cameraWorld[4], cameraWorld[8])
+            val up = localDirection(cameraWorld[1], cameraWorld[5], cameraWorld[9])
+            right to up
+        }.getOrNull() else null
         val spriteLayer = settings.spriteLayerId?.let { byId?.get(it) }
             ?.takeIf { it.type == LayerType.TEXT || it.type == LayerType.SHAPE }
         val spriteBitmap = spriteLayer?.let { render(it, time, 256, byId = byId) }
@@ -218,6 +237,47 @@ internal object LayerRaster {
             val depthScale = (1f / (1f + kotlin.math.abs(currentPosition[2]) / 1400f)).coerceIn(0.35f, 1.4f)
             val size = (baseSize * (1f + (r0 - 0.5f) * 2f * sizeRandom) *
                 (1f + ((endSize / baseSize.coerceAtLeast(0.1f)) - 1f) * progress) * depthScale * point[2]).coerceAtLeast(0.35f)
+            // Perspective-project the four corners of a camera-facing particle quad.
+            // The inverse layer homography stores those projected corners in this
+            // raster so the normal layer transform reproduces the exact camera result.
+            val billboardMatrix = if (billboardAxes != null) {
+                val right = billboardAxes.first
+                val up = billboardAxes.second
+                val half = size * 0.5f
+                val corners = arrayOf(
+                    floatArrayOf(currentPosition[0] - right[0] * half + up[0] * half,
+                        currentPosition[1] - right[1] * half + up[1] * half,
+                        currentPosition[2] - right[2] * half + up[2] * half),
+                    floatArrayOf(currentPosition[0] + right[0] * half + up[0] * half,
+                        currentPosition[1] + right[1] * half + up[1] * half,
+                        currentPosition[2] + right[2] * half + up[2] * half),
+                    floatArrayOf(currentPosition[0] + right[0] * half - up[0] * half,
+                        currentPosition[1] + right[1] * half - up[1] * half,
+                        currentPosition[2] + right[2] * half - up[2] * half),
+                    floatArrayOf(currentPosition[0] - right[0] * half - up[0] * half,
+                        currentPosition[1] - right[1] * half - up[1] * half,
+                        currentPosition[2] - right[2] * half - up[2] * half)
+                )
+                val destination = FloatArray(8)
+                var valid = true
+                corners.forEachIndexed { cornerIndex, corner ->
+                    val projectedCorner = project(corner[0], corner[1], corner[2])
+                    if (projectedCorner == null) valid = false
+                    else {
+                        destination[cornerIndex * 2] = projectedCorner[0]
+                        destination[cornerIndex * 2 + 1] = projectedCorner[1]
+                    }
+                }
+                if (valid) {
+                    val source = floatArrayOf(
+                        drawX - half, drawY - half, drawX + half, drawY - half,
+                        drawX + half, drawY + half, drawX - half, drawY + half
+                    )
+                    Matrix().also { matrix ->
+                        if (!matrix.setPolyToPoly(source, 0, destination, 0, 4)) matrix.reset()
+                    }
+                } else null
+            } else null
             val fadeInAmount = if (fadeIn <= 0f) 1f else (progress / fadeIn).coerceIn(0f, 1f)
             val fadeOutAmount = if (fadeOut <= 0f) 1f else ((1f - progress) / fadeOut).coerceIn(0f, 1f)
             val fadeEnvelope = minOf(fadeInAmount, fadeOutAmount).let {
@@ -260,6 +320,7 @@ internal object LayerRaster {
                 if (settings.orientToMotion) velocityAngle else 0f
             val stretch = 1f + (motionStretch / 1000f) * (kotlin.math.abs(velocity) / 200f).coerceAtMost(5f)
             canvas.save()
+            if (billboardMatrix != null) canvas.concat(billboardMatrix)
             canvas.rotate(particleRotation, drawX, drawY)
             canvas.scale(1f, stretch, drawX, drawY)
             if (spriteBitmap != null && settings.particleType == "Sprite") {
