@@ -550,7 +550,7 @@ private fun GpuCompositionPreviewCanvas(
                 }
                 // Clips and images use their decoded frame; text and shapes their raster.
                 val source = frames[layer.id]
-                    ?: textTextures[layer.id]?.second?.takeIf { !it.isRecycled && (layer.type == LayerType.TEXT || layer.type == LayerType.SHAPE) }
+                    ?: textTextures[layer.id]?.second?.takeIf { !it.isRecycled && (layer.type == LayerType.TEXT || layer.type == LayerType.SHAPE || layer.type == LayerType.PARTICULAR) }
                     ?: continue
                 val activeEffects = EffectStackRunner.pictureEffects(layer.effectStack).take(12)
                 if (activeEffects.isEmpty()) {
