@@ -635,7 +635,7 @@ private fun GpuCompositionPreviewCanvas(
                 val cached = textTextures[layer.id]
                 if (cached == null || cached.first != signature || cached.second.isRecycled) {
                     val edge = if (MediaWorkers.isConstrainedDevice) 320 else 768
-                    val generated = LayerRaster.render(layer, editor.time, edge)
+                    val generated = LayerRaster.render(layer, editor.time, edge, byId = byId)
                     if (generated != null) textTextures[layer.id] = signature to generated
                     generated
                 } else cached.second
