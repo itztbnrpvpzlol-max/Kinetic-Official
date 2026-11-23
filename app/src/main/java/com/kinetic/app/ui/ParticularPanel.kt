@@ -50,7 +50,7 @@ private val particularPalette = listOf(
 
 @Composable
 fun ParticularPanel(editor: EditorState, layer: Layer) {
-    val settings = layer.particleSettings
+    val settings = layer.particles
     Column(
         Modifier.fillMaxSize().background(KColors.Surface).verticalScroll(rememberScrollState())
             .padding(horizontal = 10.dp, vertical = 7.dp),
@@ -65,10 +65,10 @@ fun ParticularPanel(editor: EditorState, layer: Layer) {
         }
 
         ParticularColorRow("Particle Color", settings.color) { color ->
-            editor.updateLayer(layer.id, push = true) { it.copy(particleSettings = it.particleSettings.copy(color = color)) }
+            editor.updateLayer(layer.id, push = true) { it.copy(particleSettings = it.particles.copy(color = color)) }
         }
         ParticularColorRow("End Color", settings.endColor) { color ->
-            editor.updateLayer(layer.id, push = true) { it.copy(particleSettings = it.particleSettings.copy(endColor = color)) }
+            editor.updateLayer(layer.id, push = true) { it.copy(particleSettings = it.particles.copy(endColor = color)) }
         }
 
         SectionLabel("EMITTER")
@@ -102,7 +102,7 @@ fun ParticularPanel(editor: EditorState, layer: Layer) {
             listOf("Circle", "Square", "Diamond", "Star").forEach { shape ->
                 BoxChip(shape, settings.shape == shape) {
                     editor.updateLayer(layer.id, push = true) {
-                        it.copy(particleSettings = it.particleSettings.copy(shape = shape))
+                        it.copy(particleSettings = it.particles.copy(shape = shape))
                     }
                 }
             }
