@@ -526,7 +526,7 @@ data class Layer(
     val textStyle: TextStyle = TextStyle(),
     val textAnimators: List<TextAnimator> = emptyList(),
     val color: Int = 0xFF8D8BA3.toInt(),
-    val particleSettings: ParticleSettings = ParticleSettings(),
+    val particleSettings: ParticleSettings? = null,
     val props: Map<PropId, Prop>,
     /** Legacy simple layer flags (for example Grayscale). */
     val effects: List<String> = emptyList(),
@@ -546,6 +546,7 @@ data class Layer(
     val precompLayers: List<Layer> = emptyList()
 ) {
     val end: Float get() = start + duration
+    val particles: ParticleSettings get() = particleSettings ?: ParticleSettings()
     fun p(id: PropId): Prop = props[id] ?: Prop(
         when (id) {
             PropId.ANCHOR_X -> width / 2f
