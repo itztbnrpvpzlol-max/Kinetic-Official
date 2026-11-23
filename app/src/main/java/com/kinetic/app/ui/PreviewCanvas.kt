@@ -298,6 +298,7 @@ fun CpuPreviewCanvas(
                 key = key * 31L + layer.color + layer.width.hashCode() + layer.height.hashCode() + layer.shapeKind.hashCode()
                 key = key * 31L + layer.vectorPointsAt(time).hashCode() + layer.vectorClosed.hashCode()
                 key = key * 31L + layer.particles.hashCode() + layer.props.filterKeys { it.isParticleProp }.hashCode()
+                key = key * 31L + effectById.hashCode()
                 key = key * 31L + stack.hashCode() + bucket
                 if (vectorKeys[layer.id] == key) continue
                 val maxEdge = if (MediaWorkers.isConstrainedDevice) 320 else 768
