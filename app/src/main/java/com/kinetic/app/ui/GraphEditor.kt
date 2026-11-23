@@ -173,28 +173,21 @@ fun GraphPanel(editor: EditorState, layer: Layer, modifier: Modifier = Modifier)
     var mode by remember(layer.id) { mutableStateOf(GraphMode.EASE) }
     val keys = currentLayer.p(selected).keys
     val segment = graphSegment(keys, editor.selectedKey)
-
-    Column(modifier.fillMaxSize().background(KColors.Surface)) {
-        GraphHeader(mode, { mode = it }) {
-            if (graphItems.size > 1) {
-                Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
-                    graphItems.forEach { (label, id) ->
-                        val active = id == selected
-                        Box(Modifier.clip(RoundedCornerShape(6.dp))
-                            .background(if (active) KColors.Accent.copy(alpha = 0.16f) else KColors.Bg)
-                            .border(1.dp, if (active) KColors.Accent.copy(alpha = 0.6f) else KColors.Line, RoundedCornerShape(6.dp))
-                            .clickable { editor.selectProp(id) }.padding(horizontal = 8.dp, vertical = 5.dp)) {
-                            Text(label, color = if (active) KColors.Accent else KColors.Muted, fontSize = 9.sp)
-                        }
-                    }
-                }
-            } else Spacer(Modifier.weight(1f))
+    val selector: @Composable () -> Unit = {
+        if (graphItems.size > 1) {
+            val current = graphItems.firstOrNull { it.second == selected }?.first ?: selected.label
+            PillDropdown(current, graphItems.map { (label, id) -> label to { editor.selectProp(id) } })
         }
+    }
+
+    Box(modifier.fillMaxSize().background(KColors.Surface).padding(6.dp)) {
         if (keys.size < 2) {
             NoCurveHint(if (keys.isEmpty()) "No keyframes on ${selected.label}" else "Add a second keyframe to shape a transition")
+            Box(Modifier.align(Alignment.TopStart).padding(2.dp)) { selector() }
         } else {
             CurveEditor(
-                keys = keys, segment = segment, mode = mode, modifier = Modifier.weight(1f).fillMaxWidth(),
+                keys = keys, segment = segment, mode = mode, onMode = { mode = it }, selector = selector,
+                modifier = Modifier.fillMaxSize(),
                 onBeginEdit = { editor.beginEdit() },
                 onKeyChange = { index, key -> editor.replaceKey(layer.id, selected, index, key, push = false) }
             )
@@ -217,31 +210,22 @@ fun EffectGraphPanel(editor: EditorState, layer: Layer, modifier: Modifier = Mod
     var mode by remember(effect.id, spec.key) { mutableStateOf(GraphMode.EASE) }
     val graphSelection = editor.selectedEffectKey.takeIf { it in keys.indices } ?: 0
     val segment = graphSegment(keys, graphSelection)
+    val selector: @Composable () -> Unit = {
+        if (keys.size > 1) {
+            val label = "K" + (graphSelection + 1) + " · " + String.format(java.util.Locale.US, "%.2fs", keys[graphSelection].t)
+            PillDropdown(label, keys.mapIndexed { i, k ->
+                ("K" + (i + 1) + " · " + String.format(java.util.Locale.US, "%.2fs", k.t)) to { editor.selectEffectKey(i) }
+            })
+        }
+    }
 
-    Column(modifier.fillMaxSize().background(KColors.Surface)) {
-        GraphHeader(mode, { mode = it }) {
-            Text(effect.name + " · " + spec.label, color = KColors.Text, fontSize = 10.sp, fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.weight(1f), maxLines = 1)
-        }
-        if (keys.isNotEmpty()) {
-            Row(Modifier.fillMaxWidth().height(30.dp).horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
-                keys.forEachIndexed { index, key ->
-                    val sel = index == graphSelection
-                    Box(Modifier.clip(RoundedCornerShape(6.dp)).background(if (sel) KColors.Accent.copy(alpha = 0.16f) else KColors.Bg)
-                        .border(1.dp, if (sel) KColors.Accent else KColors.Line, RoundedCornerShape(6.dp))
-                        .clickable { editor.selectEffectKey(index) }.padding(horizontal = 8.dp, vertical = 5.dp)) {
-                        Text("K" + (index + 1) + " · " + String.format(java.util.Locale.US, "%.2fs", key.t),
-                            color = if (sel) KColors.Accent else KColors.Muted, fontSize = 8.sp, fontWeight = FontWeight.SemiBold)
-                    }
-                }
-            }
-        }
+    Box(modifier.fillMaxSize().background(KColors.Surface).padding(6.dp)) {
         if (keys.size < 2) {
             NoCurveHint(if (keys.isEmpty()) "No keyframes on " + spec.label else "Add a second keyframe to shape a transition")
         } else {
             CurveEditor(
-                keys = keys, segment = segment, mode = mode, modifier = Modifier.weight(1f).fillMaxWidth(),
+                keys = keys, segment = segment, mode = mode, onMode = { mode = it }, selector = selector,
+                modifier = Modifier.fillMaxSize(),
                 onBeginEdit = { editor.beginEdit() },
                 onKeyChange = { index, key -> editor.replaceEffectParameterKey(layer.id, effect.id, spec.key, index, key) }
             )
@@ -250,16 +234,32 @@ fun EffectGraphPanel(editor: EditorState, layer: Layer, modifier: Modifier = Mod
 }
 
 @Composable
-private fun GraphHeader(mode: GraphMode, onMode: (GraphMode) -> Unit, left: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit) {
-    Row(Modifier.fillMaxWidth().height(34.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-        left()
-        Spacer(Modifier.width(6.dp))
-        listOf(GraphMode.EASE to "Ease", GraphMode.VALUE to "Value", GraphMode.SPEED to "Speed").forEachIndexed { i, (m, label) ->
-            if (i > 0) Spacer(Modifier.width(4.dp))
-            Box(Modifier.clip(RoundedCornerShape(7.dp))
-                .background(if (mode == m) KColors.Accent.copy(alpha = 0.17f) else KColors.Bg)
-                .border(1.dp, if (mode == m) KColors.Accent.copy(alpha = 0.65f) else KColors.Line, RoundedCornerShape(7.dp))
-                .clickable { onMode(m) }.padding(horizontal = 10.dp, vertical = 6.dp)) {
+private fun PillDropdown(label: String, items: List<Pair<String, () -> Unit>>) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        Row(Modifier.clip(RoundedCornerShape(9.dp)).background(KColors.Surface.copy(alpha = 0.92f))
+            .border(1.dp, KColors.Line, RoundedCornerShape(9.dp)).clickable { open = true }
+            .padding(horizontal = 9.dp, vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(label, color = KColors.Text, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+            Spacer(Modifier.width(4.dp))
+            KIcon(IconKind.CHEVRON_DOWN, KColors.Muted, Modifier.size(10.dp))
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }, containerColor = KColors.Surface) {
+            items.forEach { (text, action) ->
+                DropdownMenuItem(text = { Text(text, color = KColors.Text, fontSize = 13.sp) }, onClick = { open = false; action() })
+            }
+        }
+    }
+}
+
+@Composable
+private fun ModeSwitch(mode: GraphMode, onMode: (GraphMode) -> Unit) {
+    val shape = RoundedCornerShape(9.dp)
+    Row(Modifier.clip(shape).background(KColors.Surface.copy(alpha = 0.92f)).border(1.dp, KColors.Line, shape)) {
+        listOf(GraphMode.EASE to "Ease", GraphMode.VALUE to "Value", GraphMode.SPEED to "Speed").forEach { (m, label) ->
+            Box(Modifier.height(26.dp).clip(shape)
+                .background(if (mode == m) KColors.Accent.copy(alpha = 0.2f) else Color.Transparent)
+                .clickable { onMode(m) }.padding(horizontal = 9.dp), contentAlignment = Alignment.Center) {
                 Text(label, color = if (mode == m) KColors.Accent else KColors.Muted, fontSize = 9.sp, fontWeight = FontWeight.SemiBold)
             }
         }
@@ -283,8 +283,8 @@ private fun NoCurveHint(text: String) {
 
 @Composable
 private fun CurveEditor(
-    keys: List<Keyframe>, segment: Int, mode: GraphMode, modifier: Modifier,
-    onBeginEdit: () -> Unit, onKeyChange: (Int, Keyframe) -> Unit
+    keys: List<Keyframe>, segment: Int, mode: GraphMode, onMode: (GraphMode) -> Unit, selector: @Composable () -> Unit,
+    modifier: Modifier, onBeginEdit: () -> Unit, onKeyChange: (Int, Keyframe) -> Unit
 ) {
     val haptic = LocalHapticFeedback.current
     var dragKeys by remember { mutableStateOf<List<Keyframe>?>(null) }
@@ -330,7 +330,7 @@ private fun CurveEditor(
         Box(Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(12.dp)).background(KColors.Bg)) {
             // ---- canvas
             Canvas(Modifier.fillMaxSize().clipToBounds().pointerInput(Unit) {
-                val pad = 16.dp.toPx()
+                val pad = 12.dp.toPx()
                 val rail = 14.dp.toPx()
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
@@ -416,35 +416,39 @@ private fun CurveEditor(
             }
 
             // ---- overlays
-            if (mode == GraphMode.EASE) {
-                val family = a.family()
-                Box(Modifier.align(Alignment.TopStart).padding(8.dp)) {
-                    Row(Modifier.clip(RoundedCornerShape(9.dp)).background(KColors.Surface.copy(alpha = 0.92f))
-                        .border(1.dp, KColors.Line, RoundedCornerShape(9.dp)).clickable { typeMenu = true }
-                        .padding(horizontal = 9.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                        CurveGlyph(a, true, Modifier.size(width = 18.dp, height = 12.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text(curveTypes.first { it.first == family }.second, color = KColors.Text, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
-                        Spacer(Modifier.width(4.dp))
-                        KIcon(IconKind.CHEVRON_DOWN, KColors.Muted, Modifier.size(10.dp))
-                    }
-                    DropdownMenu(expanded = typeMenu, onDismissRequest = { typeMenu = false }, containerColor = KColors.Surface) {
-                        curveTypes.forEach { (type, label) ->
-                            DropdownMenuItem(
-                                leadingIcon = { CurveGlyph(typeSample(type), type == family, Modifier.size(width = 22.dp, height = 14.dp)) },
-                                text = { Text(label, color = if (type == family) KColors.Accent else KColors.Text, fontSize = 13.sp,
-                                    fontWeight = if (type == family) FontWeight.SemiBold else FontWeight.Normal) },
-                                onClick = {
-                                    typeMenu = false
-                                    if (type != family) applyDiscrete(switchType(a, type))
-                                }
-                            )
+            Box(Modifier.align(Alignment.TopEnd).padding(8.dp)) { ModeSwitch(mode, onMode) }
+            Column(Modifier.align(Alignment.TopStart).padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (mode == GraphMode.EASE) {
+                    val family = a.family()
+                    Box {
+                        Row(Modifier.clip(RoundedCornerShape(9.dp)).background(KColors.Surface.copy(alpha = 0.92f))
+                            .border(1.dp, KColors.Line, RoundedCornerShape(9.dp)).clickable { typeMenu = true }
+                            .padding(horizontal = 9.dp, vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
+                            CurveGlyph(a, true, Modifier.size(width = 18.dp, height = 12.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text(curveTypes.first { it.first == family }.second, color = KColors.Text, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                            Spacer(Modifier.width(4.dp))
+                            KIcon(IconKind.CHEVRON_DOWN, KColors.Muted, Modifier.size(10.dp))
+                        }
+                        DropdownMenu(expanded = typeMenu, onDismissRequest = { typeMenu = false }, containerColor = KColors.Surface) {
+                            curveTypes.forEach { (type, label) ->
+                                DropdownMenuItem(
+                                    leadingIcon = { CurveGlyph(typeSample(type), type == family, Modifier.size(width = 22.dp, height = 14.dp)) },
+                                    text = { Text(label, color = if (type == family) KColors.Accent else KColors.Text, fontSize = 13.sp,
+                                        fontWeight = if (type == family) FontWeight.SemiBold else FontWeight.Normal) },
+                                    onClick = {
+                                        typeMenu = false
+                                        if (type != family) applyDiscrete(switchType(a, type))
+                                    }
+                                )
+                            }
                         }
                     }
                 }
-                Text(formulaText(a), color = KColors.Muted, fontSize = 8.sp, maxLines = 1,
-                    modifier = Modifier.align(Alignment.TopEnd).padding(top = 12.dp, end = 10.dp))
-                if (family == KeyType.STEPS) {
+                selector()
+            }
+            if (mode == GraphMode.EASE) {
+                if (a.family() == KeyType.STEPS) {
                     Row(Modifier.align(Alignment.BottomEnd).padding(end = 8.dp, bottom = 8.dp).clip(RoundedCornerShape(9.dp))
                         .background(KColors.Surface.copy(alpha = 0.94f)).border(1.dp, KColors.Line, RoundedCornerShape(9.dp))) {
                         listOf("End" to 0f, "Start" to 1f).forEach { (label, jump) ->
@@ -458,14 +462,13 @@ private fun CurveEditor(
                     }
                 }
             } else {
-                Text(if (mode == GraphMode.VALUE) "Drag the end points up or down to change their values"
-                    else "Speed follows the value curve of this segment",
+                Text(if (mode == GraphMode.VALUE) "Drag the end points up or down" else "Speed follows the value curve",
                     color = KColors.Muted, fontSize = 8.sp, maxLines = 1, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 6.dp))
             }
         }
 
         if (mode == GraphMode.EASE) {
-            PresetColumn(a, Modifier.width(78.dp).fillMaxHeight()) { applyDiscrete(it) }
+            PresetColumn(a, Modifier.width(66.dp).fillMaxHeight()) { applyDiscrete(it) }
         }
     }
 }
@@ -517,7 +520,7 @@ private fun PresetColumn(a: Keyframe, modifier: Modifier, onPick: (Keyframe) -> 
         (if (p.type == KeyType.LINEAR || p.type == KeyType.HOLD) KeyType.BEZIER else p.type) == family
     }
     Column(modifier.clip(RoundedCornerShape(12.dp)).background(KColors.Bg).border(1.dp, KColors.Line, RoundedCornerShape(12.dp))
-        .verticalScroll(rememberScrollState()).padding(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        .verticalScroll(rememberScrollState()).padding(5.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 2.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("PRESETS", color = KColors.Muted, fontSize = 8.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
             Box(Modifier.size(22.dp).clip(CircleShape).background(KColors.Surface).clickable {
@@ -537,7 +540,7 @@ private fun PresetColumn(a: Keyframe, modifier: Modifier, onPick: (Keyframe) -> 
                     )
                 }.padding(vertical = 5.dp, horizontal = 3.dp),
                 horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                CurveGlyph(preset.asKey(), selected, Modifier.fillMaxWidth().height(22.dp).padding(horizontal = 6.dp))
+                CurveGlyph(preset.asKey(), selected, Modifier.fillMaxWidth().height(18.dp).padding(horizontal = 6.dp))
                 Text(preset.label, color = if (selected) KColors.Accent else KColors.Text, fontSize = 8.sp, maxLines = 1, textAlign = TextAlign.Center)
             }
         }
@@ -684,7 +687,7 @@ private val labelPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIA
 
 private fun DrawScope.drawCurveScene(keys: List<Keyframe>, seg: Int, mode: GraphMode, activeHandle: Int, fixedRange: Pair<Float, Float>?) {
     if (seg !in 0 until keys.lastIndex) return
-    val pad = 16.dp.toPx()
+    val pad = 12.dp.toPx()
     val g = GraphGeometry(size.width, size.height, pad, 14.dp.toPx(), keys, seg, mode, fixedRange)
     val a = keys[seg]; val b = keys[seg + 1]
     val accent = KColors.Accent

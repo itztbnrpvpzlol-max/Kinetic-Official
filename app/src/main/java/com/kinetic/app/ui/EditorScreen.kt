@@ -125,7 +125,6 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
     var showToolPanel by remember { mutableStateOf(false) }
     var showCameraDialog by remember { mutableStateOf(false) }
     var pendingTextTool by remember { mutableStateOf<String?>(null) }
-    var toolGraphOpen by remember { mutableStateOf(false) }
     var exportBackTick by remember { mutableIntStateOf(0) }
     var openCameraPanelOnSelect by remember { mutableStateOf(false) }
     var showShapePanel by remember { mutableStateOf(false) }
@@ -397,13 +396,7 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                     )
                 } else if (!compactHeight && (showPropertiesPanel || showToolPanel)) {
                     // Every dock tool shares the Properties panel shell and workspace footprint.
-                    // The curve editor needs real room to be usable, so panels grow while a graph is open.
-                    val graphTall = if (showPropertiesPanel) panelTab == 1 else toolGraphOpen
-                    val adaptivePanelHeight = when {
-                        graphTall -> (windowMaxHeight.value * 0.52f).coerceIn(300f, 460f)
-                        dockTool == "Masking" -> (windowMaxHeight.value * 0.43f).coerceIn(280f, 390f)
-                        else -> (windowMaxHeight.value * 0.27f).coerceIn(180f, 228f)
-                    }
+                    val adaptivePanelHeight = if (dockTool == "Masking") (windowMaxHeight.value * 0.43f).coerceIn(280f, 390f) else (windowMaxHeight.value * 0.27f).coerceIn(180f, 228f)
                     if (showPropertiesPanel) {
                         EditPanel(editor, activeLayer, panelTab, { panelTab = it }, { showPropertiesPanel = false },
                             onRename = { renameTarget = activeLayer }, onParent = { parentPicker = true },
@@ -416,7 +409,6 @@ fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> 
                             rotoForeground = rotoForeground, onRotoForegroundChange = { rotoForeground = it },
                             onOpenEffects = { showEffectsScreen = true },
                             onOpenMasking = { editor.playing = false; dockTool = "Masking"; showToolPanel = true },
-                            onGraphOpenChange = { toolGraphOpen = it },
                             modifier = Modifier.fillMaxWidth().height(adaptivePanelHeight.dp))
                     }
                 }
@@ -793,13 +785,10 @@ private fun ToolEditPanel(
     onRotoForegroundChange: (Boolean) -> Unit,
     onOpenEffects: () -> Unit,
     onOpenMasking: () -> Unit,
-    onGraphOpenChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val displayTime = rememberEditorDisplayTime(editor)
     var showGraph by remember(tool, layer.id) { mutableStateOf(false) }
-    androidx.compose.runtime.LaunchedEffect(showGraph) { onGraphOpenChange(showGraph) }
-    androidx.compose.runtime.DisposableEffect(Unit) { onDispose { onGraphOpenChange(false) } }
     val isTextTool = tool == "Edit" || tool == "Animate"
     var textTab by remember(layer.id) { mutableStateOf(if (tool == "Animate") "Animator" else "Text") }
     androidx.compose.runtime.LaunchedEffect(tool) { if (tool == "Animate") textTab = "Animator" else if (tool == "Edit") textTab = "Text" }
