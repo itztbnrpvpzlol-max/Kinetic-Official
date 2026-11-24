@@ -66,7 +66,7 @@ object ParticlePresets {
             PropId.PARTICLE_LIFETIME to 14f, PropId.PARTICLE_LIFE_RANDOM to 15f,
             PropId.PARTICLE_SIZE to 8f, PropId.PARTICLE_SIZE_RANDOM to 70f, PropId.PARTICLE_END_SIZE to 8f,
             PropId.PARTICLE_OPACITY to 90f, PropId.PARTICLE_END_OPACITY to 90f,
-            PropId.PARTICLE_FADE_IN to 4f, PropId.PARTICLE_FADE_OUT to 4f, PropId.PARTICLE_FEATHER to 55f
+            PropId.PARTICLE_FADE_IN to 0f, PropId.PARTICLE_FADE_OUT to 4f, PropId.PARTICLE_FEATHER to 55f
         )) { it.copy(preset = "Snow", color = 0xFFFFFFFF.toInt(), endColor = 0xFFDDEBFF.toInt(), particleType = "Sphere",
             shape = "Circle", additive = false, tailEnabled = false, orientToMotion = false, sphereEmitter = false,
             emitterMotion = "Leave Trail", velocityFromMotion = false, showLayer = false) }
@@ -83,7 +83,7 @@ object ParticlePresets {
             PropId.PARTICLE_LIFETIME to 1.2f, PropId.PARTICLE_LIFE_RANDOM to 40f,
             PropId.PARTICLE_SIZE to 120f, PropId.PARTICLE_SIZE_RANDOM to 40f, PropId.PARTICLE_END_SIZE to 25f,
             PropId.PARTICLE_OPACITY to 65f, PropId.PARTICLE_END_OPACITY to 0f,
-            PropId.PARTICLE_FADE_IN to 10f, PropId.PARTICLE_FADE_OUT to 55f, PropId.PARTICLE_FEATHER to 85f,
+            PropId.PARTICLE_FADE_IN to 0f, PropId.PARTICLE_FADE_OUT to 55f, PropId.PARTICLE_FEATHER to 85f,
             PropId.PARTICLE_SPIN to 25f, PropId.PARTICLE_SPIN_RANDOM to 40f
         )) { it.copy(preset = "Fire", color = 0xFFFFB347.toInt(), endColor = 0xFFB01800.toInt(), particleType = "Cloudlet",
             shape = "Circle", additive = true, tailEnabled = false, orientToMotion = false, sphereEmitter = false,
@@ -133,7 +133,7 @@ object ParticlePresets {
             PropId.PARTICLE_LIFETIME to 8f, PropId.PARTICLE_LIFE_RANDOM to 30f,
             PropId.PARTICLE_SIZE to 40f, PropId.PARTICLE_SIZE_RANDOM to 60f, PropId.PARTICLE_END_SIZE to 40f,
             PropId.PARTICLE_OPACITY to 22f, PropId.PARTICLE_END_OPACITY to 22f,
-            PropId.PARTICLE_FADE_IN to 25f, PropId.PARTICLE_FADE_OUT to 25f, PropId.PARTICLE_FEATHER to 90f,
+            PropId.PARTICLE_FADE_IN to 12f, PropId.PARTICLE_FADE_OUT to 25f, PropId.PARTICLE_FEATHER to 90f,
             PropId.PARTICLE_SPIN to 6f, PropId.PARTICLE_SPIN_RANDOM to 12f
         )) { it.copy(preset = "Dust", color = 0xFFD2C4AE.toInt(), endColor = 0xFFB9AC96.toInt(), particleType = "Cloudlet",
             shape = "Circle", additive = false, tailEnabled = false, orientToMotion = false, sphereEmitter = false,
@@ -148,7 +148,7 @@ object ParticlePresets {
             PropId.PARTICLE_LIFETIME to 6f, PropId.PARTICLE_LIFE_RANDOM to 30f,
             PropId.PARTICLE_SIZE to 95f, PropId.PARTICLE_SIZE_RANDOM to 80f, PropId.PARTICLE_END_SIZE to 95f,
             PropId.PARTICLE_OPACITY to 38f, PropId.PARTICLE_END_OPACITY to 38f,
-            PropId.PARTICLE_FADE_IN to 30f, PropId.PARTICLE_FADE_OUT to 30f, PropId.PARTICLE_FEATHER to 18f
+            PropId.PARTICLE_FADE_IN to 12f, PropId.PARTICLE_FADE_OUT to 30f, PropId.PARTICLE_FEATHER to 18f
         )) { it.copy(preset = "Bokeh", color = 0xFFFFE8B0.toInt(), endColor = 0xFFFFB0E0.toInt(), particleType = "Sphere",
             shape = "Circle", additive = true, tailEnabled = false, orientToMotion = false, sphereEmitter = false,
             emitterMotion = "Leave Trail", velocityFromMotion = false, showLayer = false) }
@@ -188,6 +188,12 @@ object ParticlePresets {
     fun apply(layer: Layer, name: String): Layer {
         val preset = build(name) ?: return layer
         val values = baseline().also { it.putAll(preset.values) }
+        // Pre-roll must cover the longest possible particle life, otherwise the scene visibly builds up
+        // from empty at the start. Trail is the exception: it draws a ribbon from the emitter's motion.
+        if (name != "Trail") {
+            val life = (values[PropId.PARTICLE_LIFETIME] ?: 2f) * (1f + (values[PropId.PARTICLE_LIFE_RANDOM] ?: 0f) / 100f)
+            values[PropId.PARTICLE_PREROLL] = maxOf(values[PropId.PARTICLE_PREROLL] ?: 0f, life * 1000f + 100f)
+        }
         val props = values.entries.fold(layer.props) { acc, e -> acc + (e.key to Prop(e.value)) }
         return layer.copy(props = props, particleSettings = preset.settings(layer.particles))
     }

@@ -78,6 +78,9 @@ internal object ParticleRenderer {
         var histCount = 0
     }
 
+    private class Sim(val particles: List<Particle>, val last: StepParams, val nowEmitter: FloatArray)
+    private val simCache = HashMap<String, Pair<Long, Sim>>()
+
     private fun hash(seed: Int, a: Int, salt: Int): Float {
         var v = seed xor (a * 0x45d9f3b) xor (salt * 0x27d4eb2d)
         v = (v xor (v ushr 16)) * 0x45d9f3b
@@ -97,14 +100,24 @@ internal object ParticleRenderer {
     private fun softSprite(feather: Float): Bitmap {
         val key = (feather.coerceIn(0f, 1f) * 12f).toInt()
         return sprites.getOrPut(key) {
-            val n = 96
+            val n = 128
             val bmp = Bitmap.createBitmap(n, n, Bitmap.Config.ARGB_8888)
-            val hardness = (1f - key / 12f).coerceIn(0f, 0.985f)
-            val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+            val hardness = (1f - key / 12f).coerceIn(0f, 0.97f)
+            // eased (smoothstep) falloff from the hard core to the rim: no visible rings or flat discs
+            val stops = 12
+            val pos = FloatArray(stops + 1)
+            val col = IntArray(stops + 1)
+            for (i in 0..stops) {
+                val u = i / stops.toFloat()
+                pos[i] = hardness + (1f - hardness) * u
+                val e = u * u * (3f - 2f * u)
+                col[i] = Color.argb(((1f - e) * 255f).toInt().coerceIn(0, 255), 255, 255, 255)
+            }
+            pos[stops] = 1f
+            val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.DITHER_FLAG)
             paint.shader = RadialGradient(
-                n / 2f, n / 2f, n / 2f,
-                intArrayOf(Color.WHITE, Color.WHITE, Color.argb(0, 255, 255, 255)),
-                floatArrayOf(0f, hardness, 1f), Shader.TileMode.CLAMP
+                n / 2f, n / 2f, n / 2f - 0.5f,
+                intArrayOf(Color.WHITE) + col, floatArrayOf(0f) + pos, Shader.TileMode.CLAMP
             )
             Canvas(bmp).drawCircle(n / 2f, n / 2f, n / 2f, paint)
             bmp
@@ -159,200 +172,236 @@ internal object ParticleRenderer {
         fun value(id: PropId, fallback: Float = 0f, t: Float = time) =
             layer.p(id).valueAt(t).takeIf { it.isFinite() } ?: fallback
 
-        // --- window of simulation steps that can still have living particles ---
-        val lifeProp = layer.p(PropId.PARTICLE_LIFETIME)
-        val randProp = layer.p(PropId.PARTICLE_LIFE_RANDOM)
-        var lifeCeil = max(lifeProp.base, value(PropId.PARTICLE_LIFETIME, 2f))
-        lifeProp.keys.forEach { lifeCeil = max(lifeCeil, it.v) }
-        var randCeil = max(randProp.base, value(PropId.PARTICLE_LIFE_RANDOM, 20f))
-        randProp.keys.forEach { randCeil = max(randCeil, it.v) }
-        val maxLife = (lifeCeil.coerceAtLeast(0.05f) * (1f + randCeil / 100f)).coerceIn(0.05f, MAX_LIFE)
-        val preroll = (value(PropId.PARTICLE_PREROLL, 1000f) / 1000f).coerceIn(0f, 30f)
-        val startT = layer.start - preroll
-        val endT = min(time, layer.end)
-        if (endT < startT) return
-        val jNow = floor(time / STEP).toInt()
-        val jFirst = max(floor(startT / STEP).toInt() , floor((time - maxLife) / STEP).toInt() - 1)
-        if (jNow < jFirst) return
+        fun simulate(): Sim? {
+            // --- window of simulation steps that can still have living particles ---
+            val lifeProp = layer.p(PropId.PARTICLE_LIFETIME)
+            val randProp = layer.p(PropId.PARTICLE_LIFE_RANDOM)
+            var lifeCeil = max(lifeProp.base, value(PropId.PARTICLE_LIFETIME, 2f))
+            lifeProp.keys.forEach { lifeCeil = max(lifeCeil, it.v) }
+            var randCeil = max(randProp.base, value(PropId.PARTICLE_LIFE_RANDOM, 20f))
+            randProp.keys.forEach { randCeil = max(randCeil, it.v) }
+            val maxLife = (lifeCeil.coerceAtLeast(0.05f) * (1f + randCeil / 100f)).coerceIn(0.05f, MAX_LIFE)
+            val preroll = (value(PropId.PARTICLE_PREROLL, 1000f) / 1000f).coerceIn(0f, 30f)
+            val startT = layer.start - preroll
+            val endT = min(time, layer.end)
+            if (endT < startT) return null
+            val jNow = floor(time / STEP).toInt()
+            val jFirst = max(floor(startT / STEP).toInt() , floor((time - maxLife) / STEP).toInt() - 1)
+            if (jNow < jFirst) return null
 
-        val seedValue = value(PropId.PARTICLE_RANDOM_SEED).toInt()
-        val seed = if (seedValue == 0) layer.id.hashCode() else seedValue
+            val seedValue = value(PropId.PARTICLE_RANDOM_SEED).toInt()
+            val seed = if (seedValue == 0) layer.id.hashCode() else seedValue
 
-        // --- per-step parameter table ---
-        val count = jNow - jFirst + 1
-        val table = ArrayList<StepParams>(count)
-        for (j in jFirst..jNow) {
-            val t = (j * STEP).coerceAtLeast(0f)
-            fun v(id: PropId, fb: Float = 0f) = value(id, fb, t)
-            table += StepParams(
-                t = t,
-                rate = v(PropId.PARTICLE_RATE, 60f).coerceIn(0f, 20000f),
-                life = v(PropId.PARTICLE_LIFETIME, 2f).coerceAtLeast(0.02f),
-                lifeRandom = v(PropId.PARTICLE_LIFE_RANDOM, 20f) / 100f,
-                velocity = v(PropId.PARTICLE_VELOCITY, 80f),
-                velocityRandom = v(PropId.PARTICLE_VELOCITY_RANDOM, 20f) / 100f,
-                spread = Math.toRadians(v(PropId.PARTICLE_SPREAD, 28f).toDouble()).toFloat(),
-                tilt = Math.toRadians(v(PropId.PARTICLE_DIRECTION_TILT).toDouble()).toFloat(),
-                spin = Math.toRadians(v(PropId.PARTICLE_DIRECTION_SPIN).toDouble()).toFloat(),
-                size = v(PropId.PARTICLE_SIZE, 6f).coerceAtLeast(0f),
-                sizeRandom = v(PropId.PARTICLE_SIZE_RANDOM, 30f) / 100f,
-                endSize = v(PropId.PARTICLE_END_SIZE, 0f).coerceAtLeast(0f),
-                opacity = v(PropId.PARTICLE_OPACITY, 100f).coerceIn(0f, 100f) / 100f,
-                endOpacity = v(PropId.PARTICLE_END_OPACITY, 0f).coerceIn(0f, 100f) / 100f,
-                fadeIn = v(PropId.PARTICLE_FADE_IN).coerceIn(0f, 100f) / 100f,
-                fadeOut = v(PropId.PARTICLE_FADE_OUT).coerceIn(0f, 100f) / 100f,
-                feather = v(PropId.PARTICLE_FEATHER).coerceIn(0f, 100f) / 100f,
-                rotation = v(PropId.PARTICLE_ROTATION),
-                rotationRandom = v(PropId.PARTICLE_ROTATION_RANDOM),
-                spinDeg = v(PropId.PARTICLE_SPIN) + v(PropId.PARTICLE_ROTATION_SPEED),
-                spinRandom = v(PropId.PARTICLE_SPIN_RANDOM),
-                stretch = v(PropId.PARTICLE_MOTION_STRETCH).coerceIn(0f, 1000f),
-                gravity = v(PropId.PARTICLE_GRAVITY),
-                windX = v(PropId.PARTICLE_WIND_X), windY = v(PropId.PARTICLE_WIND_Y), windZ = v(PropId.PARTICLE_WIND_Z),
-                drag = v(PropId.PARTICLE_DRAG).coerceIn(0f, 100f) / 20f,
-                turbulence = v(PropId.PARTICLE_TURBULENCE),
-                turbulenceSpeed = v(PropId.PARTICLE_TURBULENCE_SPEED, 1f).coerceIn(0f, 20f),
-                tailLength = v(PropId.PARTICLE_TAIL_LENGTH).coerceIn(0f, 10000f) / 1000f,
-                tailSegments = v(PropId.PARTICLE_TAIL_SEGMENTS, 8f).toInt().coerceIn(1, 32),
-                tailWidth = v(PropId.PARTICLE_TAIL_WIDTH, 100f).coerceIn(0f, 500f) / 100f,
-                tailTaper = v(PropId.PARTICLE_TAIL_TAPER).coerceIn(0f, 100f) / 100f,
-                tailOpacity = v(PropId.PARTICLE_TAIL_OPACITY, 100f).coerceIn(0f, 100f) / 100f,
-                offX = v(PropId.PARTICLE_POS_X), offY = v(PropId.PARTICLE_POS_Y), offZ = v(PropId.PARTICLE_POS_Z),
-                sizeX = v(PropId.PARTICLE_EMITTER_SIZE_X), sizeY = v(PropId.PARTICLE_EMITTER_SIZE_Y), sizeZ = v(PropId.PARTICLE_EMITTER_SIZE_Z),
-                emitter = childSpaceWorld4(layer, t, byId)
-            )
+            // --- per-step parameter table ---
+            var chainAnimated = false
+            var cursor: Layer? = layer
+            var guard = 0
+            while (cursor != null && guard++ < 16 && !chainAnimated) {
+                chainAnimated = cursor.props.any { (id, pr) -> !id.isParticleProp && (pr.keys.size > 1 || pr.expression != null) }
+                cursor = cursor.parentId?.let { byId[it] }
+            }
+            val emitterStatic = !chainAnimated
+            val staticEmitter = if (emitterStatic) childSpaceWorld4(layer, time, byId) else null
+            val count = jNow - jFirst + 1
+            val table = ArrayList<StepParams>(count)
+            for (j in jFirst..jNow) {
+                val t = j * STEP
+                fun v(id: PropId, fb: Float = 0f) = value(id, fb, t)
+                table += StepParams(
+                    t = t,
+                    rate = v(PropId.PARTICLE_RATE, 60f).coerceIn(0f, 20000f),
+                    life = v(PropId.PARTICLE_LIFETIME, 2f).coerceAtLeast(0.02f),
+                    lifeRandom = v(PropId.PARTICLE_LIFE_RANDOM, 20f) / 100f,
+                    velocity = v(PropId.PARTICLE_VELOCITY, 80f),
+                    velocityRandom = v(PropId.PARTICLE_VELOCITY_RANDOM, 20f) / 100f,
+                    spread = Math.toRadians(v(PropId.PARTICLE_SPREAD, 28f).toDouble()).toFloat(),
+                    tilt = Math.toRadians(v(PropId.PARTICLE_DIRECTION_TILT).toDouble()).toFloat(),
+                    spin = Math.toRadians(v(PropId.PARTICLE_DIRECTION_SPIN).toDouble()).toFloat(),
+                    size = v(PropId.PARTICLE_SIZE, 6f).coerceAtLeast(0f),
+                    sizeRandom = v(PropId.PARTICLE_SIZE_RANDOM, 30f) / 100f,
+                    endSize = v(PropId.PARTICLE_END_SIZE, 0f).coerceAtLeast(0f),
+                    opacity = v(PropId.PARTICLE_OPACITY, 100f).coerceIn(0f, 100f) / 100f,
+                    endOpacity = v(PropId.PARTICLE_END_OPACITY, 0f).coerceIn(0f, 100f) / 100f,
+                    fadeIn = v(PropId.PARTICLE_FADE_IN).coerceIn(0f, 100f) / 100f,
+                    fadeOut = v(PropId.PARTICLE_FADE_OUT).coerceIn(0f, 100f) / 100f,
+                    feather = v(PropId.PARTICLE_FEATHER).coerceIn(0f, 100f) / 100f,
+                    rotation = v(PropId.PARTICLE_ROTATION),
+                    rotationRandom = v(PropId.PARTICLE_ROTATION_RANDOM),
+                    spinDeg = v(PropId.PARTICLE_SPIN) + v(PropId.PARTICLE_ROTATION_SPEED),
+                    spinRandom = v(PropId.PARTICLE_SPIN_RANDOM),
+                    stretch = v(PropId.PARTICLE_MOTION_STRETCH).coerceIn(0f, 1000f),
+                    gravity = v(PropId.PARTICLE_GRAVITY),
+                    windX = v(PropId.PARTICLE_WIND_X), windY = v(PropId.PARTICLE_WIND_Y), windZ = v(PropId.PARTICLE_WIND_Z),
+                    drag = v(PropId.PARTICLE_DRAG).coerceIn(0f, 100f) / 20f,
+                    turbulence = v(PropId.PARTICLE_TURBULENCE),
+                    turbulenceSpeed = v(PropId.PARTICLE_TURBULENCE_SPEED, 1f).coerceIn(0f, 20f),
+                    tailLength = v(PropId.PARTICLE_TAIL_LENGTH).coerceIn(0f, 10000f) / 1000f,
+                    tailSegments = v(PropId.PARTICLE_TAIL_SEGMENTS, 8f).toInt().coerceIn(1, 32),
+                    tailWidth = v(PropId.PARTICLE_TAIL_WIDTH, 100f).coerceIn(0f, 500f) / 100f,
+                    tailTaper = v(PropId.PARTICLE_TAIL_TAPER).coerceIn(0f, 100f) / 100f,
+                    tailOpacity = v(PropId.PARTICLE_TAIL_OPACITY, 100f).coerceIn(0f, 100f) / 100f,
+                    offX = v(PropId.PARTICLE_POS_X), offY = v(PropId.PARTICLE_POS_Y), offZ = v(PropId.PARTICLE_POS_Z),
+                    sizeX = v(PropId.PARTICLE_EMITTER_SIZE_X), sizeY = v(PropId.PARTICLE_EMITTER_SIZE_Y), sizeZ = v(PropId.PARTICLE_EMITTER_SIZE_Z),
+                    emitter = if (emitterStatic) staticEmitter!! else childSpaceWorld4(layer, t, byId)
+                )
+            }
+            fun stepAt(t: Float): StepParams = table[(floor(t / STEP).toInt() - jFirst).coerceIn(0, table.size - 1)]
+            val stationary = settings.emitterMotion == "Stationary"
+            val follow = settings.emitterMotion == "Follow Layer"
+            val fixedEmitter = if (stationary) childSpaceWorld4(layer, layer.start, byId) else null
+            val nowEmitter = table.last().emitter
+
+            // --- spawn + simulate ---
+            val particles = ArrayList<Particle>()
+            var jStep = jNow
+            val tailOn = settings.tailEnabled
+            while (jStep >= jFirst && particles.size < maxParticles) {
+                val sp = table[jStep - jFirst]
+                val j = jStep
+                jStep--
+                if (sp.t < startT - STEP || sp.t > endT) continue
+                val expected = sp.rate * STEP
+                val n = floor(expected + hash(seed, j, 77)).toInt()
+                for (m in 0 until n) {
+                    if (particles.size >= maxParticles) break
+                    val id = j * 64 + m
+                    val r0 = hash(seed, id, 0); val r1 = hash(seed, id, 1); val r2 = hash(seed, id, 2)
+                    val r3 = hash(seed, id, 3); val r4 = hash(seed, id, 4); val r5 = hash(seed, id, 5)
+                    val tb = sp.t + r5 * STEP
+                    if (tb < startT || tb > time) continue
+                    val age = time - tb
+                    val life = (sp.life * (1f + (r0 * 2f - 1f) * sp.lifeRandom)).coerceIn(0.03f, MAX_LIFE)
+                    if (age > life) continue
+
+                    val particle = Particle(sp, id)
+                    particle.r0 = r0; particle.r1 = r1; particle.r2 = r2; particle.r3 = r3; particle.r4 = r4
+                    particle.life = life; particle.age = age; particle.progress = (age / life).coerceIn(0f, 1f)
+
+                    // birth transform: fixed (stationary), current (follow) or at the birth time (trail)
+                    val birthEmitter = fixedEmitter ?: if (follow) nowEmitter else sp.emitter
+                    val local = FloatArray(3)
+                    if (settings.sphereEmitter) {
+                        val rad = cbrt(r2.toDouble()).toFloat()
+                        val cy = r0 * 2f - 1f
+                        val ring = sqrt((1f - cy * cy).coerceAtLeast(0f))
+                        val ang = r1 * 2f * PI.toFloat()
+                        local[0] = cos(ang) * ring * rad * sp.sizeX * 0.5f
+                        local[1] = cy * rad * sp.sizeY * 0.5f
+                        local[2] = sin(ang) * ring * rad * sp.sizeZ * 0.5f
+                    } else {
+                        local[0] = (r2 - 0.5f) * sp.sizeX
+                        local[1] = (r3 - 0.5f) * sp.sizeY
+                        local[2] = (r4 - 0.5f) * sp.sizeZ
+                    }
+                    local[0] += sp.offX; local[1] += sp.offY; local[2] += sp.offZ
+                    val dirLocal = axisDirection(sp.tilt, sp.spin, sp.spread, r1, r3)
+                    val speed = sp.velocity * (1f + (r2 * 2f - 1f) * sp.velocityRandom)
+
+                    // Follow Layer simulates in emitter space; everything else directly in world space.
+                    var px: Float; var py: Float; var pz: Float
+                    var vx: Float; var vy: Float; var vz: Float
+                    if (follow) {
+                        px = local[0]; py = local[1]; pz = local[2]
+                        vx = dirLocal[0] * speed; vy = dirLocal[1] * speed; vz = dirLocal[2] * speed
+                    } else {
+                        val w = transformPoint4(birthEmitter, local[0], local[1], local[2])
+                        px = w[0]; py = w[1]; pz = w[2]
+                        val d = worldDir(birthEmitter, dirLocal)
+                        vx = d[0] * speed; vy = d[1] * speed; vz = d[2] * speed
+                        if (settings.velocityFromMotion && !stationary) {
+                            val prev = table[max(0, (j - jFirst) - 1)].emitter
+                            vx += (sp.emitter[3] - prev[3]) / STEP
+                            vy += (sp.emitter[7] - prev[7]) / STEP
+                            vz += (sp.emitter[11] - prev[11]) / STEP
+                        }
+                    }
+
+                    if (tailOn) {
+                        val cap = (age / STEP).toInt() + 3
+                        particle.histAge = FloatArray(cap); particle.histPos = FloatArray(cap * 3)
+                        particle.histAge!![0] = 0f
+                        particle.histPos!![0] = px; particle.histPos!![1] = py; particle.histPos!![2] = pz
+                        particle.histCount = 1
+                    }
+
+                    // integrate on the global step grid so keyed physics is honoured
+                    var t = tb
+                    while (t < time - 1e-5f) {
+                        val gridEnd = (floor(t / STEP + 1e-4f) + 1f) * STEP
+                        val tn = min(gridEnd, time)
+                        val dt = tn - t
+                        if (dt <= 1e-6f) { t = tn; continue }
+                        val ph = stepAt(t)
+                        vy += ph.gravity * dt
+                        vx += ph.windX * dt; vy += ph.windY * dt; vz += ph.windZ * dt
+                        if (ph.drag > 0f) {
+                            val damp = exp((-ph.drag * dt).toDouble()).toFloat()
+                            vx *= damp; vy *= damp; vz *= damp
+                        }
+                        px += vx * dt; py += vy * dt; pz += vz * dt
+                        t = tn
+                        val hist = particle.histPos
+                        if (hist != null && particle.histCount < particle.histAge!!.size) {
+                            val h = particle.histCount++
+                            particle.histAge!![h] = t - tb
+                            hist[h * 3] = px; hist[h * 3 + 1] = py; hist[h * 3 + 2] = pz
+                        }
+                    }
+                    particle.vx = vx; particle.vy = vy; particle.vz = vz
+                    // turbulence: smooth 3D wobble that grows in over the first moments of life
+                    if (sp.turbulence != 0f) {
+                        val w = sp.turbulenceSpeed * 2f * PI.toFloat() * 0.5f
+                        val amp = sp.turbulence * min(1f, age * 2f)
+                        px += amp * (sin(age * w + r1 * 6.2832f) + 0.5f * sin(age * w * 2.3f + r2 * 6.2832f)) * 0.66f
+                        py += amp * (sin(age * w * 1.3f + r3 * 6.2832f) + 0.5f * sin(age * w * 1.9f + r4 * 6.2832f)) * 0.66f
+                        pz += amp * (sin(age * w * 0.9f + r0 * 6.2832f) + 0.5f * sin(age * w * 2.7f + r1 * 6.2832f)) * 0.66f
+                    }
+                    if (follow) {
+                        val w = transformPoint4(nowEmitter, px, py, pz)
+                        px = w[0]; py = w[1]; pz = w[2]
+                        val hist = particle.histPos
+                        if (hist != null) for (h in 0 until particle.histCount) {
+                            val hw = transformPoint4(nowEmitter, hist[h * 3], hist[h * 3 + 1], hist[h * 3 + 2])
+                            hist[h * 3] = hw[0]; hist[h * 3 + 1] = hw[1]; hist[h * 3 + 2] = hw[2]
+                        }
+                    }
+                    particle.x = px; particle.y = py; particle.z = pz
+                    particles += particle
+                }
+            }
+
+            return Sim(particles, table.last(), nowEmitter)
         }
-        fun stepAt(t: Float): StepParams = table[(floor(t / STEP).toInt() - jFirst).coerceIn(0, table.size - 1)]
-        val stationary = settings.emitterMotion == "Stationary"
-        val follow = settings.emitterMotion == "Follow Layer"
-        val fixedEmitter = if (stationary) childSpaceWorld4(layer, layer.start, byId) else null
-        val nowEmitter = table.last().emitter
 
-        // --- spawn + simulate ---
-        val particles = ArrayList<Particle>()
-        var jStep = jNow
-        val tailOn = settings.tailEnabled
-        while (jStep >= jFirst && particles.size < maxParticles) {
-            val sp = table[jStep - jFirst]
-            val j = jStep
-            jStep--
-            if (sp.t < startT - STEP || sp.t > endT) continue
-            val expected = sp.rate * STEP
-            val n = floor(expected + hash(seed, j, 77)).toInt()
-            for (m in 0 until n) {
-                if (particles.size >= maxParticles) break
-                val id = j * 64 + m
-                val r0 = hash(seed, id, 0); val r1 = hash(seed, id, 1); val r2 = hash(seed, id, 2)
-                val r3 = hash(seed, id, 3); val r4 = hash(seed, id, 4); val r5 = hash(seed, id, 5)
-                val tb = sp.t + r5 * STEP
-                if (tb < startT || tb > time) continue
-                val age = time - tb
-                val life = (sp.life * (1f + (r0 * 2f - 1f) * sp.lifeRandom)).coerceIn(0.03f, MAX_LIFE)
-                if (age > life) continue
-
-                val particle = Particle(sp, id)
-                particle.r0 = r0; particle.r1 = r1; particle.r2 = r2; particle.r3 = r3; particle.r4 = r4
-                particle.life = life; particle.age = age; particle.progress = (age / life).coerceIn(0f, 1f)
-
-                // birth transform: fixed (stationary), current (follow) or at the birth time (trail)
-                val birthEmitter = fixedEmitter ?: if (follow) nowEmitter else sp.emitter
-                val local = FloatArray(3)
-                if (settings.sphereEmitter) {
-                    val rad = cbrt(r2.toDouble()).toFloat()
-                    val cy = r0 * 2f - 1f
-                    val ring = sqrt((1f - cy * cy).coerceAtLeast(0f))
-                    val ang = r1 * 2f * PI.toFloat()
-                    local[0] = cos(ang) * ring * rad * sp.sizeX * 0.5f
-                    local[1] = cy * rad * sp.sizeY * 0.5f
-                    local[2] = sin(ang) * ring * rad * sp.sizeZ * 0.5f
-                } else {
-                    local[0] = (r2 - 0.5f) * sp.sizeX
-                    local[1] = (r3 - 0.5f) * sp.sizeY
-                    local[2] = (r4 - 0.5f) * sp.sizeZ
-                }
-                local[0] += sp.offX; local[1] += sp.offY; local[2] += sp.offZ
-                val dirLocal = axisDirection(sp.tilt, sp.spin, sp.spread, r1, r3)
-                val speed = sp.velocity * (1f + (r2 * 2f - 1f) * sp.velocityRandom)
-
-                // Follow Layer simulates in emitter space; everything else directly in world space.
-                var px: Float; var py: Float; var pz: Float
-                var vx: Float; var vy: Float; var vz: Float
-                if (follow) {
-                    px = local[0]; py = local[1]; pz = local[2]
-                    vx = dirLocal[0] * speed; vy = dirLocal[1] * speed; vz = dirLocal[2] * speed
-                } else {
-                    val w = transformPoint4(birthEmitter, local[0], local[1], local[2])
-                    px = w[0]; py = w[1]; pz = w[2]
-                    val d = worldDir(birthEmitter, dirLocal)
-                    vx = d[0] * speed; vy = d[1] * speed; vz = d[2] * speed
-                    if (settings.velocityFromMotion && !stationary) {
-                        val prev = table[max(0, (j - jFirst) - 1)].emitter
-                        vx += (sp.emitter[3] - prev[3]) / STEP
-                        vy += (sp.emitter[7] - prev[7]) / STEP
-                        vz += (sp.emitter[11] - prev[11]) / STEP
-                    }
-                }
-
-                if (tailOn) {
-                    val cap = (age / STEP).toInt() + 3
-                    particle.histAge = FloatArray(cap); particle.histPos = FloatArray(cap * 3)
-                    particle.histAge!![0] = 0f
-                    particle.histPos!![0] = px; particle.histPos!![1] = py; particle.histPos!![2] = pz
-                    particle.histCount = 1
-                }
-
-                // integrate on the global step grid so keyed physics is honoured
-                var t = tb
-                while (t < time - 1e-5f) {
-                    val gridEnd = (floor(t / STEP + 1e-4f) + 1f) * STEP
-                    val tn = min(gridEnd, time)
-                    val dt = tn - t
-                    if (dt <= 1e-6f) { t = tn; continue }
-                    val ph = stepAt(t)
-                    vy += ph.gravity * dt
-                    vx += ph.windX * dt; vy += ph.windY * dt; vz += ph.windZ * dt
-                    if (ph.drag > 0f) {
-                        val damp = exp((-ph.drag * dt).toDouble()).toFloat()
-                        vx *= damp; vy *= damp; vz *= damp
-                    }
-                    px += vx * dt; py += vy * dt; pz += vz * dt
-                    t = tn
-                    val hist = particle.histPos
-                    if (hist != null && particle.histCount < particle.histAge!!.size) {
-                        val h = particle.histCount++
-                        particle.histAge!![h] = t - tb
-                        hist[h * 3] = px; hist[h * 3 + 1] = py; hist[h * 3 + 2] = pz
-                    }
-                }
-                particle.vx = vx; particle.vy = vy; particle.vz = vz
-                // turbulence: smooth 3D wobble that grows in over the first moments of life
-                if (sp.turbulence != 0f) {
-                    val w = sp.turbulenceSpeed * 2f * PI.toFloat() * 0.5f
-                    val amp = sp.turbulence * min(1f, age * 2f)
-                    px += amp * (sin(age * w + r1 * 6.2832f) + 0.5f * sin(age * w * 2.3f + r2 * 6.2832f)) * 0.66f
-                    py += amp * (sin(age * w * 1.3f + r3 * 6.2832f) + 0.5f * sin(age * w * 1.9f + r4 * 6.2832f)) * 0.66f
-                    pz += amp * (sin(age * w * 0.9f + r0 * 6.2832f) + 0.5f * sin(age * w * 2.7f + r1 * 6.2832f)) * 0.66f
-                }
-                if (follow) {
-                    val w = transformPoint4(nowEmitter, px, py, pz)
-                    px = w[0]; py = w[1]; pz = w[2]
-                    val hist = particle.histPos
-                    if (hist != null) for (h in 0 until particle.histCount) {
-                        val hw = transformPoint4(nowEmitter, hist[h * 3], hist[h * 3 + 1], hist[h * 3 + 2])
-                        hist[h * 3] = hw[0]; hist[h * 3 + 1] = hw[1]; hist[h * 3 + 2] = hw[2]
-                    }
-                }
-                particle.x = px; particle.y = py; particle.z = pz
-                particles += particle
+        // The simulation depends on the layer, its parent chain and the time, but NOT on the camera.
+        // Cache it, so moving/animating the camera (or a null it hangs from) only re-projects.
+        var simKey = layer.hashCode().toLong() * 31L + time.toBits() + maxParticles
+        run {
+            var c: Layer? = layer.parentId?.let { byId[it] }
+            var g = 0
+            while (c != null && g++ < 16) {
+                simKey = simKey * 31L + c.props.hashCode() + (c.parentId?.hashCode() ?: 0) + c.width.toBits() + c.height.toBits()
+                c = c.parentId?.let { byId[it] }
             }
         }
+        val sim: Sim = synchronized(simCache) {
+            simCache[layer.id]?.takeIf { it.first == simKey }?.second
+        } ?: (simulate() ?: return).also { fresh ->
+            synchronized(simCache) {
+                if (simCache.size > 8) simCache.clear()
+                simCache[layer.id] = simKey to fresh
+            }
+        }
+        val particles = ArrayList(sim.particles)
+        val nowEmitter = sim.nowEmitter
+        val tailOn = settings.tailEnabled
         if (particles.isEmpty() && !settings.showLayer) return
 
         // --- projection through the scene camera ---
         val projector = SceneProjector(byId, time)
         val out = FloatArray(4)
         val out2 = FloatArray(4)
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG or Paint.DITHER_FLAG)
         paint.xfermode = if (settings.additive) addMode else null
         val spriteLayer = settings.spriteLayerId?.let { byId[it] }
             ?.takeIf { it.type == LayerType.TEXT || it.type == LayerType.SHAPE }
@@ -415,22 +464,19 @@ internal object ParticleRenderer {
                 if (settings.orientToMotion) motionAngle + 90f else 0f
             val stretch = 1f + (sp.stretch / 100f) * (motionLen / max(diameter, 1f)).coerceAtMost(6f) * 0.25f
 
-            // tail: re-projected history so it bends correctly under any camera
+            // tail: re-projected history so it bends correctly under any camera. Drawn as ONE tapered
+            // ribbon with a colour gradient (no overlapping round caps, so no "beads" along the streak).
             val hist = p.histPos
             if (tailOn && hist != null && sp.tailLength > 0f && sp.tailOpacity > 0f && p.histCount > 1) {
-                paint.style = Paint.Style.STROKE
-                paint.strokeCap = Paint.Cap.ROUND
-                paint.colorFilter = null
-                paint.shader = null
-                paint.color = color
                 val segs = sp.tailSegments
-                var prevX = sx; var prevY = sy
-                var ok = true
-                for (s in 1..segs) {
-                    val f = s.toFloat() / segs
+                val n = segs + 1
+                val xs = FloatArray(n); val ys = FloatArray(n); val ws = FloatArray(n)
+                xs[0] = sx; ys[0] = sy; ws[0] = diameter * sp.tailWidth * 0.5f
+                var used = 1
+                val ages = p.histAge!!
+                for (s2 in 1..segs) {
+                    val f = s2.toFloat() / segs
                     val a = (p.age - sp.tailLength * f).coerceAtLeast(0f)
-                    // interpolate history at age a
-                    val ages = p.histAge!!
                     var i = 0
                     while (i < p.histCount - 1 && ages[i + 1] < a) i++
                     val i2 = min(i + 1, p.histCount - 1)
@@ -439,15 +485,44 @@ internal object ParticleRenderer {
                     val hx = hist[i * 3] + (hist[i2 * 3] - hist[i * 3]) * u
                     val hy = hist[i * 3 + 1] + (hist[i2 * 3 + 1] - hist[i * 3 + 1]) * u
                     val hz = hist[i * 3 + 2] + (hist[i2 * 3 + 2] - hist[i * 3 + 2]) * u
-                    if (!projector.project(hx, hy, hz, out2)) { ok = false; break }
-                    val taper = (1f - sp.tailTaper * f).coerceAtLeast(0.05f)
-                    paint.strokeWidth = (diameter * sp.tailWidth * taper * (out2[2] / k).coerceIn(0.2f, 3f) * 0.5f).coerceAtLeast(0.5f)
-                    paint.alpha = (alpha * sp.tailOpacity * (1f - f * 0.6f)).toInt().coerceIn(0, 255)
-                    canvas.drawLine(prevX, prevY, out2[0], out2[1], paint)
-                    prevX = out2[0]; prevY = out2[1]
+                    if (!projector.project(hx, hy, hz, out2)) break
+                    xs[s2] = out2[0]; ys[s2] = out2[1]
+                    ws[s2] = diameter * sp.tailWidth * 0.5f * (out2[2] / k).coerceIn(0.2f, 3f) * (1f - sp.tailTaper * f).coerceAtLeast(0f)
+                    used = s2 + 1
                 }
-                if (!ok) { /* partially behind the camera: keep what was drawn */ }
-                paint.style = Paint.Style.FILL
+                val dxT = xs[used - 1] - sx; val dyT = ys[used - 1] - sy
+                if (used > 1 && dxT * dxT + dyT * dyT > 0.5f) {
+                    path.reset()
+                    // left edge forward, right edge back
+                    for (i in 0 until used) {
+                        val pi = max(0, i - 1); val ni = min(used - 1, i + 1)
+                        var tx = xs[ni] - xs[pi]; var ty = ys[ni] - ys[pi]
+                        val tl = sqrt(tx * tx + ty * ty).coerceAtLeast(1e-4f)
+                        tx /= tl; ty /= tl
+                        val ox = -ty * ws[i]; val oy = tx * ws[i]
+                        if (i == 0) path.moveTo(xs[i] + ox, ys[i] + oy) else path.lineTo(xs[i] + ox, ys[i] + oy)
+                    }
+                    for (i in used - 1 downTo 0) {
+                        val pi = max(0, i - 1); val ni = min(used - 1, i + 1)
+                        var tx = xs[ni] - xs[pi]; var ty = ys[ni] - ys[pi]
+                        val tl = sqrt(tx * tx + ty * ty).coerceAtLeast(1e-4f)
+                        tx /= tl; ty /= tl
+                        path.lineTo(xs[i] + ty * ws[i], ys[i] - tx * ws[i])
+                    }
+                    path.close()
+                    val headA = (alpha * sp.tailOpacity).toInt().coerceIn(0, 255)
+                    val rgb = color and 0x00FFFFFF
+                    paint.style = Paint.Style.FILL
+                    paint.colorFilter = null
+                    paint.alpha = 255
+                    paint.shader = android.graphics.LinearGradient(
+                        sx, sy, xs[used - 1], ys[used - 1],
+                        intArrayOf((headA shl 24) or rgb, ((headA * 0.45f).toInt() shl 24) or rgb, rgb),
+                        floatArrayOf(0f, 0.45f, 1f), Shader.TileMode.CLAMP
+                    )
+                    canvas.drawPath(path, paint)
+                    paint.shader = null
+                }
             }
 
             paint.style = Paint.Style.FILL
@@ -538,7 +613,7 @@ internal object ParticleRenderer {
 
         // emitter guide ("Show Layer"): the emitter volume, projected like everything else
         if (settings.showLayer) {
-            val sp = table.last()
+            val sp = sim.last
             val e = nowEmitter
             paint.xfermode = null
             paint.colorFilter = null
