@@ -104,6 +104,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
 fun EditorScreen(editor: EditorState, onExit: () -> Unit, onOpenSettings: () -> Unit) {
+    FrameCacheHost(editor)
     val ctx = LocalContext.current
     val density = LocalDensity.current.density
     val scope = rememberCoroutineScope()

@@ -666,7 +666,16 @@ private fun GpuCompositionPreviewCanvas(
 
     val renderLayers = ArrayList<GpuLayer>()
     val activeTextTextureIds = HashSet<String>()
-    for (layer in editor.previewLayers.asReversed()) {
+    // Frame cache: when this exact frame was already rendered (and nothing it shows has changed since), play
+    // the stored picture instead of re-decoding, re-effecting and re-compositing every layer again.
+    val cachedFrame = if (editor.timelinePath.isEmpty()) editor.frameCache.lookup((editor.time * editor.fps).toInt()) else null
+    if (cachedFrame != null) {
+        renderLayers += GpuLayer(
+            "__frame-cache", cachedFrame, Matrix(), com.kinetic.app.model.COMP_W, com.kinetic.app.model.COMP_H,
+            1f, false, false, "Normal", false, emptyList()
+        )
+    }
+    for (layer in (if (cachedFrame != null) emptyList<com.kinetic.app.model.Layer>() else editor.previewLayers).asReversed()) {
         if (!layer.visible || !layer.activeAt(editor.time) || layer.type == LayerType.AUDIO ||
             layer.type == LayerType.NULL || layer.type == LayerType.CAMERA || layer.type == LayerType.ADJUSTMENT) continue
         if (layer.type == LayerType.VIDEO && layer.id in textureVideoIds) {

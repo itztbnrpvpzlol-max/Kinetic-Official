@@ -363,6 +363,13 @@ private fun Ruler(editor: EditorState, pps: Float, contentW: Dp, leadingPad: Dp)
                 drawPath(head, KColors.Accent)
             }
         }
+        // Cached frames (valid in the RAM frame cache) show as a green bar along the top of the ruler.
+        val cacheFps = editor.fps.coerceAtLeast(1)
+        editor.frameCache.ranges.forEach { r ->
+            val x1 = originX + r.first / cacheFps.toFloat() * pps * dens
+            val x2 = originX + (r.last + 1) / cacheFps.toFloat() * pps * dens
+            if (x2 >= 0f && x1 <= size.width) drawRect(Color(0xFF2BD68A), Offset(x1, 0f), Size((x2 - x1).coerceAtLeast(1f), 3.dp.toPx()))
+        }
         for (s in 0..secs) {
             val x = originX + s * pps * dens
             if (pps >= 80f) {

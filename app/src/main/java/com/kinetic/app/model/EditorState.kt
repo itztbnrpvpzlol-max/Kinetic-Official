@@ -18,6 +18,8 @@ private data class TimelineFrame(val precompId: String, val parentLayers: List<L
 
 /** One open composition. A new instance is always empty. */
 class EditorState(val settings: AppSettings, val projectId: String = UUID.randomUUID().toString(), var projectName: String = "Untitled") {
+    /** RAM frame cache for the preview (frames are rendered in the background and replayed instead of re-composited). */
+    val frameCache = PreviewFrameCache()
     var compSettings by mutableStateOf(settings.lastComp)
         private set
     var resolution by mutableIntStateOf(1)
