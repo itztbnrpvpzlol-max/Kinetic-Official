@@ -548,6 +548,47 @@ private fun GpuCompositionPreviewCanvas(
                     effectMargins.remove(layer.id)
                     continue
                 }
+                if (layer.type == LayerType.PARTICULAR) {
+                    // Particles are re-simulated every frame; rasterize and apply the effect stack in one
+                    // step so glow & co. always belong to exactly the particles they were computed from.
+                    val stack = EffectStackRunner.pictureEffects(layer.effectStack).take(12)
+                    if (stack.isEmpty()) {
+                        val old = effectedFrames.remove(layer.id)
+                        if (old != null && !old.isRecycled) old.recycle()
+                        effectFrameKeys.remove(layer.id)
+                        effectMargins.remove(layer.id)
+                        continue
+                    }
+                    val sceneLayers = editor.previewLayers
+                    val bucket = (now * compositionFps).toInt()
+                    var pKey = layer.particles.hashCode().toLong()
+                    pKey = pKey * 31L + layer.props.filterKeys { it.isParticleProp }.hashCode()
+                    pKey = pKey * 31L + sceneLayers.hashCode()
+                    pKey = pKey * 31L + stack.hashCode() + bucket
+                    if (effectFrameKeys[layer.id] == pKey) continue
+                    val byLayerId = sceneLayers.associateBy { it.id }
+                    val edge = if (MediaWorkers.isConstrainedDevice) 320 else 768
+                    val pixels = if (MediaWorkers.isConstrainedDevice) 1_500_000 else 4_000_000
+                    val result = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                        val raster = LayerRaster.render(layer, now, edge, byId = byLayerId) ?: return@withContext null
+                        try {
+                            EffectStackRunner.processBitmapGrown(
+                                raster, stack, now, now - layer.start, compositionFps.toFloat(),
+                                layer.width, layer.height, pixels
+                            ) ?: EffectStackRunner.Effected(raster.copy(android.graphics.Bitmap.Config.ARGB_8888, false), 0f, 0f, 0f, 0f)
+                        } finally {
+                            raster.recycle()
+                        }
+                    }
+                    if (result != null && (latestTimelineTime.value * compositionFps).toInt() == bucket) {
+                        val previous = effectedFrames.put(layer.id, result.bitmap)
+                        if (previous != null && previous !== result.bitmap && !previous.isRecycled) previous.recycle()
+                        if (result.grown) effectMargins[layer.id] = floatArrayOf(result.left, result.top, result.right, result.bottom)
+                        else effectMargins.remove(layer.id)
+                        effectFrameKeys[layer.id] = pKey
+                    } else if (result != null && !result.bitmap.isRecycled) result.bitmap.recycle()
+                    continue
+                }
                 // Clips and images use their decoded frame; text and shapes their raster.
                 val source = frames[layer.id]
                     ?: textTextures[layer.id]?.second?.takeIf { !it.isRecycled && (layer.type == LayerType.TEXT || layer.type == LayerType.SHAPE || layer.type == LayerType.PARTICULAR) }
@@ -628,17 +669,22 @@ private fun GpuCompositionPreviewCanvas(
         val bitmap = when (layer.type) {
             LayerType.IMAGE, LayerType.VIDEO -> sourceBitmap
             LayerType.PARTICULAR -> {
-                activeTextTextureIds.add(layer.id)
-                val signature = layer.particles.hashCode() * 31 +
-                    layer.props.filterKeys { it.isParticleProp }.hashCode() * 17 +
-                    byId.hashCode() * 13 + (editor.time * editor.fps).toInt()
-                val cached = textTextures[layer.id]
-                if (cached == null || cached.first != signature || cached.second.isRecycled) {
-                    val edge = if (MediaWorkers.isConstrainedDevice) 320 else 768
-                    val generated = LayerRaster.render(layer, editor.time, edge, byId = byId)
-                    if (generated != null) textTextures[layer.id] = signature to generated
-                    generated
-                } else cached.second
+                val hasEffects = EffectStackRunner.pictureEffects(layer.effectStack).isNotEmpty()
+                val readyEffected = if (hasEffects) effectedFrames[layer.id]?.takeIf { !it.isRecycled } else null
+                if (readyEffected != null) readyEffected
+                else {
+                    activeTextTextureIds.add(layer.id)
+                    val signature = layer.particles.hashCode() * 31 +
+                        layer.props.filterKeys { it.isParticleProp }.hashCode() * 17 +
+                        editor.previewLayers.hashCode() * 13 + (editor.time * editor.fps).toInt()
+                    val cached = textTextures[layer.id]
+                    if (cached == null || cached.first != signature || cached.second.isRecycled) {
+                        val edge = if (MediaWorkers.isConstrainedDevice) 320 else 768
+                        val generated = LayerRaster.render(layer, editor.time, edge, byId = byId)
+                        if (generated != null) textTextures[layer.id] = signature to generated
+                        generated
+                    } else cached.second
+                }
             }
             LayerType.TEXT, LayerType.SHAPE -> {
                 activeTextTextureIds.add(layer.id)
@@ -701,7 +747,7 @@ private fun GpuCompositionPreviewCanvas(
         } ?: continue
         val opacity = (layer.p(PropId.OPACITY).valueAt(editor.time) / 100f).coerceIn(0f, 1f)
         val effected = if (layer.type == LayerType.TEXT || layer.type == LayerType.SHAPE || layer.type == LayerType.PARTICULAR)
-            effectedFrames[layer.id]?.takeIf { !it.isRecycled } else null
+            effectedFrames[layer.id]?.takeIf { !it.isRecycled && (layer.type != LayerType.PARTICULAR || it === bitmap) } else null
         val drawBitmap = effected ?: bitmap
         // Effects may paint beyond the layer (glow, shadow, tiling): draw the enlarged result,
         // shifted so the original content stays where it was.

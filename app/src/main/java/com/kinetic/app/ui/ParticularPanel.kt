@@ -38,7 +38,7 @@ import com.kinetic.app.model.Layer
 import com.kinetic.app.model.LayerType
 import com.kinetic.app.model.PropId
 
-private val particularPresets = listOf("Rain", "Snow", "Fire", "Sparks", "Fireworks", "Dust", "Bokeh", "Trail", "Comet")
+private val particularPresets = com.kinetic.app.model.ParticlePresets.names
 private val particularPalette = listOf(
     "White" to 0xFFFFFFFF.toInt(),
     "Ice" to 0xFFBDEBFF.toInt(),

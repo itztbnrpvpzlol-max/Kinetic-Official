@@ -528,7 +528,7 @@ data class ParticleSettings(
     val spriteTint: Boolean = true,
     val orientToMotion: Boolean = false,
     val tailEnabled: Boolean = false,
-    val showLayer: Boolean = true,
+    val showLayer: Boolean = false,
     val particleType: String = "Sphere"
 )
 
@@ -915,6 +915,57 @@ fun invert4(m: FloatArray): FloatArray? {
     return FloatArray(16) { a[(it / 4) * 8 + 4 + it % 4].toFloat() }
 }
 
+/**
+ * Perspective projector for world-space points. Uses the active camera (including its whole parent
+ * chain, so a camera parented to a null orbits/moves the view) or After Effects' default camera.
+ */
+class SceneProjector(byId: Map<String, Layer>, t: Float) {
+    private val rt = FloatArray(9)
+    private var cx = COMP_W / 2f
+    private var cy = COMP_H / 2f
+    private var cz = -CAMERA_DEFAULT_ZOOM
+    private var zoom = CAMERA_DEFAULT_ZOOM
+    /** World-space camera right/up/forward axes, for billboarding. */
+    val right = floatArrayOf(1f, 0f, 0f)
+    val up = floatArrayOf(0f, 1f, 0f)
+    val forward = floatArrayOf(0f, 0f, 1f)
+    val eye: FloatArray get() = floatArrayOf(cx, cy, cz)
+
+    init {
+        rt[0] = 1f; rt[4] = 1f; rt[8] = 1f
+        val cam = activeCamera(byId, t)
+        if (cam != null) {
+            val w = layerWorld4(cam, t, byId)
+            fun len(a: Float, b: Float, c: Float) = Math.sqrt((a * a + b * b + c * c).toDouble()).toFloat().coerceAtLeast(1e-6f)
+            val l0 = len(w[0], w[4], w[8]); val l1 = len(w[1], w[5], w[9]); val l2 = len(w[2], w[6], w[10])
+            right[0] = w[0] / l0; right[1] = w[4] / l0; right[2] = w[8] / l0
+            up[0] = w[1] / l1; up[1] = w[5] / l1; up[2] = w[9] / l1
+            forward[0] = w[2] / l2; forward[1] = w[6] / l2; forward[2] = w[10] / l2
+            cx = w[3]; cy = w[7]; cz = w[11]
+            zoom = cam.p(PropId.CAM_ZOOM).valueAt(t).coerceAtLeast(1f)
+        }
+        // rows of R^T are the camera axes
+        rt[0] = right[0]; rt[1] = right[1]; rt[2] = right[2]
+        rt[3] = up[0]; rt[4] = up[1]; rt[5] = up[2]
+        rt[6] = forward[0]; rt[7] = forward[1]; rt[8] = forward[2]
+    }
+
+    /** Fills [out] with screen x, screen y and the perspective scale (px per world px). False if behind the camera. */
+    fun project(x: Float, y: Float, z: Float, out: FloatArray): Boolean {
+        val dx = x - cx; val dy = y - cy; val dz = z - cz
+        val vx = rt[0] * dx + rt[1] * dy + rt[2] * dz
+        val vy = rt[3] * dx + rt[4] * dy + rt[5] * dz
+        val vz = rt[6] * dx + rt[7] * dy + rt[8] * dz
+        if (!vz.isFinite() || vz <= 1f) return false
+        val k = zoom / vz
+        out[0] = vx * k + COMP_W / 2f
+        out[1] = vy * k + COMP_H / 2f
+        out[2] = k
+        out[3] = vz
+        return true
+    }
+}
+
 data class ProjectedLayerPoint(val x: Float, val y: Float, val sizeScale: Float)
 
 /** Project an individual 3D particle through the active camera into composition coordinates. */
@@ -987,6 +1038,9 @@ fun layerMatrixInto(
     scratch: MutableMap<Int, Matrix>,
     depth: Int = 0
 ) {
+    // Particle layers draw directly in composition space: every particle is projected through the
+    // camera individually, so the layer itself is never warped as a flat plane.
+    if (layer.type == LayerType.PARTICULAR) { out.reset(); return }
     if (layer.is3D && layer.type != LayerType.CAMERA) {
         val cam = activeCamera(byId, t)
         if (cam != null) { cameraLayerMatrix(layer, cam, t, byId, depth, out); return }
@@ -1025,6 +1079,7 @@ fun layerMatrixInto(
 /** Layer-space -> composition-space matrix at time t, including the parent chain. */
 fun layerMatrix(layer: Layer, t: Float, byId: Map<String, Layer>, depth: Int = 0): Matrix {
     val m = Matrix()
+    if (layer.type == LayerType.PARTICULAR) return m
     if (layer.is3D && layer.type != LayerType.CAMERA) {
         val cam = activeCamera(byId, t)
         if (cam != null) { cameraLayerMatrix(layer, cam, t, byId, depth, m); return m }
