@@ -47,7 +47,7 @@ internal object ParticleRenderer {
     private const val MAX_LIFE = 15f
 
     /** Everything that can be keyed, sampled once per simulation step. */
-    private class StepParams(
+    private data class StepParams(
         val t: Float,
         val rate: Float, val life: Float, val lifeRandom: Float,
         val velocity: Float, val velocityRandom: Float,
@@ -80,6 +80,26 @@ internal object ParticleRenderer {
 
     private class Sim(val particles: List<Particle>, val last: StepParams, val nowEmitter: FloatArray)
     private val simCache = HashMap<String, Pair<Long, Sim>>()
+
+    /** Closed-form position/velocity after [t] seconds under constant acceleration (ax, ay, az) and linear drag [k]. */
+    private fun kin(p0: FloatArray, v0: FloatArray, ax: Float, ay: Float, az: Float, k: Float, t: Float, o: FloatArray) {
+        if (k > 1e-4f) {
+            val e = exp((-k * t).toDouble()).toFloat()
+            val fac = (1f - e) / k
+            val ux = ax / k; val uy = ay / k; val uz = az / k
+            o[0] = p0[0] + ux * t + (v0[0] - ux) * fac
+            o[1] = p0[1] + uy * t + (v0[1] - uy) * fac
+            o[2] = p0[2] + uz * t + (v0[2] - uz) * fac
+            o[3] = ux + (v0[0] - ux) * e
+            o[4] = uy + (v0[1] - uy) * e
+            o[5] = uz + (v0[2] - uz) * e
+        } else {
+            o[0] = p0[0] + v0[0] * t + 0.5f * ax * t * t
+            o[1] = p0[1] + v0[1] * t + 0.5f * ay * t * t
+            o[2] = p0[2] + v0[2] * t + 0.5f * az * t * t
+            o[3] = v0[0] + ax * t; o[4] = v0[1] + ay * t; o[5] = v0[2] + az * t
+        }
+    }
 
     private fun hash(seed: Int, a: Int, salt: Int): Float {
         var v = seed xor (a * 0x45d9f3b) xor (salt * 0x27d4eb2d)
@@ -204,10 +224,9 @@ internal object ParticleRenderer {
             val staticEmitter = if (emitterStatic) childSpaceWorld4(layer, time, byId) else null
             val count = jNow - jFirst + 1
             val table = ArrayList<StepParams>(count)
-            for (j in jFirst..jNow) {
-                val t = j * STEP
+            fun makeParams(t: Float): StepParams {
                 fun v(id: PropId, fb: Float = 0f) = value(id, fb, t)
-                table += StepParams(
+                return StepParams(
                     t = t,
                     rate = v(PropId.PARTICLE_RATE, 60f).coerceIn(0f, 20000f),
                     life = v(PropId.PARTICLE_LIFETIME, 2f).coerceAtLeast(0.02f),
@@ -245,6 +264,18 @@ internal object ParticleRenderer {
                     emitter = if (emitterStatic) staticEmitter!! else childSpaceWorld4(layer, t, byId)
                 )
             }
+            // Nothing keyed on the particle properties (the usual case): build the parameter set ONCE and share it
+            // across every step instead of sampling ~60 properties for each of hundreds of steps per frame.
+            val paramsStatic = layer.props.none { (id, pr) -> id.isParticleProp && (pr.keys.size > 1 || pr.expression != null) }
+            val base = if (paramsStatic) makeParams(time) else null
+            for (j in jFirst..jNow) {
+                val t = j * STEP
+                table += when {
+                    base == null -> makeParams(t)
+                    emitterStatic -> base
+                    else -> base.copy(emitter = childSpaceWorld4(layer, t, byId))
+                }
+            }
             fun stepAt(t: Float): StepParams = table[(floor(t / STEP).toInt() - jFirst).coerceIn(0, table.size - 1)]
             val stationary = settings.emitterMotion == "Stationary"
             val follow = settings.emitterMotion == "Follow Layer"
@@ -259,7 +290,8 @@ internal object ParticleRenderer {
                 val sp = table[jStep - jFirst]
                 val j = jStep
                 jStep--
-                if (sp.t < startT - STEP || sp.t > endT) continue
+                val stepT = j * STEP
+                if (stepT < startT - STEP || stepT > endT) continue
                 val expected = sp.rate * STEP
                 val n = floor(expected + hash(seed, j, 77)).toInt()
                 for (m in 0 until n) {
@@ -267,7 +299,7 @@ internal object ParticleRenderer {
                     val id = j * 64 + m
                     val r0 = hash(seed, id, 0); val r1 = hash(seed, id, 1); val r2 = hash(seed, id, 2)
                     val r3 = hash(seed, id, 3); val r4 = hash(seed, id, 4); val r5 = hash(seed, id, 5)
-                    val tb = sp.t + r5 * STEP
+                    val tb = stepT + r5 * STEP
                     if (tb < startT || tb > time) continue
                     val age = time - tb
                     val life = (sp.life * (1f + (r0 * 2f - 1f) * sp.lifeRandom)).coerceIn(0.03f, MAX_LIFE)
@@ -316,35 +348,55 @@ internal object ParticleRenderer {
                         }
                     }
 
-                    if (tailOn) {
-                        val cap = (age / STEP).toInt() + 3
-                        particle.histAge = FloatArray(cap); particle.histPos = FloatArray(cap * 3)
-                        particle.histAge!![0] = 0f
-                        particle.histPos!![0] = px; particle.histPos!![1] = py; particle.histPos!![2] = pz
-                        particle.histCount = 1
-                    }
-
-                    // integrate on the global step grid so keyed physics is honoured
-                    var t = tb
-                    while (t < time - 1e-5f) {
-                        val gridEnd = (floor(t / STEP + 1e-4f) + 1f) * STEP
-                        val tn = min(gridEnd, time)
-                        val dt = tn - t
-                        if (dt <= 1e-6f) { t = tn; continue }
-                        val ph = stepAt(t)
-                        vy += ph.gravity * dt
-                        vx += ph.windX * dt; vy += ph.windY * dt; vz += ph.windZ * dt
-                        if (ph.drag > 0f) {
-                            val damp = exp((-ph.drag * dt).toDouble()).toFloat()
-                            vx *= damp; vy *= damp; vz *= damp
+                    if (base != null) {
+                        // Nothing keyed: gravity, wind and drag have a closed form, so a particle costs O(1)
+                        // no matter how old it is (instead of one integration step per 1/30 s of its life).
+                        val p0 = floatArrayOf(px, py, pz); val v0 = floatArrayOf(vx, vy, vz)
+                        val o = FloatArray(6)
+                        val ax = base.windX; val ay = base.gravity + base.windY; val az = base.windZ
+                        kin(p0, v0, ax, ay, az, base.drag, age, o)
+                        px = o[0]; py = o[1]; pz = o[2]; vx = o[3]; vy = o[4]; vz = o[5]
+                        if (tailOn && sp.tailLength > 0f) {
+                            val segs = sp.tailSegments
+                            val hAge = FloatArray(segs + 1); val hPos = FloatArray((segs + 1) * 3)
+                            for (i in 0..segs) {
+                                val a2 = (age - sp.tailLength * (segs - i) / segs).coerceAtLeast(0f)
+                                kin(p0, v0, ax, ay, az, base.drag, a2, o)
+                                hAge[i] = a2; hPos[i * 3] = o[0]; hPos[i * 3 + 1] = o[1]; hPos[i * 3 + 2] = o[2]
+                            }
+                            particle.histAge = hAge; particle.histPos = hPos; particle.histCount = segs + 1
                         }
-                        px += vx * dt; py += vy * dt; pz += vz * dt
-                        t = tn
-                        val hist = particle.histPos
-                        if (hist != null && particle.histCount < particle.histAge!!.size) {
-                            val h = particle.histCount++
-                            particle.histAge!![h] = t - tb
-                            hist[h * 3] = px; hist[h * 3 + 1] = py; hist[h * 3 + 2] = pz
+                    } else {
+                        if (tailOn) {
+                            val cap = (age / STEP).toInt() + 3
+                            particle.histAge = FloatArray(cap); particle.histPos = FloatArray(cap * 3)
+                            particle.histAge!![0] = 0f
+                            particle.histPos!![0] = px; particle.histPos!![1] = py; particle.histPos!![2] = pz
+                            particle.histCount = 1
+                        }
+
+                        // integrate on the global step grid so keyed physics is honoured
+                        var t = tb
+                        while (t < time - 1e-5f) {
+                            val gridEnd = (floor(t / STEP + 1e-4f) + 1f) * STEP
+                            val tn = min(gridEnd, time)
+                            val dt = tn - t
+                            if (dt <= 1e-6f) { t = tn; continue }
+                            val ph = stepAt(t)
+                            vy += ph.gravity * dt
+                            vx += ph.windX * dt; vy += ph.windY * dt; vz += ph.windZ * dt
+                            if (ph.drag > 0f) {
+                                val damp = exp((-ph.drag * dt).toDouble()).toFloat()
+                                vx *= damp; vy *= damp; vz *= damp
+                            }
+                            px += vx * dt; py += vy * dt; pz += vz * dt
+                            t = tn
+                            val hist = particle.histPos
+                            if (hist != null && particle.histCount < particle.histAge!!.size) {
+                                val h = particle.histCount++
+                                particle.histAge!![h] = t - tb
+                                hist[h * 3] = px; hist[h * 3 + 1] = py; hist[h * 3 + 2] = pz
+                            }
                         }
                     }
                     particle.vx = vx; particle.vy = vy; particle.vz = vz

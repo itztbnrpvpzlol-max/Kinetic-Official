@@ -169,7 +169,28 @@ internal class ExportFrameRenderer(
         if (fixedRaw != null) release(fixedRaw)
     }
 
+    /** Effected stills that cannot change from frame to frame, kept so they are processed once per export, not once per frame. */
+    private val staticEffected = HashMap<String, Pair<Int, Piece>>()
+
     private fun drawLayer(layer: Layer, time: Float) {
+        if (layer.type == LayerType.IMAGE) {
+            val stack = EffectStackRunner.pictureEffects(layer.effectStack).take(12)
+            if (stack.isNotEmpty() && !EffectStackRunner.isTimeDependent(stack) && !MotionBlur.effectsAnimated(layer)) {
+                val key = stack.hashCode() * 31 + layer.width.toBits() * 7 + layer.height.toBits()
+                var cached = staticEffected[layer.id]?.takeIf { it.first == key && !it.second.bitmap.isRecycled }
+                if (cached == null) {
+                    staticEffected.remove(layer.id)?.second?.let { release(it) }
+                    val raw0 = rasterFor(layer, time) ?: return
+                    val made = applyEffects(layer, raw0, time)
+                    if (made === raw0) { drawPiece(layer, raw0, time, null); return }
+                    cached = key to made
+                    if (staticEffected.size < 6) staticEffected[layer.id] = cached
+                    else { drawPiece(layer, made, time, null); release(made); return }
+                }
+                drawPiece(layer, cached.second, time, null)
+                return
+            }
+        }
         val raw = rasterFor(layer, time) ?: return
         val piece = applyEffects(layer, raw, time)
         drawPiece(layer, piece, time, null)
@@ -313,6 +334,8 @@ internal class ExportFrameRenderer(
         retrievers.values.forEach { runCatching { it.release() } }
         decoders.clear()
         retrievers.clear()
+        staticEffected.values.forEach { release(it.second) }
+        staticEffected.clear()
         images.values.forEach { if (!it.isRecycled) it.recycle() }
         images.clear()
         if (!bitmap.isRecycled) bitmap.recycle()

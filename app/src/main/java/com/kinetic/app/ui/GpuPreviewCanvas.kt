@@ -309,6 +309,8 @@ private fun GpuCompositionPreviewCanvas(
     // CPU effects are prepared off the GL thread. The renderer only uploads ready bitmaps.
     val effectedFrames = remember { mutableStateMapOf<String, Bitmap>() }
     val effectFrameKeys = remember { mutableMapOf<String, Long>() }
+    // Timeline time each effected bitmap was made for, so a stale one is never shown as if it were current.
+    val effectedTimes = remember { mutableMapOf<String, Float>() }
     // Room (layer units: left, top, right, bottom) that a layer's effects painted outside its bounds.
     val effectMargins = remember { mutableMapOf<String, FloatArray>() }
     // Preserve a recent decoded sample across adjacent split segments that share a source URI.
@@ -606,18 +608,29 @@ private fun GpuCompositionPreviewCanvas(
                 var keyValue = System.identityHashCode(source).toLong()
                 keyValue = keyValue * 31L + activeEffects.hashCode().toLong()
                 keyValue = keyValue * 31L + timeBucket.toLong()
-                if (effectFrameKeys[layer.id] == keyValue) continue
+                if (effectFrameKeys[layer.id] == keyValue) { effectedTimes[layer.id] = now; continue }
 
-                val maxPixels = if (MediaWorkers.isConstrainedDevice) 1_500_000 else 4_000_000
+                val maxPixels = if (latestPlaying.value) {
+                    if (MediaWorkers.isConstrainedDevice) 500_000 else 1_200_000
+                } else if (MediaWorkers.isConstrainedDevice) 1_500_000 else 4_000_000
                 val result = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
                     EffectStackRunner.processBitmapGrown(
                         source, activeEffects, now, now - layer.start, compositionFps.toFloat(),
                         layer.width, layer.height, maxPixels
                     )
                 }
-                val stillCurrent = (frames[layer.id] === source || textTextures[layer.id]?.second === source) &&
-                    (!timeDependent || (latestTimelineTime.value * effectSampleFps).toInt() == timeBucket)
+                // While playing, the decoder replaces the source frame faster than the effect finishes, so an
+                // exact "is this still the current frame" test throws EVERY result away and the preview freezes
+                // on an old effected frame. Accept the result instead (it is a few frames old at most, and the
+                // draw step falls back to the raw frame if it ever gets too old).
+                val playingNow = latestPlaying.value
+                val stillCurrent = (frames[layer.id] != null || textTextures[layer.id] != null) &&
+                    (playingNow || (
+                        (frames[layer.id] === source || textTextures[layer.id]?.second === source) &&
+                            (!timeDependent || (latestTimelineTime.value * effectSampleFps).toInt() == timeBucket)
+                        ))
                 if (stillCurrent) {
+                    effectedTimes[layer.id] = now
                     val next = result?.bitmap ?: source
                     val previous = effectedFrames.put(layer.id, next)
                     if (previous != null && previous !== source && previous !== next && !previous.isRecycled) {
@@ -636,6 +649,13 @@ private fun GpuCompositionPreviewCanvas(
     }
 
     val byId = editor.previewLayers.associateBy { it.id }
+    /** The effected bitmap for [id], only if it was made for (about) the current playhead. */
+    fun freshEffected(id: String): Bitmap? {
+        val bmp = effectedFrames[id]?.takeIf { !it.isRecycled } ?: return null
+        val madeAt = effectedTimes[id] ?: return null
+        val tolerance = if (editor.playing) 0.4f else 0.05f
+        return if (kotlin.math.abs(editor.time - madeAt) <= tolerance) bmp else null
+    }
     fun motionBlurSampleTimes(layer: com.kinetic.app.model.Layer): FloatArray =
         com.kinetic.app.model.MotionBlur.sampleTimes(
             layer, editor.time, editor.compSettings.shutterAngle, editor.compSettings.fps,
@@ -663,7 +683,7 @@ private fun GpuCompositionPreviewCanvas(
             continue
         }
         val sourceBitmap = when (layer.type) {
-            LayerType.IMAGE, LayerType.VIDEO -> effectedFrames[layer.id] ?: frames[layer.id]
+            LayerType.IMAGE, LayerType.VIDEO -> freshEffected(layer.id) ?: frames[layer.id]
             else -> null
         }
         val bitmap = when (layer.type) {
@@ -747,11 +767,13 @@ private fun GpuCompositionPreviewCanvas(
         } ?: continue
         val opacity = (layer.p(PropId.OPACITY).valueAt(editor.time) / 100f).coerceIn(0f, 1f)
         val effected = if (layer.type == LayerType.TEXT || layer.type == LayerType.SHAPE || layer.type == LayerType.PARTICULAR)
-            effectedFrames[layer.id]?.takeIf { !it.isRecycled && (layer.type != LayerType.PARTICULAR || it === bitmap) } else null
+            (if (layer.type == LayerType.PARTICULAR) effectedFrames[layer.id] else freshEffected(layer.id))
+                ?.takeIf { !it.isRecycled && (layer.type != LayerType.PARTICULAR || it === bitmap) } else null
         val drawBitmap = effected ?: bitmap
         // Effects may paint beyond the layer (glow, shadow, tiling): draw the enlarged result,
         // shifted so the original content stays where it was.
-        val margin = if (effected != null || layer.type == LayerType.IMAGE || layer.type == LayerType.VIDEO)
+        // Only an effected bitmap carries the extra room; a raw fallback frame must keep the layer's own size.
+        val margin = if (effected != null || ((layer.type == LayerType.IMAGE || layer.type == LayerType.VIDEO) && bitmap === effectedFrames[layer.id]))
             effectMargins[layer.id] else null
         val sampleTimes = motionBlurSampleTimes(layer)
         sampleTimes.forEachIndexed { sampleIndex, sampleTime ->
