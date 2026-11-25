@@ -65,6 +65,8 @@ import com.kinetic.app.model.COMP_W
 import com.kinetic.app.model.EditorState
 import com.kinetic.app.model.LayerType
 import com.kinetic.app.model.PropId
+import com.kinetic.app.model.sourceElapsedAt
+import com.kinetic.app.model.speedAt
 import com.kinetic.app.model.layerMatrix
 import com.kinetic.app.model.EffectInstance
 import com.kinetic.app.engine.EffectStackRunner
