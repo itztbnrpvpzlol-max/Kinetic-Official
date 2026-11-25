@@ -135,12 +135,14 @@ class PreviewFrameCache {
                     stream.write(data)
                     stream.fd.sync()
                 }
+                // Remove the old index/file before installing the replacement. Doing
+                // this in the opposite order can delete the freshly-renamed target.
+                removeEntry(frame)
                 if (target.exists()) target.delete()
                 if (!temp.renameTo(target)) {
                     temp.copyTo(target, overwrite = true)
                     temp.delete()
                 }
-                removeEntry(frame)
                 entries[frame] = Entry(sig, target, target.length())
                 bytes += target.length()
                 decoded.remove(frame)?.second?.let { if (!it.isRecycled) it.recycle() }
@@ -163,8 +165,9 @@ class PreviewFrameCache {
     private fun evictToBudget() {
         if (bytes <= budgetBytes) return
         val target = (budgetBytes * 0.92).toLong()
-        val head = playheadFrame
-        val order = entries.keys.sortedByDescending { kotlin.math.abs(it - head) }
+        // Keep the earliest contiguous prerender range intact. Evict the
+        // far end first so the green progress bar remains meaningful.
+        val order = entries.keys.sortedDescending()
         for (frame in order) {
             if (bytes <= target) break
             removeEntry(frame)
