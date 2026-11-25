@@ -179,22 +179,27 @@ object SmartFrameCache {
                 return duplicate(near)
             }
         }
-        if (inFlight.contains(key)) {
-            for (i in 0 until 20) {
-                delay(3L)
-                val ready = synchronized(lock) { frames[key]?.bitmap }
-                if (ready != null) return duplicate(ready)
-                if (!inFlight.contains(key)) break
-            }
-        }
         demand.incrementAndGet()
         try {
-            val startedNs = System.nanoTime()
-            val bitmap = MediaLoader.bitmapFor(ctx, uri, LayerType.VIDEO, timeSec, fps, edge, persistToDisk) ?: return null
-            val ms = (System.nanoTime() - startedNs) / 1_000_000f
-            recordDecode(ms, fps)
-            duplicate(bitmap)?.let { put(key, it, ms) }
-            return bitmap
+            // Only one decoder may own a frame key at a time. Prefetch and
+            // foreground requests share this gate, so a slow decode cannot
+            // trigger a second identical decode after an arbitrary 60 ms wait.
+            while (true) {
+                val ready = synchronized(lock) { frames[key]?.bitmap }
+                if (ready != null) return duplicate(ready)
+                if (inFlight.add(key)) break
+                delay(3L)
+            }
+            try {
+                val startedNs = System.nanoTime()
+                val bitmap = MediaLoader.bitmapFor(ctx, uri, LayerType.VIDEO, timeSec, fps, edge, persistToDisk) ?: return null
+                val ms = (System.nanoTime() - startedNs) / 1_000_000f
+                recordDecode(ms, fps)
+                duplicate(bitmap)?.let { put(key, it, ms) }
+                return bitmap
+            } finally {
+                inFlight.remove(key)
+            }
         } finally {
             demand.decrementAndGet()
         }
