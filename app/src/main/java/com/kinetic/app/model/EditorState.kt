@@ -35,22 +35,47 @@ class EditorState(val settings: AppSettings, val projectId: String = UUID.random
     private val timelineFrames = mutableListOf<TimelineFrame>()
     var timelinePath by mutableStateOf<List<String>>(emptyList())
         private set
+    // These derived lists are read dozens of times per frame by the preview and timeline. Rebuilding them
+    // (copying layers, flattening pre-comps, deep-hashing) on every read was a major source of UI lag, so they
+    // are memoized on the identity of the underlying layer list and only rebuilt when an edit replaces it.
+    private val derivedLock = Any()
+    private var derivedLayers: List<Layer>? = null
+    private var derivedDepth = -1
+    private var derivedParent: List<Layer>? = null
+    private var cachedProject: List<Layer> = emptyList()
+    private var cachedPreview: List<Layer> = emptyList()
+    private var cachedProjectPreview: List<Layer> = emptyList()
+    private var cachedPreviewHash = 0
+
+    private fun refreshDerived() {
+        val cur = layers
+        val depth = timelineFrames.size
+        val parent = timelineFrames.lastOrNull()?.parentLayers
+        if (cur === derivedLayers && depth == derivedDepth && parent === derivedParent) return
+        var current = cur
+        timelineFrames.asReversed().forEach { frame ->
+            current = frame.parentLayers.map { layer ->
+                if (layer.id == frame.precompId) layer.copy(precompLayers = current) else layer
+            }
+        }
+        cachedProject = current
+        cachedPreview = flattenPrecomps(cur)
+        cachedProjectPreview = if (depth == 0) cachedPreview else flattenPrecomps(current)
+        cachedPreviewHash = cachedPreview.hashCode()
+        derivedLayers = cur; derivedDepth = depth; derivedParent = parent
+    }
+
     /** Root project layers, including edits made while nested pre-comps are open. */
     val projectLayers: List<Layer>
-        get() {
-            var current = layers
-            timelineFrames.asReversed().forEach { frame ->
-                current = frame.parentLayers.map { layer ->
-                    if (layer.id == frame.precompId) layer.copy(precompLayers = current) else layer
-                }
-            }
-            return current
-        }
+        get() = synchronized(derivedLock) { refreshDerived(); cachedProject }
     /** Flattened visual stack: pre-comp children render in the parent stack's position. */
     val previewLayers: List<Layer>
-        get() = flattenPrecomps(layers)
+        get() = synchronized(derivedLock) { refreshDerived(); cachedPreview }
     val projectPreviewLayers: List<Layer>
-        get() = flattenPrecomps(projectLayers)
+        get() = synchronized(derivedLock) { refreshDerived(); cachedProjectPreview }
+    /** Deep hash of [previewLayers], computed once per edit instead of once per layer per frame. */
+    val previewLayersHash: Int
+        get() = synchronized(derivedLock) { refreshDerived(); cachedPreviewHash }
     val timelineTabs: List<TimelineTab>
         get() {
             val result = mutableListOf(TimelineTab(emptyList(), projectName))

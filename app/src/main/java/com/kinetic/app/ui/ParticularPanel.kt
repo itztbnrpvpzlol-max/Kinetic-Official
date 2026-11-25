@@ -275,7 +275,8 @@ private fun ParticleValueRow(
     editor: EditorState, layer: Layer, label: String, id: PropId,
     min: Float, max: Float, step: Float, format: String, displayMultiplier: Float = 1f
 ) {
-    val value = layer.p(id).valueAt(editor.time) * displayMultiplier
+    val pProp = layer.p(id)
+    val value by remember(pProp, displayMultiplier) { derivedStateOf { pProp.valueAt(editor.time) * displayMultiplier } }
     Row(Modifier.fillMaxWidth().height(34.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(label, color = if (editor.selectedProp == id) KColors.Accent else KColors.Text,
             fontSize = 10.sp, fontWeight = FontWeight.Medium, modifier = Modifier.width(108.dp))

@@ -54,11 +54,29 @@ fun FrameCacheHost(editor: EditorState) {
             Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND)
             try {
                 var lastRefresh = System.currentTimeMillis()
+                var lastHead = -1
+                var lastMoveAt = 0L
                 val out = ByteArrayOutputStream(64 * 1024)
                 while (isActive) {
                     val head = (editor.time * fps).toInt().coerceIn(0, total - 1)
                     cache.playheadFrame = head
-                    if (editor.playing) cache.prefetchDecode(head + 1, 8, total)
+                    val tick = System.currentTimeMillis()
+                    if (head != lastHead) { lastHead = head; lastMoveAt = tick }
+                    if (editor.playing) {
+                        cache.prefetchDecode(head + 1, 8, total)
+                        // Live playback needs every bit of CPU for decoding. Only keep caching while playing if the
+                        // cache is already well ahead of the playhead (which is then playing from RAM, not decoding).
+                        var aheadReady = true
+                        for (i in 1..45) {
+                            val f = head + i
+                            if (f >= total) break
+                            if (!cache.hasValid(f)) { aheadReady = false; break }
+                        }
+                        if (!aheadReady) { delay(120L); continue }
+                    } else if (tick - lastMoveAt < 300L) {
+                        // Scrubbing / seeking: do not compete with the preview while the playhead is moving.
+                        delay(80L); continue
+                    }
                     var next = -1
                     for (i in 0 until total) {
                         val f = (head + i) % total

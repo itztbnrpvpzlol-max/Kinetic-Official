@@ -110,7 +110,8 @@ fun PropertyLine(label: String, editor: EditorState, layer: Layer, ids: List<Pro
 @Composable
 private fun ValueController(editor: EditorState, layer: Layer, id: PropId, axis: String, modifier: Modifier = Modifier) {
     val prop = layer.p(id)
-    val value = prop.valueAt(editor.time)
+    // Derived: playing the timeline only recomposes this row when ITS value actually changes (not 30x/sec).
+    val value by remember(prop) { derivedStateOf { prop.valueAt(editor.time) } }
     val density = LocalDensity.current.density
     var typing by remember(layer.id, id) { mutableStateOf(false) }
     Box(modifier.height(30.dp).clip(RoundedCornerShape(6.dp))
@@ -144,8 +145,8 @@ private fun VectorPointLine(editor: EditorState, layer: Layer, index: Int, point
         Row(verticalAlignment = Alignment.CenterVertically) {
             val xId = com.kinetic.app.model.PropId.vectorPoint(index, 'X')
             val yId = com.kinetic.app.model.PropId.vectorPoint(index, 'Y')
-            val xValue = xId?.let { layer.p(it).valueAt(editor.time) } ?: point.x
-            val yValue = yId?.let { layer.p(it).valueAt(editor.time) } ?: point.y
+            val xValue by remember(layer, xId) { derivedStateOf { xId?.let { layer.p(it).valueAt(editor.time) } ?: point.x } }
+            val yValue by remember(layer, yId) { derivedStateOf { yId?.let { layer.p(it).valueAt(editor.time) } ?: point.y } }
             ScrubValueBar("X", xValue, Modifier.weight(1f), step = 0.004f,
                 selected = editor.selectedProp == xId,
                 onSelect = { xId?.let(editor::selectProp) }) {

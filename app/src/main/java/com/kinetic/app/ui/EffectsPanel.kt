@@ -239,7 +239,7 @@ private fun EffectParameterLine(
     editor: EditorState, layer: Layer, effect: EffectInstance, spec: EffectControlSpec,
     selected: Boolean, onSelect: () -> Unit
 ) {
-    val current = effect.parameterAt(spec.key, editor.time, spec.default)
+    val current by remember(effect, spec) { derivedStateOf { effect.parameterAt(spec.key, editor.time, spec.default) } }
     val animated = effect.parameterKeys[spec.key].orEmpty().isNotEmpty()
     val rowShape = RoundedCornerShape(6.dp)
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,

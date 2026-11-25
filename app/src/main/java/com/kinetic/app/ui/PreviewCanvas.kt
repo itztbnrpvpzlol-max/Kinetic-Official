@@ -370,7 +370,7 @@ fun CpuPreviewCanvas(
                 }
                 val below = editor.previewLayers.drop(index + 1).asReversed()
                 val sampleFps = if (MediaWorkers.isConstrainedDevice) 12 else 24
-                var key = editor.previewLayers.hashCode().toLong()
+                var key = editor.previewLayersHash.toLong()
                 key = key * 31L + stack.hashCode() + (time * sampleFps).toInt()
                 below.forEach { l ->
                     key = key * 31L + System.identityHashCode(effectedBitmaps[l.id] ?: bitmaps[l.id] ?: vectorEffected[l.id]?.bitmap)

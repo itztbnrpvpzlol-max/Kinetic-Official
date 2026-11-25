@@ -565,7 +565,7 @@ private fun GpuCompositionPreviewCanvas(
                     val bucket = (now * compositionFps).toInt()
                     var pKey = layer.particles.hashCode().toLong()
                     pKey = pKey * 31L + layer.props.filterKeys { it.isParticleProp }.hashCode()
-                    pKey = pKey * 31L + sceneLayers.hashCode()
+                    pKey = pKey * 31L + editor.previewLayersHash
                     pKey = pKey * 31L + stack.hashCode() + bucket
                     if (effectFrameKeys[layer.id] == pKey) continue
                     val byLayerId = sceneLayers.associateBy { it.id }
@@ -705,7 +705,7 @@ private fun GpuCompositionPreviewCanvas(
                     activeTextTextureIds.add(layer.id)
                     val signature = layer.particles.hashCode() * 31 +
                         layer.props.filterKeys { it.isParticleProp }.hashCode() * 17 +
-                        editor.previewLayers.hashCode() * 13 + (editor.time * editor.fps).toInt()
+                        editor.previewLayersHash * 13 + (editor.time * editor.fps).toInt()
                     val cached = textTextures[layer.id]
                     if (cached == null || cached.first != signature || cached.second.isRecycled) {
                         val edge = if (MediaWorkers.isConstrainedDevice) 320 else 768
