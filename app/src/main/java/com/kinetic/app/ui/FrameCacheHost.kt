@@ -14,6 +14,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.yield
 import java.io.ByteArrayOutputStream
 import kotlin.math.ceil
 
@@ -54,7 +55,8 @@ fun FrameCacheHost(editor: EditorState) {
             val h = (w * COMP_H / COMP_W).toInt().coerceAtLeast(2).let { it - it % 2 }
             var renderer: ExportFrameRenderer? = null
             val failed = HashSet<Int>()
-            Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND)
+            // Cache generation runs only while paused; default priority avoids needlessly
+            // throttling every frame behind background work.
             try {
                 var lastRefresh = System.currentTimeMillis()
                 var lastHead = -1
@@ -112,8 +114,9 @@ fun FrameCacheHost(editor: EditorState) {
                         renderer = null
                     }
                     if (now - lastRefresh > 1500) { cache.refreshRanges(total); lastRefresh = now }
-                    // Stay out of the way of live playback and scrubbing: yield a little between frames.
-                    delay(40L)
+                    // Do not impose an artificial 25 FPS ceiling on cache generation.
+                    // Yield cooperatively so UI / playback coroutines still get scheduled.
+                    yield()
                 }
             } finally {
                 runCatching { renderer?.close() }
