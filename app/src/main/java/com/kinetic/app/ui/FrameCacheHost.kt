@@ -66,7 +66,7 @@ fun FrameCacheHost(editor: EditorState) {
                     val tick = System.currentTimeMillis()
                     if (head != lastHead) { lastHead = head; lastMoveAt = tick }
                     // JPEG decompression is done here, off the UI thread, in a tiny window.
-                    cache.prefetchDecode(head, 3, total)
+                    cache.prefetchDecode(head, 6, total)
                     if (editor.playing) {
                         // Never run the expensive composition renderer during live playback.
                         delay(100L)
@@ -75,25 +75,15 @@ fun FrameCacheHost(editor: EditorState) {
                         // Scrubbing / seeking: do not compete with the preview while the playhead is moving.
                         delay(80L); continue
                     }
-                    // Keep only a short window around the playhead warm. Rendering the
-                    // entire composition in the background competes with editing and wastes RAM.
+                    // Sweep the full composition, starting at the playhead and wrapping
+                    // around. The compressed-frame budget decides how much can remain
+                    // resident; this avoids permanently limiting the cache to ~2 seconds.
                     var next = -1
-                    val ahead = maxOf(1, fps * 2)
-                    val behind = maxOf(1, fps / 2)
-                    for (offset in 0..ahead) {
-                        val frame = head + offset
-                        if (frame < total && frame !in failed && !cache.hasValid(frame)) {
+                    for (offset in 0 until total) {
+                        val frame = (head + offset) % total
+                        if (frame !in failed && !cache.hasValid(frame)) {
                             next = frame
                             break
-                        }
-                    }
-                    if (next < 0) {
-                        for (offset in 1..behind) {
-                            val frame = head - offset
-                            if (frame >= 0 && frame !in failed && !cache.hasValid(frame)) {
-                                next = frame
-                                break
-                            }
                         }
                     }
                     val now = System.currentTimeMillis()
