@@ -5,6 +5,7 @@ import com.kinetic.app.model.EffectInstance
 import org.json.JSONArray
 import org.json.JSONObject
 import java.nio.ByteBuffer
+import java.util.LinkedHashMap
 
 /**
  * Runs a layer's EffectCraft effect stack. Keyframes are evaluated here (Kinetic owns animation)
@@ -60,6 +61,77 @@ object EffectStackRunner {
         return array.toString()
     }
 
+    private data class CachedEffectBitmap(
+        val bitmap: Bitmap,
+        val left: Float,
+        val top: Float,
+        val right: Float,
+        val bottom: Float
+    )
+
+    // Bounded layer-effect cache. Cached bitmaps are immutable; callers receive
+    // their own copy because existing render paths recycle their results.
+    private val effectCacheLock = Any()
+    private val effectBitmapCache = LinkedHashMap<String, CachedEffectBitmap>(24, 0.75f, true)
+    private var effectBitmapCacheBytes = 0L
+    private val effectBitmapCacheLimit = 24L * 1024L * 1024L
+
+    private fun effectCacheKey(
+        source: Bitmap, effects: List<EffectInstance>, time: Float, layerTime: Float,
+        frameRate: Float, layerWidth: Float, layerHeight: Float, mode: String
+    ): String {
+        val active = if (mode.startsWith("audio")) audioEffects(effects) else pictureEffects(effects)
+        val timeDependent = active.any { effect ->
+            effect.parameterKeys.values.any { it.isNotEmpty() } ||
+                EffectCatalog.find(effect.effectId)?.sourceCategory in TIME_DEPENDENT_SOURCES
+        }
+        val evaluatedTime = if (timeDependent) time else 0f
+        return buildString {
+            append(mode).append('|')
+            append(System.identityHashCode(source)).append(':').append(source.generationId).append(':')
+            append(source.width).append('x').append(source.height).append('|')
+            append(stackJson(active, evaluatedTime)).append('|')
+            append(layerTime.takeIf { timeDependent } ?: 0f).append('|')
+            append(frameRate).append('|').append(layerWidth).append('x').append(layerHeight)
+        }
+    }
+
+    private fun cachedEffect(key: String): CachedEffectBitmap? = synchronized(effectCacheLock) {
+        val cached = effectBitmapCache[key] ?: return@synchronized null
+        if (cached.bitmap.isRecycled) {
+            effectBitmapCache.remove(key)
+            effectBitmapCacheBytes -= cached.bitmap.allocationByteCount.toLong()
+            return@synchronized null
+        }
+        cached
+    }
+
+    private fun rememberEffect(key: String, bitmap: Bitmap, left: Float = 0f, top: Float = 0f, right: Float = 0f, bottom: Float = 0f) {
+        val copy = runCatching { bitmap.copy(Bitmap.Config.ARGB_8888, false) }.getOrNull() ?: return
+        synchronized(effectCacheLock) {
+            effectBitmapCache.remove(key)?.let { old ->
+                effectBitmapCacheBytes -= old.bitmap.allocationByteCount.toLong()
+                if (!old.bitmap.isRecycled) old.bitmap.recycle()
+            }
+            effectBitmapCache[key] = CachedEffectBitmap(copy, left, top, right, bottom)
+            effectBitmapCacheBytes += copy.allocationByteCount.toLong()
+            val iterator = effectBitmapCache.entries.iterator()
+            while (effectBitmapCacheBytes > effectBitmapCacheLimit && iterator.hasNext()) {
+                val old = iterator.next().value
+                iterator.remove()
+                effectBitmapCacheBytes -= old.bitmap.allocationByteCount.toLong()
+                if (!old.bitmap.isRecycled) old.bitmap.recycle()
+            }
+        }
+    }
+
+    /** Explicitly drops retained effect results, for memory-pressure handling. */
+    fun clearEffectCache() = synchronized(effectCacheLock) {
+        effectBitmapCache.values.forEach { if (!it.bitmap.isRecycled) it.bitmap.recycle() }
+        effectBitmapCache.clear()
+        effectBitmapCacheBytes = 0L
+    }
+
     private val directBuffers = object : ThreadLocal<ByteBuffer?>() {}
 
     private fun scratch(bytes: Int): ByteBuffer {
@@ -80,6 +152,10 @@ object EffectStackRunner {
     ): Bitmap? {
         val active = pictureEffects(effects)
         if (active.isEmpty() || !EffectCraftNative.available || source.isRecycled) return null
+        val key = effectCacheKey(source, active, time, layerTime, frameRate, layerWidth, layerHeight, "bitmap:$adjustment")
+        cachedEffect(key)?.let { cached ->
+            return runCatching { cached.bitmap.copy(Bitmap.Config.ARGB_8888, true) }.getOrNull()
+        }
         val output = runCatching { source.copy(Bitmap.Config.ARGB_8888, true) }.getOrNull() ?: return null
         val applied = runCatching {
             val buffer = scratch(output.width * output.height * 4)
@@ -94,7 +170,10 @@ object EffectStackRunner {
             }
             count
         }.getOrDefault(-1)
-        if (applied > 0) return output
+        if (applied > 0) {
+            rememberEffect(key, output)
+            return output
+        }
         if (!output.isRecycled) output.recycle()
         return null
     }
@@ -115,6 +194,11 @@ object EffectStackRunner {
     ): Effected? {
         val active = pictureEffects(effects)
         if (active.isEmpty() || !EffectCraftNative.available || source.isRecycled) return null
+        val key = effectCacheKey(source, active, time, layerTime, frameRate, layerWidth, layerHeight, "grown:$adjustment:$maxPixels")
+        cachedEffect(key)?.let { cached ->
+            val copy = runCatching { cached.bitmap.copy(Bitmap.Config.ARGB_8888, true) }.getOrNull()
+            if (copy != null) return Effected(copy, cached.left, cached.top, cached.right, cached.bottom)
+        }
         return runCatching {
             val w = source.width
             val h = source.height
@@ -137,7 +221,12 @@ object EffectStackRunner {
             bitmap.copyPixelsFromBuffer(out)
             val sx = layerWidth / w
             val sy = layerHeight / h
-            Effected(bitmap, info[2] * sx, info[3] * sy, info[4] * sx, info[5] * sy)
+            val left = info[2] * sx
+            val top = info[3] * sy
+            val right = info[4] * sx
+            val bottom = info[5] * sy
+            rememberEffect(key, bitmap, left, top, right, bottom)
+            Effected(bitmap, left, top, right, bottom)
         }.getOrNull()
     }
 
