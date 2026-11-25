@@ -7,12 +7,12 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import java.io.File
+import java.io.FileOutputStream
 
 /**
- * Decides whether a cached frame is still correct. The signature of a frame covers the composition
- * settings plus every layer that is on screen at that moment (and its whole parent chain: nulls,
- * cameras, precomps). Editing a layer therefore changes the signature of exactly the frames that layer
- * appears in; every other frame stays valid.
+ * Per-frame validity signatures for the flattened root composition. A frame is reusable only
+ * while every visible layer contributing to it and the composition settings remain unchanged.
  */
 class FrameSignatures(private val layers: List<Layer>, comp: CompSettings) {
     val fps: Int = comp.fps.coerceIn(1, 120)
@@ -40,27 +40,32 @@ class FrameSignatures(private val layers: List<Layer>, comp: CompSettings) {
 }
 
 /**
- * RAM frame cache for the preview. Frames are stored as small JPEGs (about 10x lighter than raw
- * bitmaps, so far more of the timeline fits), validated against [FrameSignatures] on every read, and
- * decoded just-in-time (a few frames ahead of the playhead while playing).
+ * Disk-backed composition prerender. JPEG frames survive RAM pressure and app restarts; only a
+ * tiny decoded window stays in memory. Writes are atomic so an interrupted render never exposes
+ * a partially-written frame. The timeline ranges represent verified frames on disk.
  */
 class PreviewFrameCache {
-    private class Entry(val sig: Long, val data: ByteArray)
+    private class Entry(val sig: Long, val file: File, val size: Long)
 
     private val lock = Any()
     private val entries = HashMap<Int, Entry>()
     private val decoded = object : LinkedHashMap<Int, Pair<Long, Bitmap>>(32, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Int, Pair<Long, Bitmap>>?): Boolean = size > DECODED_MAX
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Int, Pair<Long, Bitmap>>?): Boolean {
+            val remove = size > DECODED_MAX
+            if (remove) eldest?.value?.second?.let { if (!it.isRecycled) it.recycle() }
+            return remove
+        }
     }
+    private var directory: File? = null
     private var bytes = 0L
 
     @Volatile var signatures: FrameSignatures? = null
         private set
     @Volatile var playheadFrame = 0
-    var budgetBytes: Long = 160L * 1024L * 1024L
+    var budgetBytes: Long = 512L * 1024L * 1024L
 
     var enabled by mutableStateOf(true)
-    /** Frame ranges (inclusive) that are cached AND still valid; drawn as the green bar on the timeline. */
+    /** Valid prerendered frame ranges, displayed as the green timeline bar. */
     var ranges by mutableStateOf<List<IntRange>>(emptyList())
         private set
     var cachedFrames by mutableIntStateOf(0)
@@ -68,55 +73,111 @@ class PreviewFrameCache {
     var cachedBytes by mutableLongStateOf(0L)
         private set
 
+    /** Attach this project's persistent cache directory and index existing frame files. */
+    fun configureDisk(dir: File, maxBytes: Long) {
+        synchronized(lock) {
+            if (directory?.absolutePath == dir.absolutePath) {
+                budgetBytes = maxBytes.coerceAtLeast(8L * 1024L * 1024L)
+                return
+            }
+            decoded.values.forEach { if (!it.second.isRecycled) it.second.recycle() }
+            decoded.clear()
+            entries.clear()
+            bytes = 0L
+            directory = dir
+            budgetBytes = maxBytes.coerceAtLeast(8L * 1024L * 1024L)
+            dir.mkdirs()
+            dir.listFiles()?.forEach { file ->
+                if (!file.isFile || !file.name.endsWith(".jpg")) return@forEach
+                val stem = file.name.removeSuffix(".jpg")
+                val split = stem.indexOf('-')
+                if (split <= 0) { file.delete(); return@forEach }
+                val frame = stem.substring(0, split).toIntOrNull()
+                val sig = stem.substring(split + 1).toLongOrNull()
+                if (frame == null || sig == null || file.length() <= 0L) {
+                    file.delete()
+                } else {
+                    val old = entries.put(frame, Entry(sig, file, file.length()))
+                    if (old != null) { bytes -= old.size; old.file.delete() }
+                    bytes += file.length()
+                }
+            }
+            evictToBudget()
+        }
+    }
+
     fun setSignatures(sigs: FrameSignatures?) { signatures = sigs }
 
     fun hasValid(frame: Int): Boolean {
-        val sigs = signatures ?: return false
-        val sig = sigs.sigAt(frame)
-        synchronized(lock) { return entries[frame]?.sig == sig }
+        val sig = signatures?.sigAt(frame) ?: return false
+        synchronized(lock) {
+            val entry = entries[frame] ?: return false
+            if (entry.sig != sig || !entry.file.isFile || entry.file.length() != entry.size) {
+                removeEntry(frame)
+                return false
+            }
+            return true
+        }
     }
 
+    /** Called from the background prerender worker. */
     fun put(frame: Int, sig: Long, data: ByteArray) {
         synchronized(lock) {
-            entries.put(frame, Entry(sig, data))?.let { bytes -= it.data.size }
-            bytes += data.size
-            decoded.remove(frame)
-            if (bytes > budgetBytes) evictFarthest()
+            val dir = directory ?: return
+            if (data.isEmpty()) return
+            val target = File(dir, "${frame}-${sig}.jpg")
+            val temp = File(dir, "${frame}-${sig}.tmp")
+            try {
+                FileOutputStream(temp).use { stream ->
+                    stream.write(data)
+                    stream.fd.sync()
+                }
+                if (target.exists()) target.delete()
+                if (!temp.renameTo(target)) {
+                    temp.copyTo(target, overwrite = true)
+                    temp.delete()
+                }
+                removeEntry(frame)
+                entries[frame] = Entry(sig, target, target.length())
+                bytes += target.length()
+                decoded.remove(frame)?.second?.let { if (!it.isRecycled) it.recycle() }
+                evictToBudget()
+            } catch (_: Throwable) {
+                temp.delete()
+                target.delete()
+            }
         }
     }
 
-    private fun evictFarthest() {
+    private fun removeEntry(frame: Int) {
+        entries.remove(frame)?.let {
+            bytes -= it.size
+            it.file.delete()
+        }
+        decoded.remove(frame)?.second?.let { if (!it.isRecycled) it.recycle() }
+    }
+
+    private fun evictToBudget() {
+        if (bytes <= budgetBytes) return
+        val target = (budgetBytes * 0.92).toLong()
         val head = playheadFrame
-        val target = (budgetBytes * 0.9).toLong()
         val order = entries.keys.sortedByDescending { kotlin.math.abs(it - head) }
-        for (f in order) {
+        for (frame in order) {
             if (bytes <= target) break
-            entries.remove(f)?.let { bytes -= it.data.size }
-            decoded.remove(f)
+            removeEntry(frame)
         }
     }
 
-    /** True when the budget is used up; the filler then only works on frames nearer the playhead than what it would evict. */
-    fun isFull(): Boolean = synchronized(lock) { bytes > budgetBytes * 0.92 }
-
-    fun farthestDistance(): Int = synchronized(lock) {
-        val head = playheadFrame
-        entries.keys.maxOfOrNull { kotlin.math.abs(it - head) } ?: 0
-    }
-
-    private fun decode(data: ByteArray): Bitmap? = runCatching {
-        BitmapFactory.decodeByteArray(data, 0, data.size, BitmapFactory.Options().apply {
+    private fun decode(file: File): Bitmap? = runCatching {
+        BitmapFactory.decodeFile(file.absolutePath, BitmapFactory.Options().apply {
             inPreferredConfig = Bitmap.Config.ARGB_8888
         })
     }.getOrNull()
 
-    /** The cached picture for [frame], or null when it is missing or out of date. */
+    /** Only returns a bitmap already decoded off the UI thread. */
     fun lookup(frame: Int): Bitmap? {
         if (!enabled) return null
-        val sigs = signatures ?: return null
-        val sig = sigs.sigAt(frame)
-        // Never decompress a JPEG on the composition/UI thread. The cache host
-        // decodes a small playhead window on Dispatchers.Default instead.
+        val sig = signatures?.sigAt(frame) ?: return null
         return synchronized(lock) {
             decoded[frame]?.let { cached ->
                 if (cached.first == sig && !cached.second.isRecycled) return cached.second
@@ -125,20 +186,26 @@ class PreviewFrameCache {
         }
     }
 
-    /** Decodes the next [count] frames after [from] into the small decoded cache so playback never waits on JPEG decode. */
+    /** Read/decode a small forward window on the background worker before playback needs it. */
     fun prefetchDecode(from: Int, count: Int, total: Int) {
-        for (f in from until minOf(total, from + count)) {
-            val sigs = signatures ?: return
-            val sig = sigs.sigAt(f)
-            val data = synchronized(lock) {
-                if (decoded[f]?.first == sig) null else entries[f]?.takeIf { it.sig == sig }?.data
+        for (frame in from until minOf(total, from + count)) {
+            val sig = signatures?.sigAt(frame) ?: return
+            val file = synchronized(lock) {
+                val entry = entries[frame]
+                if (decoded[frame]?.first == sig) null
+                else entry?.takeIf { it.sig == sig && it.file.isFile }?.file
             } ?: continue
-            val bmp = decode(data) ?: continue
-            synchronized(lock) { decoded[f] = sig to bmp }
+            val bitmap = decode(file) ?: continue
+            synchronized(lock) {
+                val current = entries[frame]
+                if (current?.sig == sig && signatures?.sigAt(frame) == sig) {
+                    decoded.put(frame, sig to bitmap)
+                } else if (!bitmap.isRecycled) bitmap.recycle()
+            }
         }
     }
 
-    /** Drops stale frames and republishes the green ranges. Cheap enough to call a few times a second. */
+    /** Removes invalid frames and publishes exact contiguous on-disk ranges. */
     fun refreshRanges(total: Int) {
         val sigs = signatures ?: return
         val out = ArrayList<IntRange>()
@@ -146,16 +213,18 @@ class PreviewFrameCache {
         var count = 0
         var size = 0L
         synchronized(lock) {
-            val it = entries.entries.iterator()
-            while (it.hasNext()) {
-                val e = it.next()
-                if (e.key >= total || e.value.sig != sigs.sigAt(e.key)) { bytes -= e.value.data.size; decoded.remove(e.key); it.remove() }
+            val invalid = entries.keys.filter { frame ->
+                frame !in 0 until total || entries[frame]?.let { it.sig != sigs.sigAt(frame) || !it.file.isFile } != false
             }
-            for (f in 0 until total) {
-                if (entries.containsKey(f)) {
+            invalid.forEach(::removeEntry)
+            for (frame in 0 until total) {
+                if (entries.containsKey(frame)) {
                     count++
-                    if (start < 0) start = f
-                } else if (start >= 0) { out += start..(f - 1); start = -1 }
+                    if (start < 0) start = frame
+                } else if (start >= 0) {
+                    out += start..(frame - 1)
+                    start = -1
+                }
             }
             if (start >= 0) out += start..(total - 1)
             size = bytes
@@ -166,9 +235,17 @@ class PreviewFrameCache {
     }
 
     fun clear() {
-        synchronized(lock) { entries.clear(); decoded.clear(); bytes = 0L }
-        ranges = emptyList(); cachedFrames = 0; cachedBytes = 0L
+        synchronized(lock) {
+            entries.keys.toList().forEach(::removeEntry)
+            decoded.values.forEach { if (!it.second.isRecycled) it.second.recycle() }
+            decoded.clear()
+            directory?.listFiles()?.forEach { it.delete() }
+            bytes = 0L
+        }
+        ranges = emptyList()
+        cachedFrames = 0
+        cachedBytes = 0L
     }
 
-    private companion object { const val DECODED_MAX = 8 }
+    private companion object { const val DECODED_MAX = 16 }
 }
