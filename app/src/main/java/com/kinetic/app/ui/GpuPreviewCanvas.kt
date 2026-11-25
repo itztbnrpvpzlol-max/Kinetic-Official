@@ -948,11 +948,8 @@ private fun GpuVideoPlayerLayer(
         }
     }
 
-    LaunchedEffect(player, layer.id, playback, layer.start, layer.srcOffset, layer.speed) {
+    LaunchedEffect(player, layer.id, playback, layer.start, layer.srcOffset, layer.p(PropId.SPEED)) {
         if (playback != null) {
-            val clipStartUs = (layer.start * 1_000_000.0).toLong()
-            val sourceOffsetUs = (layer.srcOffset * 1_000_000.0).toLong()
-            val clipSpeed = layer.speed.coerceIn(0.1f, 4f)
             while (true) {
                 val clock = playback.clockSnapshot()
                 // Anchor the decoder at the clock snapshot's exact timeline time.
@@ -971,8 +968,8 @@ private fun GpuVideoPlayerLayer(
         }
     }
 
-    LaunchedEffect(layer.id, editor.playing, layer.speed, player) {
-        player.setSpeed(layer.speed.coerceIn(0.1f, 4f))
+    LaunchedEffect(layer.id, editor.playing, layer.p(PropId.SPEED), player) {
+        player.setSpeed(layer.speedAt(editor.time))
         if (editor.playing) {
             player.seekTo(sourcePositionMs)
             player.play()
@@ -987,8 +984,7 @@ private fun GpuVideoPlayerLayer(
         var previousTimelineTime = editor.time
         androidx.compose.runtime.snapshotFlow { editor.time }.collect { time ->
             val positionMs = (
-                ((time - layer.start).coerceAtLeast(0f) * layer.speed + layer.srcOffset)
-                    .coerceAtLeast(0f) * 1000f
+                (layer.sourceElapsedAt(time) + layer.srcOffset).coerceAtLeast(0f) * 1000f
             ).toLong()
             player.updatePositionHint(positionMs)
             if (editor.playing) {
