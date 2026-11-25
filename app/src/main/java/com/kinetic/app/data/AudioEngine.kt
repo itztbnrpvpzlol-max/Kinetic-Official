@@ -454,11 +454,15 @@ class AudioEngine(context: Context) {
                     val deltaUs = targetUs - presentationTimeUs
                     val framesToSkip = (deltaUs * sampleRate + 999_999L) / 1_000_000L
                     val bytesToSkip = framesToSkip * pcmChannelCount * bytesPerSample
+                    // This decoded block is entirely before the seek target. Keep
+                    // the trim marker for the next block; clearing it here leaks
+                    // pre-seek audio whenever the target spans multiple PCM blocks.
                     if (bytesToSkip >= size) return
                     val skip = bytesToSkip.toInt().coerceAtLeast(0)
                     buffer.position((buffer.position() + skip).coerceAtMost(buffer.limit()))
                     remaining -= skip
                 }
+                // Clear only after this block reaches (or crosses) the target.
                 dropBeforeUs = -1L
             }
 
