@@ -115,15 +115,14 @@ class PreviewFrameCache {
         if (!enabled) return null
         val sigs = signatures ?: return null
         val sig = sigs.sigAt(frame)
-        val data: ByteArray = synchronized(lock) {
-            decoded[frame]?.let { if (it.first == sig && !it.second.isRecycled) return it.second }
-            val e = entries[frame] ?: return null
-            if (e.sig != sig) return null
-            e.data
+        // Never decompress a JPEG on the composition/UI thread. The cache host
+        // decodes a small playhead window on Dispatchers.Default instead.
+        return synchronized(lock) {
+            decoded[frame]?.let { cached ->
+                if (cached.first == sig && !cached.second.isRecycled) return cached.second
+            }
+            null
         }
-        val bmp = decode(data) ?: return null
-        synchronized(lock) { decoded[frame] = sig to bmp }
-        return bmp
     }
 
     /** Decodes the next [count] frames after [from] into the small decoded cache so playback never waits on JPEG decode. */
@@ -171,5 +170,5 @@ class PreviewFrameCache {
         ranges = emptyList(); cachedFrames = 0; cachedBytes = 0L
     }
 
-    private companion object { const val DECODED_MAX = 20 }
+    private companion object { const val DECODED_MAX = 8 }
 }
