@@ -77,23 +77,22 @@ fun CpuPreviewCanvas(
     val mediaLayerSignature = mediaLayers.map {
         "${it.id}|${it.uri}|${it.type}|${it.start}|${it.duration}|${it.srcOffset}|${it.p(PropId.SPEED)}|${it.visible}|${it.effectStack.hashCode()}"
     }
-    val activeVisualLayerCount = editor.previewLayers.count {
-        it.visible && it.activeAt(editor.time) && it.type != LayerType.AUDIO &&
-            it.type != LayerType.NULL && it.type != LayerType.CAMERA && it.type != LayerType.ADJUSTMENT
+    val activeLayerCount = editor.previewLayers.count {
+        it.visible && it.activeAt(editor.time)
     }
     val layerLoadFps = when {
-        MediaWorkers.isConstrainedDevice && activeVisualLayerCount >= 6 -> 8
-        MediaWorkers.isConstrainedDevice && activeVisualLayerCount >= 4 -> 10
-        MediaWorkers.isConstrainedDevice && activeVisualLayerCount >= 2 -> 12
-        activeVisualLayerCount >= 6 -> 12
-        activeVisualLayerCount >= 4 -> 16
-        activeVisualLayerCount >= 2 -> 20
+        MediaWorkers.isConstrainedDevice && activeLayerCount >= 6 -> 8
+        MediaWorkers.isConstrainedDevice && activeLayerCount >= 4 -> 10
+        MediaWorkers.isConstrainedDevice && activeLayerCount >= 2 -> 12
+        activeLayerCount >= 6 -> 12
+        activeLayerCount >= 4 -> 16
+        activeLayerCount >= 2 -> 20
         else -> 24
     }
     val motionBlurSampleLimit = when {
-        activeVisualLayerCount >= 6 -> 4
-        activeVisualLayerCount >= 4 -> 6
-        activeVisualLayerCount >= 2 -> 8
+        activeLayerCount >= 6 -> 4
+        activeLayerCount >= 4 -> 6
+        activeLayerCount >= 2 -> 8
         else -> com.kinetic.app.model.MotionBlur.PREVIEW_MAX_SAMPLES
     }
     // CPU preview decodes every video layer to bitmaps. Reduce the sampling
