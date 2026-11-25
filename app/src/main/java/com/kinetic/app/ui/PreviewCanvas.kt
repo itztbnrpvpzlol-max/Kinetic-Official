@@ -264,7 +264,7 @@ fun CpuPreviewCanvas(
                     lastProcessed.remove(layer.id)
                     continue
                 }
-                val timeDependent = playing || EffectStackRunner.isTimeDependent(activeEffects)
+                val timeDependent = EffectStackRunner.isTimeDependent(activeEffects)
                 val effectSampleFps = if (MediaWorkers.isConstrainedDevice) 12 else MediaLoader.CPU_PREVIEW_SAMPLE_FPS
                 val timeBucket = if (timeDependent) (timelineTime * effectSampleFps).toInt() else 0
                 var key = System.identityHashCode(source).toLong()
@@ -314,7 +314,7 @@ fun CpuPreviewCanvas(
                     vectorKeys.remove(layer.id)
                     continue
                 }
-                val timeDependent = playing || EffectStackRunner.isTimeDependent(stack)
+                val timeDependent = EffectStackRunner.isTimeDependent(stack)
                 val bucket = if (layer.type == LayerType.PARTICULAR || timeDependent || layer.textIsAnimated) (time * 24).toInt() else 0
                 var key = layer.text.hashCode().toLong() * 31L + layer.textStyle.hashCode() * 17L + layer.textAnimators.hashCode() + layer.textPropsHash()
                 if (layer.textStyle.pathOnMask) key = key * 31L + layer.maskPath.hashCode()
@@ -393,8 +393,15 @@ fun CpuPreviewCanvas(
                 }
                 val below = editor.previewLayers.drop(index + 1).asReversed()
                 val sampleFps = if (MediaWorkers.isConstrainedDevice) 12 else 24
+                val animatedBelow = below.any { l ->
+                    l.motionBlur || l.textIsAnimated || l.type == LayerType.PARTICULAR ||
+                        l.props.values.any { it.keys.isNotEmpty() } ||
+                        l.effectStack.any { effect -> effect.parameterKeys.values.any { it.isNotEmpty() } }
+                }
+                val timeDependent = EffectStackRunner.isTimeDependent(stack) || animatedBelow
                 var key = editor.previewLayersHash.toLong()
-                key = key * 31L + stack.hashCode() + (time * sampleFps).toInt()
+                key = key * 31L + stack.hashCode() +
+                    if (timeDependent) (time * sampleFps).toInt().toLong() else 0L
                 below.forEach { l ->
                     key = key * 31L + System.identityHashCode(effectedBitmaps[l.id] ?: bitmaps[l.id] ?: vectorEffected[l.id]?.bitmap)
                 }
