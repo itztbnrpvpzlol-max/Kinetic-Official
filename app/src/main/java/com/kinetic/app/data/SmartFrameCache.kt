@@ -191,6 +191,10 @@ object SmartFrameCache {
                 delay(3L)
             }
             try {
+                // Recheck after acquiring the gate: another decoder may have
+                // populated the cache between the first lookup and our claim.
+                val ready = synchronized(lock) { frames[key]?.bitmap }
+                if (ready != null) return duplicate(ready)
                 val startedNs = System.nanoTime()
                 val bitmap = MediaLoader.bitmapFor(ctx, uri, LayerType.VIDEO, timeSec, fps, edge, persistToDisk) ?: return null
                 val ms = (System.nanoTime() - startedNs) / 1_000_000f
