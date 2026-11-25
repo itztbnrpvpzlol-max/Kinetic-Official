@@ -111,7 +111,15 @@ internal class SequentialVideoFrameDecoder {
             }
             val decoder = active ?: return null
             decoder.lastRequestedUs = target
-            return decodeUntil(decoder, target, maxEdge)
+            val decoded = decodeUntil(decoder, target, maxEdge)
+            if (decoded == null) {
+                // A timeout/empty output is not necessarily an exception, but returning
+                // null here leaves the preview permanently blank because callers only
+                // activate the retriever fallback after an explicit failure signal.
+                fallbackIdentity = identity
+                closeSession()
+            }
+            return decoded
         } catch (error: Exception) {
             Log.w(TAG, "Sequential MediaCodec decode failed; enabling retriever fallback", error)
             fallbackIdentity = identity
