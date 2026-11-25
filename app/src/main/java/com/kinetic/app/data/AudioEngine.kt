@@ -23,6 +23,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.LinkedHashMap
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlin.math.abs
@@ -170,6 +171,42 @@ class AudioEngine(context: Context) {
         @Volatile private var audioStack: List<EffectInstance> = emptyList()
         @Volatile private var audioTime = 0f
         private var effectHistory = FloatArray(0)
+        private data class AudioEffectCacheKey(
+            val presentationUs: Long,
+            val startSecondsBits: Long,
+            val rate: Int,
+            val channels: Int,
+            val frames: Int,
+            val stackJson: String,
+            val inputHash: Long
+        )
+        private val audioEffectCache = object : LinkedHashMap<AudioEffectCacheKey, FloatArray>(24, 0.75f, true) {}
+        private var audioEffectCacheBytes = 0L
+        private val audioEffectCacheLimit = 2L * 1024L * 1024L
+
+        private fun hashSamples(samples: FloatArray): Long {
+            var hash = -0x340d631b7bdddcdbL
+            for (sample in samples) {
+                hash = (hash xor java.lang.Float.floatToIntBits(sample).toLong()) * 0x100000001b3L
+            }
+            return hash
+        }
+
+        private fun rememberAudioEffect(key: AudioEffectCacheKey, samples: FloatArray) {
+            val copy = samples.copyOf()
+            val size = copy.size * 4L
+            synchronized(audioEffectCache) {
+                audioEffectCache.put(key, copy)?.let { audioEffectCacheBytes -= it.size * 4L }
+                audioEffectCacheBytes += size
+                val iterator = audioEffectCache.entries.iterator()
+                while (audioEffectCacheBytes > audioEffectCacheLimit && iterator.hasNext()) {
+                    val old = iterator.next().value
+                    iterator.remove()
+                    audioEffectCacheBytes -= old.size * 4L
+                }
+            }
+        }
+
         private val prepareLatch = CountDownLatch(1)
         private val worker = Thread(::decodeLoop, "KineticAudioClip").apply {
             priority = Thread.NORM_PRIORITY + 1
@@ -447,7 +484,17 @@ class AudioEngine(context: Context) {
             val histFrames = minOf(wanted, total)
             effectHistory = if (histFrames > 0) block.copyOfRange((total - histFrames) * 2, total * 2) else FloatArray(0)
             val startSeconds = presentationUs / 1_000_000.0 - keep.toDouble() / rate
-            if (!EffectStackRunner.processAudio(block, rate, startSeconds, stack, audioTime)) return
+            val stackJson = EffectStackRunner.stackJson(stack, audioTime)
+            val cacheKey = AudioEffectCacheKey(
+                presentationUs, startSeconds.toBits(), rate, channels, frames, stackJson, hashSamples(block)
+            )
+            val cached = synchronized(audioEffectCache) { audioEffectCache[cacheKey] }
+            if (cached != null && cached.size == frames * 2) {
+                cached.copyInto(block, keep * 2)
+            } else {
+                if (!EffectStackRunner.processAudio(block, rate, startSeconds, stack, audioTime)) return
+                rememberAudioEffect(cacheKey, block.copyOfRange(keep * 2, (keep + frames) * 2))
+            }
             val output = buffer.duplicate().order(buffer.order())
             output.position(start)
             val out = output.asShortBuffer()
