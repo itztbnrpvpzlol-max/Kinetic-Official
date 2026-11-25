@@ -62,6 +62,7 @@ struct DecoderSession {
     bool stepPending = true;
     bool seekPending = true;
     int64_t seekTargetUs = 0;
+    uint64_t seekGeneration = 0;
     float manualSpeed = 1.0f;
     int64_t localPositionUs = 0;
     int64_t localAnchorNs = 0;
@@ -530,11 +531,14 @@ static bool renderFrame(DecoderSession* session, AVFrame* frame) {
 
 static bool applyPendingSeek(DecoderSession* session) {
     int64_t targetUs = 0;
+    uint64_t generation = 0;
     {
         std::lock_guard<std::mutex> lock(session->mutex);
         if (!session->seekPending) return true;
         targetUs = session->seekTargetUs;
-        session->seekPending = false;
+        generation = session->seekGeneration;
+        // Keep seekPending set while the demuxer seeks. A newer request may
+        // arrive concurrently and must not be cleared by this older seek.
     }
 
     AVStream* stream = session->format->streams[session->videoStream];
@@ -547,6 +551,13 @@ static bool applyPendingSeek(DecoderSession* session) {
         return false;
     }
     avcodec_flush_buffers(session->codec);
+    {
+        std::lock_guard<std::mutex> lock(session->mutex);
+        if (session->seekGeneration == generation) {
+            session->seekPending = false;
+        }
+        session->condition.notify_all();
+    }
     return true;
 }
 
@@ -608,6 +619,13 @@ static void* decoderThread(void* opaque) {
         if (!applyPendingSeek(session)) break;
         if (hadPendingSeek) eof = false;
 
+        // A newer seek can arrive while av_seek_frame is running. Do not read
+        // or submit packets from the older seek position.
+        {
+            std::lock_guard<std::mutex> lock(session->mutex);
+            if (session->seekPending) continue;
+        }
+
         bool shouldRead = false;
         {
             std::unique_lock<std::mutex> lock(session->mutex);
@@ -654,6 +672,16 @@ static void* decoderThread(void* opaque) {
             if (session->stop.load()) break;
             setError(session, "FFmpeg could not read the next video packet: " + ffmpegError(readResult));
             break;
+        }
+
+        // Discard a packet if scrubbing requested a newer position while the
+        // demuxer was reading it. The next loop iteration applies that seek.
+        {
+            std::lock_guard<std::mutex> lock(session->mutex);
+            if (session->seekPending) {
+                av_packet_unref(session->packet);
+                continue;
+            }
         }
 
         if (session->packet->stream_index == session->videoStream) {
@@ -764,6 +792,7 @@ Java_com_kinetic_app_engine_NativeFfmpegDecoder_nativeSetClock(
             std::llabs(target - session->lastRenderedPtsUs) > 140000) {
             session->seekTargetUs = target;
             session->seekPending = true;
+            ++session->seekGeneration;
             session->stepPending = !next.playing;
         }
     }
@@ -782,6 +811,7 @@ Java_com_kinetic_app_engine_NativeFfmpegDecoder_nativeSeek(
     const int64_t now = monotonicNs();
     session->seekTargetUs = std::max<jlong>(0, targetUs);
     session->seekPending = true;
+    ++session->seekGeneration;
     session->stepPending = !session->playing;
     session->localPositionUs = session->seekTargetUs;
     session->localAnchorNs = now;
