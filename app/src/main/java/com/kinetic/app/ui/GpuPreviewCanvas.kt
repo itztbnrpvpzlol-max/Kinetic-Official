@@ -354,9 +354,22 @@ private fun GpuCompositionPreviewCanvas(
     val hasEffectVideo = activeVideoLayers.any { layer -> EffectStackRunner.hasPictureEffects(layer.effectStack) }
     // Keep native CPU effects below the decoder's maximum sample rate on
     // constrained devices; the GL thread remains free to composite each frame.
+    // Videos beyond the hardware-decoder limit are decoded to CPU bitmaps.
+    // Their frame rate must scale with the number of simultaneous bitmap
+    // layers, otherwise each extra clip competes with the GL compositor.
+    val bitmapVideoCount = (activeVideoLayers.size - videoLayers.size).coerceAtLeast(0)
+    val layeredBitmapFps = when {
+        MediaWorkers.isConstrainedDevice && bitmapVideoCount >= 4 -> 8
+        MediaWorkers.isConstrainedDevice && bitmapVideoCount >= 2 -> 10
+        MediaWorkers.isConstrainedDevice && bitmapVideoCount >= 1 -> 12
+        bitmapVideoCount >= 4 -> 12
+        bitmapVideoCount >= 2 -> 16
+        bitmapVideoCount >= 1 -> 18
+        else -> editor.fps.coerceIn(1, 60)
+    }
     val compositionFps = if (hasEffectVideo) {
-        minOf(editor.fps, adaptiveEffectFps)
-    } else editor.fps.coerceIn(1, 60)
+        minOf(editor.fps, adaptiveEffectFps, layeredBitmapFps)
+    } else layeredBitmapFps.coerceAtMost(editor.fps.coerceIn(1, 60))
     val effectSampleFps = adaptiveEffectFps
     val latestTimelineTime = androidx.compose.runtime.rememberUpdatedState(editor.time)
     val latestPlaying = androidx.compose.runtime.rememberUpdatedState(editor.playing)
