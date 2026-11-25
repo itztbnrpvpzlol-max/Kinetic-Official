@@ -181,12 +181,12 @@ jobs:
           keytool -list -keystore app/kinetic-upload.jks -storepass "${KINETIC_KEYSTORE_PASSWORD}" -alias kinetic-upload >/dev/null
           echo "KINETIC_KEYSTORE_PASSWORD=${KINETIC_KEYSTORE_PASSWORD}" >> "${GITHUB_ENV}"
 
-      - name: Build debug APK
+      - name: Build optimized APK
         shell: bash
         run: |
           set -o pipefail
           STATUS=0
-          gradle assembleDebug --no-daemon -PKINETIC_VERSION_CODE="${KINETIC_VERSION_CODE}" -PKINETIC_VERSION_NAME="${KINETIC_VERSION_NAME}" 2>&1 | tee build.log || STATUS=$?
+          gradle assembleOptimized --no-daemon -PKINETIC_VERSION_CODE="${KINETIC_VERSION_CODE}" -PKINETIC_VERSION_NAME="${KINETIC_VERSION_NAME}" 2>&1 | tee build.log || STATUS=$?
           if [ "${STATUS}" -ne 0 ]; then
             # Surface compiler errors as annotations so they are readable without opening the raw log.
             ERRORS=$(grep -E '^e: ' build.log | head -25 | sed -E 's#file:///[^ ]*/com/kinetic/app/##' | paste -sd '~' - || true)
@@ -199,7 +199,7 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: kinetic-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
+          name: kinetic-optimized-apk
+          path: app/build/outputs/apk/optimized/*.apk
           if-no-files-found: error
           retention-days: 7

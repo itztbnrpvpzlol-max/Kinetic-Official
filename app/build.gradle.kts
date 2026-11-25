@@ -62,6 +62,19 @@ android {
             // Local builds keep Android's normal local debug key; CI uses the persistent key.
             if (kineticCiKeystore.exists()) signingConfig = signingConfigs.getByName("ci")
         }
+        // The build CI ships to the phone. NOT debuggable: a debug APK runs Compose, the JVM and every Kotlin loop
+        // unoptimized (ART cannot AOT-compile debuggable apps, Compose keeps its runtime sanity checks on), which
+        // makes the whole app several times slower than it really is. Same signing key as debug, so it installs
+        // over the existing app in place. Code shrinking stays off so reflection / JNI cannot break.
+        create("optimized") {
+            initWith(getByName("release"))
+            isMinifyEnabled = false
+            isShrinkResources = false
+            isDebuggable = false
+            isJniDebuggable = false
+            signingConfig = if (kineticCiKeystore.exists()) signingConfigs.getByName("ci") else signingConfigs.getByName("debug")
+            matchingFallbacks += listOf("release")
+        }
         release {
             isMinifyEnabled = true
             isShrinkResources = true
