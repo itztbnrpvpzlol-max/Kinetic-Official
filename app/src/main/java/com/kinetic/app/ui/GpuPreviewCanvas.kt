@@ -950,20 +950,24 @@ private fun GpuVideoPlayerLayer(
         }
     }
 
-    val previousTimelineTime = remember(layer.id) {
-        androidx.compose.runtime.mutableFloatStateOf(editor.time)
-    }
-    LaunchedEffect(editor.time, editor.playing, layer.id, player) {
-        player.updatePositionHint(sourcePositionMs)
-        if (editor.playing) {
-            if (editor.time + 0.05f < previousTimelineTime.floatValue) {
-                player.seekTo(sourcePositionMs)
+    // Observe playhead updates inside one coroutine. Keying this effect by
+    // editor.time recreated it on every frame for every video layer.
+    LaunchedEffect(editor.playing, layer.id, player, layer.start, layer.srcOffset, layer.speed) {
+        var previousTimelineTime = editor.time
+        androidx.compose.runtime.snapshotFlow { editor.time }.collect { time ->
+            val positionMs = (
+                ((time - layer.start).coerceAtLeast(0f) * layer.speed + layer.srcOffset)
+                    .coerceAtLeast(0f) * 1000f
+            ).toLong()
+            player.updatePositionHint(positionMs)
+            if (editor.playing) {
+                if (time + 0.05f < previousTimelineTime) player.seekTo(positionMs)
+            } else {
+                kotlinx.coroutines.delay(24)
+                player.seekTo(positionMs)
             }
-        } else {
-            kotlinx.coroutines.delay(24)
-            player.seekTo(sourcePositionMs)
+            previousTimelineTime = time
         }
-        previousTimelineTime.floatValue = editor.time
     }
 }
 
