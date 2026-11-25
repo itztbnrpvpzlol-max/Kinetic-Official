@@ -203,8 +203,9 @@ class AudioEngine(context: Context) {
                 val elapsedFrames = (head - startHeadFrames).coerceAtLeast(0L)
                 // playbackHeadPosition counts rendered output frames. Convert that
                 // duration back to source-timeline time using the active playback speed.
+                val clockSpeed = appliedSpeed.takeIf { it.isFinite() } ?: requestedSpeed
                 val actualMs = lastSeekMs +
-                    (elapsedFrames * requestedSpeed * 1000.0 / sampleRate).toLong()
+                    (elapsedFrames * clockSpeed * 1000.0 / sampleRate).toLong()
                 if (abs(positionMs - actualMs) > DRIFT_CORRECTION_MS &&
                     now - lastSyncMs >= CORRECTION_COOLDOWN_MS) {
                     pendingSeekMs = positionMs
@@ -272,6 +273,9 @@ class AudioEngine(context: Context) {
                     val audioTrack = track
                     if (audioTrack != null && trackStarted && !outputEos) {
                         if (!appliedSpeed.isFinite() || abs(appliedSpeed - requestedSpeed) > 0.001f) {
+                            // Preserve the source-time position using the speed that
+                            // actually played before changing AudioTrack's playback rate.
+                            reanchorPlaybackClock(audioTrack)
                             runCatching {
                                 audioTrack.playbackParams = audioTrack.playbackParams.setSpeed(requestedSpeed)
                                 appliedSpeed = requestedSpeed
@@ -282,7 +286,9 @@ class AudioEngine(context: Context) {
                         if (audioTrack.playState != AudioTrack.PLAYSTATE_PLAYING) {
                             runCatching {
                                 audioTrack.setVolume(requestedVolume.coerceIn(0f, 1f))
-                                startHeadFrames = audioTrack.playbackHeadPosition.toLong() and 0xffffffffL
+                                // A pause stops the output head. Carry its elapsed
+                                // source time forward before establishing the resume anchor.
+                                reanchorPlaybackClock(audioTrack)
                                 audioTrack.play()
                             }
                         }
@@ -349,6 +355,15 @@ class AudioEngine(context: Context) {
                 runCatching { codec?.stop(); codec?.release() }
                 runCatching { extractor?.release() }
             }
+        }
+
+        /** Advance the source-time anchor using the rate that was actually applied. */
+        private fun reanchorPlaybackClock(output: AudioTrack) {
+            val head = output.playbackHeadPosition.toLong() and 0xffffffffL
+            val elapsedFrames = (head - startHeadFrames).coerceAtLeast(0L)
+            val clockSpeed = appliedSpeed.takeIf { it.isFinite() } ?: requestedSpeed
+            lastSeekMs += (elapsedFrames * clockSpeed * 1000.0 / sampleRate).toLong()
+            startHeadFrames = head
         }
 
         private fun findAudioTrack(extractor: MediaExtractor): MediaFormat? {
