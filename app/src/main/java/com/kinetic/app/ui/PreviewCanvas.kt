@@ -477,6 +477,20 @@ fun CpuPreviewCanvas(
             nc.clipRect(0f, 0f, COMP_W, COMP_H)
             if (directVideoLayerId == null) nc.drawColor(editor.compSettings.background.toInt())
 
+            // Use a pre-rendered composition frame when one is ready. The cache
+            // was previously populated in the background but never consumed here,
+            // so cached timelines still paid the full per-layer render cost.
+            val cachedFrame = if (directVideoLayerId == null) {
+                val cacheFps = editor.compSettings.fps.coerceIn(1, 60)
+                editor.frameCache.lookup((time * cacheFps).toInt())
+            } else null
+            if (cachedFrame != null) {
+                paint.alpha = 255
+                paint.color = android.graphics.Color.WHITE
+                paint.xfermode = null
+                paint.colorFilter = null
+                nc.drawBitmap(cachedFrame, null, RectF(0f, 0f, COMP_W, COMP_H), paint)
+            } else {
             for (l in layers.asReversed()) {
                 if (!l.visible || !l.activeAt(time) || l.type == LayerType.AUDIO || l.id == directVideoLayerId) continue
                 val baseAlpha = (l.p(PropId.OPACITY).valueAt(time) * 2.55f).toInt().coerceIn(0, 255)
@@ -627,6 +641,7 @@ fun CpuPreviewCanvas(
                 textPaint.colorFilter = null
                 nc.restore()
                 }
+            }
             }
             nc.restore()
 
