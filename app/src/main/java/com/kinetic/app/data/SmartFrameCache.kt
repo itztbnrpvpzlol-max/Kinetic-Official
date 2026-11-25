@@ -23,8 +23,8 @@ class PrefetchTarget(val bucket: Int, val playing: Boolean, val speed: Float, va
 /**
  * Decoded-frame cache for preview playback.
  *
- * - Frames are kept decoded in RAM so a hit costs a memcpy instead of a
- *   decompress; callers always receive their own copy, so existing code that
+ * - Frames are kept decoded in RAM so a hit returns the shared immutable bitmap instead of a
+ *   decompress; callers must not recycle cache-owned bitmaps.
  *   recycles bitmaps stays safe.
  * - A per-layer prefetcher decodes ahead of the playhead (window grows when
  *   decoding is slow), fills around the playhead when idle, and prerolls the
@@ -83,12 +83,6 @@ object SmartFrameCache {
             e < frameMs * 0.9f && tier == 2 -> 1
             else -> tier
         }
-    }
-
-    private fun duplicate(source: Bitmap): Bitmap? = try {
-        if (source.isRecycled) null else source.copy(Bitmap.Config.ARGB_8888, false)
-    } catch (e: Throwable) {
-        null
     }
 
     private fun noteHead(media: String, bucket: Int, fps: Int, playing: Boolean) {
@@ -171,12 +165,12 @@ object SmartFrameCache {
         val bucket = (timeSec * fps).toInt()
         val key = Key(media, fps, edge, bucket)
         val exact = synchronized(lock) { frames[key]?.bitmap }
-        if (exact != null) return duplicate(exact)
+        if (exact != null) return exact.takeUnless { it.isRecycled }
         if (playing) {
             val near = nearest(media, fps, edge, bucket, maxOf(2, fps / 8))
             if (near != null) {
                 scope.launch { decodeInto(ctx, uri, key) }
-                return duplicate(near)
+                return near.takeUnless { it.isRecycled }
             }
         }
         demand.incrementAndGet()
@@ -186,7 +180,7 @@ object SmartFrameCache {
             // trigger a second identical decode after an arbitrary 60 ms wait.
             while (true) {
                 val ready = synchronized(lock) { frames[key]?.bitmap }
-                if (ready != null) return duplicate(ready)
+                if (ready != null) return ready.takeUnless { it.isRecycled }
                 if (inFlight.add(key)) break
                 delay(3L)
             }
@@ -194,12 +188,12 @@ object SmartFrameCache {
                 // Recheck after acquiring the gate: another decoder may have
                 // populated the cache between the first lookup and our claim.
                 val ready = synchronized(lock) { frames[key]?.bitmap }
-                if (ready != null) return duplicate(ready)
+                if (ready != null) return ready.takeUnless { it.isRecycled }
                 val startedNs = System.nanoTime()
                 val bitmap = MediaLoader.bitmapFor(ctx, uri, LayerType.VIDEO, timeSec, fps, edge, persistToDisk) ?: return null
                 val ms = (System.nanoTime() - startedNs) / 1_000_000f
                 recordDecode(ms, fps)
-                duplicate(bitmap)?.let { put(key, it, ms) }
+                put(key, bitmap, ms)
                 return bitmap
             } finally {
                 inFlight.remove(key)
