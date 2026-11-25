@@ -77,6 +77,25 @@ fun CpuPreviewCanvas(
     val mediaLayerSignature = mediaLayers.map {
         "${it.id}|${it.uri}|${it.type}|${it.start}|${it.duration}|${it.srcOffset}|${it.p(PropId.SPEED)}|${it.visible}|${it.effectStack.hashCode()}"
     }
+    val activeVisualLayerCount = editor.previewLayers.count {
+        it.visible && it.activeAt(editor.time) && it.type != LayerType.AUDIO &&
+            it.type != LayerType.NULL && it.type != LayerType.CAMERA && it.type != LayerType.ADJUSTMENT
+    }
+    val layerLoadFps = when {
+        MediaWorkers.isConstrainedDevice && activeVisualLayerCount >= 6 -> 8
+        MediaWorkers.isConstrainedDevice && activeVisualLayerCount >= 4 -> 10
+        MediaWorkers.isConstrainedDevice && activeVisualLayerCount >= 2 -> 12
+        activeVisualLayerCount >= 6 -> 12
+        activeVisualLayerCount >= 4 -> 16
+        activeVisualLayerCount >= 2 -> 20
+        else -> 24
+    }
+    val motionBlurSampleLimit = when {
+        activeVisualLayerCount >= 6 -> 4
+        activeVisualLayerCount >= 4 -> 6
+        activeVisualLayerCount >= 2 -> 8
+        else -> com.kinetic.app.model.MotionBlur.PREVIEW_MAX_SAMPLES
+    }
     // CPU preview decodes every video layer to bitmaps. Reduce the sampling
     // workload before several decoders compete with the compositor for CPU.
     val videoLayerCount = mediaLayers.count { it.type == LayerType.VIDEO }
@@ -265,7 +284,7 @@ fun CpuPreviewCanvas(
                     continue
                 }
                 val timeDependent = EffectStackRunner.isTimeDependent(activeEffects)
-                val effectSampleFps = if (MediaWorkers.isConstrainedDevice) 12 else MediaLoader.CPU_PREVIEW_SAMPLE_FPS
+                val effectSampleFps = minOf(layerLoadFps, if (MediaWorkers.isConstrainedDevice) 12 else MediaLoader.CPU_PREVIEW_SAMPLE_FPS)
                 val timeBucket = if (timeDependent) (timelineTime * effectSampleFps).toInt() else 0
                 var key = System.identityHashCode(source).toLong()
                 key = (key * 31L) + activeEffects.hashCode().toLong()
@@ -315,7 +334,8 @@ fun CpuPreviewCanvas(
                     continue
                 }
                 val timeDependent = EffectStackRunner.isTimeDependent(stack)
-                val bucket = if (layer.type == LayerType.PARTICULAR || timeDependent || layer.textIsAnimated) (time * 24).toInt() else 0
+                val bucketFps = minOf(layerLoadFps, if (MediaWorkers.isConstrainedDevice) 12 else 24)
+                val bucket = if (layer.type == LayerType.PARTICULAR || timeDependent || layer.textIsAnimated) (time * bucketFps).toInt() else 0
                 var key = layer.text.hashCode().toLong() * 31L + layer.textStyle.hashCode() * 17L + layer.textAnimators.hashCode() + layer.textPropsHash()
                 if (layer.textStyle.pathOnMask) key = key * 31L + layer.maskPath.hashCode()
                 key = key * 31L + layer.color + layer.width.hashCode() + layer.height.hashCode() + layer.shapeKind.hashCode()
@@ -338,7 +358,7 @@ fun CpuPreviewCanvas(
                 if (result != null) vectorEffected[layer.id] = result else vectorEffected.remove(layer.id)
                 vectorKeys[layer.id] = key
             }
-            delay(if (playing) 40L else 80L)
+            delay(if (playing) maxOf(40L, 1000L / layerLoadFps) else 80L)
         }
     }
 
@@ -476,7 +496,7 @@ fun CpuPreviewCanvas(
                 }
                 val blurTimes = com.kinetic.app.model.MotionBlur.sampleTimes(
                     l, time, editor.compSettings.shutterAngle, editor.compSettings.fps, byId,
-                    com.kinetic.app.model.MotionBlur.PREVIEW_MAX_SAMPLES
+                    motionBlurSampleLimit
                 )
                 for (sampleIndex in blurTimes.indices) {
                 val sampleTime = blurTimes[sampleIndex]
