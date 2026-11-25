@@ -77,6 +77,18 @@ fun CpuPreviewCanvas(
     val mediaLayerSignature = mediaLayers.map {
         "${it.id}|${it.uri}|${it.type}|${it.start}|${it.duration}|${it.srcOffset}|${it.p(PropId.SPEED)}|${it.visible}|${it.effectStack.hashCode()}"
     }
+    // CPU preview decodes every video layer to bitmaps. Reduce the sampling
+    // workload before several decoders compete with the compositor for CPU.
+    val videoLayerCount = mediaLayers.count { it.type == LayerType.VIDEO }
+    val layeredPreviewFps = when {
+        MediaWorkers.isConstrainedDevice && videoLayerCount >= 5 -> 8
+        MediaWorkers.isConstrainedDevice && videoLayerCount >= 3 -> 10
+        MediaWorkers.isConstrainedDevice && videoLayerCount >= 2 -> 12
+        videoLayerCount >= 5 -> 12
+        videoLayerCount >= 3 -> 16
+        else -> MediaLoader.CPU_PREVIEW_SAMPLE_FPS
+    }
+    val layeredPreviewEdge = if (MediaWorkers.isConstrainedDevice && videoLayerCount >= 5) 240 else 320
 
     // Observe the master clock outside composition. Updating this volatile
     // holder does not invalidate the editor UI on every playback tick.
@@ -94,13 +106,17 @@ fun CpuPreviewCanvas(
         for (videoLayer in mediaLayers) {
             if (videoLayer.type != LayerType.VIDEO) continue
             val videoUri = videoLayer.uri ?: continue
-            val layerFps = if (MediaWorkers.isConstrainedDevice && EffectStackRunner.hasPictureEffects(videoLayer.effectStack)) {
-                12
-            } else MediaLoader.CPU_PREVIEW_SAMPLE_FPS
+            val layerFps = if (EffectStackRunner.hasPictureEffects(videoLayer.effectStack) && MediaWorkers.isConstrainedDevice) {
+                minOf(12, layeredPreviewFps)
+            } else layeredPreviewFps
             val effected = EffectStackRunner.hasPictureEffects(videoLayer.effectStack)
             SmartFrameCache.startPrefetch(
                 this, ctx, Uri.parse(videoUri), layerFps,
-                edgeOf = { playing -> if (effected || playing || MediaWorkers.isConstrainedDevice) 320 else 640 }
+                edgeOf = { playing ->
+                    if (effected || playing || MediaWorkers.isConstrainedDevice) {
+                        if (playing && videoLayerCount >= 5 && MediaWorkers.isConstrainedDevice) 240 else layeredPreviewEdge
+                    } else 640
+                }
             ) {
                 val now = previewClock.timeSec
                 when {
@@ -149,16 +165,19 @@ fun CpuPreviewCanvas(
                 } else 0f
                 // CPU effects are expensive on low-memory phones. Limit effect-bearing
                 // preview frames to 12 fps instead of queuing 20 fps of native work.
-                val sampleFps = if (MediaWorkers.isConstrainedDevice && EffectStackRunner.hasPictureEffects(layer.effectStack)) {
-                    12
-                } else MediaLoader.CPU_PREVIEW_SAMPLE_FPS
+                val sampleFps = if (EffectStackRunner.hasPictureEffects(layer.effectStack) && MediaWorkers.isConstrainedDevice) {
+                    minOf(12, layeredPreviewFps)
+                } else layeredPreviewFps
                 val bucket = if (layer.type == LayerType.VIDEO) {
                     (sourceTime * sampleFps.toFloat()).toInt()
                 } else 0
                 val frameEdge = if (
                     EffectStackRunner.hasPictureEffects(layer.effectStack) ||
                     (layer.type == LayerType.VIDEO && (playing || MediaWorkers.isConstrainedDevice))
-                ) 320 else 640
+                ) {
+                    if (layer.type == LayerType.VIDEO && playing && videoLayerCount >= 5 && MediaWorkers.isConstrainedDevice) 240
+                    else layeredPreviewEdge
+                } else 640
                 val requestKey = bucket to frameEdge
                 if (lastRequests[layer.id] == requestKey) {
                     val retryAt = retryAfterNs[layer.id]
@@ -193,7 +212,11 @@ fun CpuPreviewCanvas(
                     EffectStackRunner.hasPictureEffects(layer.effectStack) ||
                     (layer.type == LayerType.VIDEO &&
                         (previewClock.playing || MediaWorkers.isConstrainedDevice))
-                ) 320 else 640
+                ) {
+                    if (layer.type == LayerType.VIDEO && previewClock.playing &&
+                        videoLayerCount >= 5 && MediaWorkers.isConstrainedDevice) 240
+                    else layeredPreviewEdge
+                } else 640
                 // Decode on constrained devices can take several hundred milliseconds.
                 // Do not discard a successfully decoded frame just because the playhead
                 // advanced while it was decoding: that creates a permanent stale-frame
