@@ -12,6 +12,7 @@ import android.media.MediaFormat
 import android.net.Uri
 import android.os.SystemClock
 import android.os.Process
+import android.util.Log
 import com.kinetic.app.model.Layer
 import com.kinetic.app.model.LayerType
 import com.kinetic.app.model.speedAt
@@ -157,6 +158,7 @@ class AudioEngine(context: Context) {
         @Volatile private var sampleRate = 48_000
         @Volatile private var pcmChannelCount = 2
         @Volatile private var bytesPerSample = 2
+        @Volatile private var pcmEncoding = AudioFormat.ENCODING_PCM_16BIT
         @Volatile private var appliedSpeed = Float.NaN
         @Volatile private var startHeadFrames = 0L
         @Volatile private var trackStarted = false
@@ -367,6 +369,7 @@ class AudioEngine(context: Context) {
             val minBuffer = AudioTrack.getMinBufferSize(rate, channelMask, encoding)
                 .takeIf { it > 0 } ?: (rate / 5 * channelCount * 2)
             pcmChannelCount = channelCount
+            pcmEncoding = encoding
             bytesPerSample = when (encoding) {
                 AudioFormat.ENCODING_PCM_FLOAT -> 4
                 AudioFormat.ENCODING_PCM_8BIT -> 1
@@ -442,7 +445,7 @@ class AudioEngine(context: Context) {
         }
 
         private fun writePcm(buffer: ByteBuffer, size: Int, presentationTimeUs: Long) {
-            val output = track ?: return
+            var output = track ?: return
             var remaining = size
 
             // MediaExtractor seeks to the previous sync sample. Trim decoded PCM
@@ -468,7 +471,12 @@ class AudioEngine(context: Context) {
 
             while (remaining > 0 && !closed && wantsPlayback) {
                 output.setVolume(requestedVolume.coerceIn(0f, 1f))
-                val written = output.write(buffer, remaining, AudioTrack.WRITE_NON_BLOCKING)
+                val written = runCatching {
+                    output.write(buffer, remaining, AudioTrack.WRITE_NON_BLOCKING)
+                }.getOrElse {
+                    Log.w("KineticAudio", "AudioTrack write failed", it)
+                    AudioTrack.ERROR_DEAD_OBJECT
+                }
                 if (written > 0) {
                     remaining -= written
                     if (!trackStarted && wantsPlayback) {
@@ -480,6 +488,24 @@ class AudioEngine(context: Context) {
                         output.play()
                         trackStarted = true
                     }
+                } else if (written == AudioTrack.ERROR_DEAD_OBJECT) {
+                    // A dead AudioTrack otherwise makes this non-blocking loop wait forever,
+                    // silently starving this clip for the rest of playback. Rebuild the sink;
+                    // the decoder and extractor can continue without being recreated.
+                    Log.w("KineticAudio", "AudioTrack died; rebuilding the output track")
+                    runCatching { output.release() }
+                    trackStarted = false
+                    if (closed || !wantsPlayback) return
+                    runCatching {
+                        createAudioTrack(sampleRate, pcmChannelCount, pcmEncoding)
+                    }.onFailure {
+                        Log.e("KineticAudio", "Could not rebuild AudioTrack", it)
+                        return
+                    }
+                    output = track ?: return
+                } else if (written < 0) {
+                    Log.e("KineticAudio", "AudioTrack rejected PCM write: $written")
+                    return
                 } else {
                     synchronized(lock) {
                         if (!closed && wantsPlayback && pendingSeekMs < 0L) lock.wait(2L)
