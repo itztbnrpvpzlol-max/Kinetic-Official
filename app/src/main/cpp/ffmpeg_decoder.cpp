@@ -779,11 +779,22 @@ Java_com_kinetic_app_engine_NativeFfmpegDecoder_nativeSeek(
     auto* session = fromHandle(handle);
     if (!session || session->stop.load()) return;
     std::lock_guard<std::mutex> lock(session->mutex);
+    const int64_t now = monotonicNs();
     session->seekTargetUs = std::max<jlong>(0, targetUs);
     session->seekPending = true;
     session->stepPending = !session->playing;
     session->localPositionUs = session->seekTargetUs;
-    session->localAnchorNs = monotonicNs();
+    session->localAnchorNs = now;
+
+    // A direct seek changes the source-time origin. If a master clock was
+    // already active, rebase it too; otherwise frame pacing continues against
+    // the pre-seek position and can discard or mis-time the requested frames.
+    if (session->clock.valid) {
+        session->clock.positionUs = 0;
+        session->clock.monotonicNs = now;
+        session->clock.clipStartUs = 0;
+        session->clock.sourceOffsetUs = session->seekTargetUs;
+    }
     session->condition.notify_all();
 }
 
