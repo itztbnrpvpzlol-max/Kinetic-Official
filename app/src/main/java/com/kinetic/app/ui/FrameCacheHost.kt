@@ -87,7 +87,14 @@ fun FrameCacheHost(editor: EditorState) {
                         }
                     }
                     val now = System.currentTimeMillis()
-                    if (next < 0) {
+                    if (next < 0 || (
+                            cache.isFull() &&
+                            kotlin.math.abs(next - head) > cache.farthestDistance()
+                        )
+                    ) {
+                        // If the whole composition exceeds the compressed RAM budget,
+                        // stop at the resident window instead of repeatedly rendering
+                        // frames that would immediately evict themselves.
                         if (now - lastRefresh > 1500) { cache.refreshRanges(total); lastRefresh = now }
                         delay(250L)
                         continue
