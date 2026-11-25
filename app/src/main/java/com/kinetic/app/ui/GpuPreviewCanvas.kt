@@ -914,8 +914,10 @@ private fun GpuVideoPlayerLayer(
     playback: NativePlaybackEngine?,
     onDecoderFailed: (String) -> Unit
 ) {
-    val sourceTime = ((editor.time - layer.start).coerceAtLeast(0f) * layer.speed + layer.srcOffset)
-        .coerceAtLeast(0f)
+    // Use the same integrated source-time mapping as the audio engine and
+    // split/trim operations. This keeps video aligned when clip speed is
+    // animated or a segment inherits a non-1x speed curve.
+    val sourceTime = (layer.sourceElapsedAt(editor.time) + layer.srcOffset).coerceAtLeast(0f)
     val sourcePositionMs = (sourceTime * 1000f).toLong()
 
     DisposableEffect(player, surfaceView, layer.id) {
@@ -953,9 +955,18 @@ private fun GpuVideoPlayerLayer(
             val clipSpeed = layer.speed.coerceIn(0.1f, 4f)
             while (true) {
                 val clock = playback.clockSnapshot()
-                player.syncMasterClock(clock.positionUs, clock.monotonicNs, clock.speed,
-                    clock.playing, clipStartUs, sourceOffsetUs, clipSpeed, clock.generation)
-                kotlinx.coroutines.delay(33L)
+                // Anchor the decoder at the clock snapshot's exact timeline time.
+                // sourceElapsedAt integrates animated speed curves, matching AudioEngine.
+                val anchorTime = (clock.positionUs / 1_000_000.0).toFloat()
+                val mappedSourceOffsetUs = (
+                    (layer.srcOffset + layer.sourceElapsedAt(anchorTime)) * 1_000_000.0
+                ).toLong().coerceAtLeast(0L)
+                val mappedClipSpeed = layer.speedAt(anchorTime)
+                player.syncMasterClock(
+                    clock.positionUs, clock.monotonicNs, clock.speed, clock.playing,
+                    clock.positionUs, mappedSourceOffsetUs, mappedClipSpeed, clock.generation
+                )
+                kotlinx.coroutines.delay(16L)
             }
         }
     }
