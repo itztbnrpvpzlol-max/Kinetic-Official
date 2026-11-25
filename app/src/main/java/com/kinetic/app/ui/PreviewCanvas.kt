@@ -235,19 +235,21 @@ fun CpuPreviewCanvas(
                         videoLayerCount >= 5 && MediaWorkers.isConstrainedDevice) 240
                     else layeredPreviewEdge
                 } else 640
-                // Decode on constrained devices can take several hundred milliseconds.
-                // Do not discard a successfully decoded frame just because the playhead
-                // advanced while it was decoding: that creates a permanent stale-frame
-                // loop (decode -> reject -> decode -> reject) and looks like a frozen
-                // preview. Keep the latest available frame until the next one arrives.
+                // A decode can finish long after its request became obsolete. Never
+                // publish a frame for a clip that the playhead has already left, and
+                // never let a frame several samples behind replace a newer preview.
+                // One-bucket tolerance avoids rejecting every frame on slower devices.
+                val stillActive = layer.visible && layer.activeAt(currentTime)
+                val requestStillRelevant = currentBucket >= bucket &&
+                    currentBucket - bucket <= 1
                 if (frame == null) {
                     // A transient retriever miss must not permanently suppress this bucket.
-                    retryAfterNs[layer.id] = System.nanoTime() + 150_000_000L
+                    retryAfterNs[layer.id] = System.nanoTime() + 80_000_000L
                 } else {
                     retryAfterNs.remove(layer.id)
                 }
-                if (frame != null && currentEdge == frameEdge &&
-                    currentBucket >= bucket
+                if (frame != null && stillActive && requestStillRelevant &&
+                    currentEdge == frameEdge
                 ) {
                     bitmaps[layer.id] = frame
                 }
