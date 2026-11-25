@@ -78,6 +78,7 @@ class PreviewFrameCache {
         synchronized(lock) {
             if (directory?.absolutePath == dir.absolutePath) {
                 budgetBytes = maxBytes.coerceAtLeast(8L * 1024L * 1024L)
+                evictToBudget()
                 return
             }
             decoded.values.forEach { if (!it.second.isRecycled) it.second.recycle() }
@@ -109,7 +110,7 @@ class PreviewFrameCache {
     fun setSignatures(sigs: FrameSignatures?) { signatures = sigs }
 
     /** Stop at the configured disk budget instead of evicting already-prerendered timeline frames. */
-    fun isFull(): Boolean = synchronized(lock) { bytes >= budgetBytes * 0.98 }
+    fun isFull(): Boolean = synchronized(lock) { bytes >= budgetBytes * 0.90 }
 
     fun hasValid(frame: Int): Boolean {
         val sig = signatures?.sigAt(frame) ?: return false
@@ -133,7 +134,6 @@ class PreviewFrameCache {
             try {
                 FileOutputStream(temp).use { stream ->
                     stream.write(data)
-                    stream.fd.sync()
                 }
                 // Remove the old index/file before installing the replacement. Doing
                 // this in the opposite order can delete the freshly-renamed target.
@@ -205,7 +205,7 @@ class PreviewFrameCache {
             synchronized(lock) {
                 val current = entries[frame]
                 if (current?.sig == sig && signatures?.sigAt(frame) == sig) {
-                    decoded.put(frame, sig to bitmap)
+                    decoded.put(frame, sig to bitmap)?.second?.let { if (!it.isRecycled) it.recycle() }
                 } else if (!bitmap.isRecycled) bitmap.recycle()
             }
         }
