@@ -15,13 +15,11 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
-import kotlin.math.abs
 import kotlin.math.ceil
 
 /**
- * Starts the moment the editor opens: renders every frame of the root composition in the background
- * (nearest the playhead first) into the RAM frame cache. When a layer changes, only the frames that layer
- * appears in become invalid; the filler re-renders just those, after the edit settles.
+ * Maintains a small playhead-local RAM preview cache.
+ * Expensive composition rendering is paused during playback and while the user is scrubbing.
  */
 @Composable
 fun FrameCacheHost(editor: EditorState) {
@@ -45,8 +43,13 @@ fun FrameCacheHost(editor: EditorState) {
             // Let a drag / typing settle before spending CPU re-rendering.
             delay(400)
             val maxMem = Runtime.getRuntime().maxMemory()
-            cache.budgetBytes = minOf(192L * 1024L * 1024L, maxMem / 5L).coerceAtLeast(48L * 1024L * 1024L)
-            val w = (if (com.kinetic.app.data.MediaWorkers.isConstrainedDevice) 480 else 640)
+            val constrained = com.kinetic.app.data.MediaWorkers.isConstrainedDevice
+            cache.budgetBytes = if (constrained) {
+                (maxMem / 16L).coerceIn(8L * 1024L * 1024L, 24L * 1024L * 1024L)
+            } else {
+                (maxMem / 8L).coerceIn(16L * 1024L * 1024L, 96L * 1024L * 1024L)
+            }
+            val w = (if (constrained) 320 else 480)
                 .coerceAtMost(COMP_W.toInt().coerceAtLeast(2)).let { it - it % 2 }
             val h = (w * COMP_H / COMP_W).toInt().coerceAtLeast(2).let { it - it % 2 }
             var renderer: ExportFrameRenderer? = null
@@ -62,37 +65,48 @@ fun FrameCacheHost(editor: EditorState) {
                     cache.playheadFrame = head
                     val tick = System.currentTimeMillis()
                     if (head != lastHead) { lastHead = head; lastMoveAt = tick }
+                    // JPEG decompression is done here, off the UI thread, in a tiny window.
+                    cache.prefetchDecode(head, 3, total)
                     if (editor.playing) {
-                        cache.prefetchDecode(head + 1, 8, total)
-                        // Live playback needs every bit of CPU for decoding. Only keep caching while playing if the
-                        // cache is already well ahead of the playhead (which is then playing from RAM, not decoding).
-                        var aheadReady = true
-                        for (i in 1..45) {
-                            val f = head + i
-                            if (f >= total) break
-                            if (!cache.hasValid(f)) { aheadReady = false; break }
-                        }
-                        if (!aheadReady) { delay(120L); continue }
+                        // Never run the expensive composition renderer during live playback.
+                        delay(100L)
+                        continue
                     } else if (tick - lastMoveAt < 300L) {
                         // Scrubbing / seeking: do not compete with the preview while the playhead is moving.
                         delay(80L); continue
                     }
+                    // Keep only a short window around the playhead warm. Rendering the
+                    // entire composition in the background competes with editing and wastes RAM.
                     var next = -1
-                    for (i in 0 until total) {
-                        val f = (head + i) % total
-                        if (f !in failed && !cache.hasValid(f)) { next = f; break }
+                    val ahead = maxOf(1, fps * 2)
+                    val behind = maxOf(1, fps / 2)
+                    for (offset in 0..ahead) {
+                        val frame = head + offset
+                        if (frame < total && frame !in failed && !cache.hasValid(frame)) {
+                            next = frame
+                            break
+                        }
+                    }
+                    if (next < 0) {
+                        for (offset in 1..behind) {
+                            val frame = head - offset
+                            if (frame >= 0 && frame !in failed && !cache.hasValid(frame)) {
+                                next = frame
+                                break
+                            }
+                        }
                     }
                     val now = System.currentTimeMillis()
-                    if (next < 0 || (cache.isFull() && abs(next - head) >= cache.farthestDistance())) {
-                        if (now - lastRefresh > 400) { cache.refreshRanges(total); lastRefresh = now }
-                        delay(if (editor.playing) 60L else 250L)
+                    if (next < 0) {
+                        if (now - lastRefresh > 1500) { cache.refreshRanges(total); lastRefresh = now }
+                        delay(250L)
                         continue
                     }
                     try {
                         val r = renderer ?: ExportFrameRenderer(context, layers, comp, w, h, fps).also { renderer = it }
                         val bmp: Bitmap = r.render(next / fps.toFloat())
                         out.reset()
-                        bmp.compress(Bitmap.CompressFormat.JPEG, 84, out)
+                        bmp.compress(Bitmap.CompressFormat.JPEG, 80, out)
                         cache.put(next, sigs.sigAt(next), out.toByteArray())
                     } catch (e: Throwable) {
                         if (e is kotlinx.coroutines.CancellationException) throw e
@@ -100,9 +114,9 @@ fun FrameCacheHost(editor: EditorState) {
                         runCatching { renderer?.close() }
                         renderer = null
                     }
-                    if (now - lastRefresh > 400) { cache.refreshRanges(total); lastRefresh = now }
+                    if (now - lastRefresh > 1500) { cache.refreshRanges(total); lastRefresh = now }
                     // Stay out of the way of live playback and scrubbing: yield a little between frames.
-                    delay(if (editor.playing) 4L else 1L)
+                    delay(40L)
                 }
             } finally {
                 runCatching { renderer?.close() }
