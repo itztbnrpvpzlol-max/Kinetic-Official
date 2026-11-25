@@ -336,9 +336,12 @@ static bool renderHardwareFrame(DecoderSession* session, AVFrame* frame) {
         seekPending = session->seekPending;
         seekTargetUs = session->seekTargetUs;
         expectedUs = expectedSourceUsLocked(session, monotonicNs());
+        // The master transport and clip can each run up to 4x. The
+        // source clock advances at their product, so preserve the full
+        // combined range when converting source-time deltas to wall time.
         rate = session->clock.valid
-            ? std::clamp(session->clock.masterSpeed * session->clock.clipSpeed, 0.1, 4.0)
-            : std::max(0.1f, session->manualSpeed);
+            ? std::clamp(session->clock.masterSpeed * session->clock.clipSpeed, 0.01, 16.0)
+            : std::clamp(static_cast<double>(session->manualSpeed), 0.1, 4.0);
     }
     if (ptsUs < 0) ptsUs = expectedUs;
     if (seekPending) {
@@ -442,11 +445,18 @@ static bool renderSoftwareFrame(DecoderSession* session, AVFrame* frame) {
 
         const int64_t deltaUs = ptsUs - expectedUs;
         if (deltaUs < -100000) return true;
-        if (deltaUs <= 50000) {
+        if (deltaUs <= 2000) {
+            // Present close to the master clock instead of showing frames
+            // noticeably early and letting the next decoded frames bunch up.
             shouldRender = true;
             break;
         }
-        session->condition.wait_for(lock, std::chrono::milliseconds(8));
+        const double playbackRate = session->clock.valid
+            ? std::clamp(session->clock.masterSpeed * session->clock.clipSpeed, 0.01, 16.0)
+            : std::clamp(static_cast<double>(session->manualSpeed), 0.1, 4.0);
+        const int64_t waitUs = static_cast<int64_t>(deltaUs / playbackRate);
+        session->condition.wait_for(lock,
+            std::chrono::microseconds(std::clamp<int64_t>(waitUs, 500, 8000)));
     }
 
     if (!shouldRender || session->stop.load()) return true;
