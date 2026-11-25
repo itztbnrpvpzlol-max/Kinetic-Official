@@ -143,14 +143,14 @@ object SmartFrameCache {
     private fun has(key: Key): Boolean = synchronized(lock) { frames.containsKey(key) }
 
     private fun nearest(media: String, fps: Int, edge: Int, bucket: Int, maxLag: Int): Bitmap? = synchronized(lock) {
-        var found: Bitmap? = null
+        // During playback only reuse a very recent frame from behind the source
+        // playhead. Never show a future sample or an old sample several buckets
+        // away: that looks like clips arriving after the playhead has passed them.
         for (lag in 1..maxLag) {
             val older = frames[Key(media, fps, edge, bucket - lag)]
-            if (older != null) { found = older.bitmap; break }
-            val newer = frames[Key(media, fps, edge, bucket + lag)]
-            if (newer != null) { found = newer.bitmap; break }
+            if (older != null) return@synchronized older.bitmap
         }
-        found
+        null
     }
 
     /**
@@ -167,7 +167,7 @@ object SmartFrameCache {
         val exact = synchronized(lock) { frames[key]?.bitmap }
         if (exact != null) return exact.takeUnless { it.isRecycled }
         if (playing) {
-            val near = nearest(media, fps, edge, bucket, maxOf(2, fps / 8))
+            val near = nearest(media, fps, edge, bucket, 1)
             if (near != null) {
                 scope.launch { decodeInto(ctx, uri, key) }
                 return near.takeUnless { it.isRecycled }
