@@ -371,7 +371,27 @@ private fun GpuCompositionPreviewCanvas(
     val compositionFps = if (hasEffectVideo) {
         minOf(editor.fps, adaptiveEffectFps, layeredBitmapFps)
     } else layeredBitmapFps.coerceAtMost(editor.fps.coerceIn(1, 60))
-    val effectSampleFps = adaptiveEffectFps
+    // Budget expensive sampling across every active visual layer, not just video.
+    val activeVisualLayerCount = editor.previewLayers.count {
+        it.visible && it.activeAt(editor.time) && it.type != LayerType.AUDIO &&
+            it.type != LayerType.NULL && it.type != LayerType.CAMERA && it.type != LayerType.ADJUSTMENT
+    }
+    val layerLoadFps = when {
+        MediaWorkers.isConstrainedDevice && activeVisualLayerCount >= 6 -> 8
+        MediaWorkers.isConstrainedDevice && activeVisualLayerCount >= 4 -> 10
+        MediaWorkers.isConstrainedDevice && activeVisualLayerCount >= 2 -> 12
+        activeVisualLayerCount >= 6 -> 12
+        activeVisualLayerCount >= 4 -> 16
+        activeVisualLayerCount >= 2 -> 20
+        else -> 24
+    }
+    val motionBlurSampleLimit = when {
+        activeVisualLayerCount >= 6 -> 4
+        activeVisualLayerCount >= 4 -> 6
+        activeVisualLayerCount >= 2 -> 8
+        else -> com.kinetic.app.model.MotionBlur.PREVIEW_MAX_SAMPLES
+    }
+    val effectSampleFps = minOf(adaptiveEffectFps, layerLoadFps)
     val latestTimelineTime = androidx.compose.runtime.rememberUpdatedState(editor.time)
     val latestPlaying = androidx.compose.runtime.rememberUpdatedState(editor.playing)
 
@@ -673,7 +693,7 @@ private fun GpuCompositionPreviewCanvas(
     fun motionBlurSampleTimes(layer: com.kinetic.app.model.Layer): FloatArray =
         com.kinetic.app.model.MotionBlur.sampleTimes(
             layer, editor.time, editor.compSettings.shutterAngle, editor.compSettings.fps,
-            byId, com.kinetic.app.model.MotionBlur.PREVIEW_MAX_SAMPLES
+            byId, motionBlurSampleLimit
         )
     fun sampleOpacity(opacity: Float, index: Int, count: Int): Float =
         com.kinetic.app.model.MotionBlur.sampleAlpha(opacity, index, count)
