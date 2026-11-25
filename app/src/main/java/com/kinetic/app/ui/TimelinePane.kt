@@ -800,7 +800,12 @@ private fun Clip(editor: EditorState, layer: Layer, pps: Float, selected: Boolea
         } else if (layer.type == LayerType.IMAGE) {
             listOfNotNull(MediaLoader.bitmapFor(ctx, Uri.parse(u), LayerType.IMAGE, 0f, 1, 320, lowPriorityRequest = true, persistToDisk = false))
         } else {
-            val fractions = floatArrayOf(0f, 0.25f, 0.5f, 0.75f)
+            // Timeline thumbnails are background work. Keep the strip lighter
+            // on constrained devices so a large layer stack doesn't flood the
+            // shared cache worker with dozens of frame decodes.
+            val fractions = if (MediaWorkers.isConstrainedDevice) {
+                floatArrayOf(0f, 0.5f)
+            } else floatArrayOf(0f, 0.25f, 0.5f, 0.75f)
             buildList {
                 for (fraction in fractions) {
                     var sourceTime = layer.srcOffset + layer.duration * fraction * layer.speed
