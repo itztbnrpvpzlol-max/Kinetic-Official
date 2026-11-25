@@ -521,8 +521,7 @@ private fun GpuCompositionPreviewCanvas(
                             }
                             wasActive = true
                             val sourceTime = (
-                                (timelineTime - layer.start).coerceAtLeast(0f) *
-                                    layer.speed + layer.srcOffset
+                                layer.sourceElapsedAt(timelineTime) + layer.srcOffset
                             ).coerceAtLeast(0f)
                             if (frames[layer.id] == null) {
                                 val recent = recentVideoFrames[uri]
