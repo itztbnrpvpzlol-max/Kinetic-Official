@@ -1123,12 +1123,20 @@ private fun PreviewToolsBar(
         else layer.props.flatMap { (id, prop) -> prop.keys.map { id to it } }
     }.orEmpty().sortedBy { it.second.t }
     val tolerance = editor.frame / 2f
-    val canSkipPrevious = editor.previousBeatMarker() != null ||
+    // A selected layer owns skip navigation: never let beat markers steal
+    // previous/next keyframe or layer-edge jumps.
+    val canSkipPrevious = if (selectedLayer != null) {
         selectedKeyframes.any { it.second.t < editor.time - tolerance } ||
-        (selectedLayer != null && editor.time > selectedLayer.start + tolerance) || editor.time > tolerance
-    val canSkipNext = editor.nextBeatMarker() != null ||
+            editor.time > selectedLayer.start + tolerance
+    } else {
+        editor.previousBeatMarker() != null || editor.time > tolerance
+    }
+    val canSkipNext = if (selectedLayer != null) {
         selectedKeyframes.any { it.second.t > editor.time + tolerance } ||
-        (selectedLayer != null && editor.time < selectedLayer.end - tolerance) || editor.time < editor.duration - tolerance
+            editor.time < selectedLayer.end - tolerance
+    } else {
+        editor.nextBeatMarker() != null || editor.time < editor.duration - tolerance
+    }
     val canStepBack = editor.time > tolerance
     val canStepForward = editor.time < editor.duration - tolerance
 
@@ -1148,16 +1156,15 @@ private fun PreviewToolsBar(
         ) {
             PreviewTool(IconKind.SKIP_START, canSkipPrevious) {
                 editor.playing = false
-                val previousBeat = editor.previousBeatMarker()
                 val previous = selectedKeyframes.lastOrNull { it.second.t < editor.time - tolerance }
                 when {
-                    previousBeat != null -> editor.seek(previousBeat)
-                    previous != null && selectedLayer != null -> {
+                    selectedLayer != null && previous != null -> {
                         val (id, key) = previous
                         editor.selectProp(id)
                         editor.selectKey(id, selectedLayer.p(id).keys.indexOf(key), key.t)
                     }
-                    selectedLayer != null && editor.time > selectedLayer.start + tolerance -> editor.seek(selectedLayer.start)
+                    selectedLayer != null -> editor.seek(selectedLayer.start)
+                    editor.previousBeatMarker() != null -> editor.seek(editor.previousBeatMarker()!!)
                     else -> editor.seek(0f)
                 }
             }
@@ -1172,16 +1179,15 @@ private fun PreviewToolsBar(
             }
             PreviewTool(IconKind.SKIP_END, canSkipNext) {
                 editor.playing = false
-                val nextBeat = editor.nextBeatMarker()
                 val next = selectedKeyframes.firstOrNull { it.second.t > editor.time + tolerance }
                 when {
-                    nextBeat != null -> editor.seek(nextBeat)
-                    next != null && selectedLayer != null -> {
+                    selectedLayer != null && next != null -> {
                         val (id, key) = next
                         editor.selectProp(id)
                         editor.selectKey(id, selectedLayer.p(id).keys.indexOf(key), key.t)
                     }
-                    selectedLayer != null && editor.time < selectedLayer.end - tolerance -> editor.seek(selectedLayer.end)
+                    selectedLayer != null -> editor.seek(selectedLayer.end)
+                    editor.nextBeatMarker() != null -> editor.seek(editor.nextBeatMarker()!!)
                     else -> editor.seek(editor.duration)
                 }
             }
