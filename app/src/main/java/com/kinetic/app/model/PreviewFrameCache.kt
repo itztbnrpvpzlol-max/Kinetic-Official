@@ -108,6 +108,9 @@ class PreviewFrameCache {
 
     fun setSignatures(sigs: FrameSignatures?) { signatures = sigs }
 
+    /** Stop at the configured disk budget instead of evicting already-prerendered timeline frames. */
+    fun isFull(): Boolean = synchronized(lock) { bytes >= budgetBytes * 0.98 }
+
     fun hasValid(frame: Int): Boolean {
         val sig = signatures?.sigAt(frame) ?: return false
         synchronized(lock) {
