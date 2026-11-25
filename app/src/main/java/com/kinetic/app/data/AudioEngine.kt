@@ -238,11 +238,11 @@ class AudioEngine(context: Context) {
             } else if (currentTrack != null && trackStarted) {
                 val head = currentTrack.playbackHeadPosition.toLong() and 0xffffffffL
                 val elapsedFrames = (head - startHeadFrames).coerceAtLeast(0L)
-                // playbackHeadPosition counts rendered output frames. Convert that
-                // duration back to source-timeline time using the active playback speed.
-                val clockSpeed = appliedSpeed.takeIf { it.isFinite() } ?: requestedSpeed
+                // playbackHeadPosition already counts frames consumed by AudioTrack.
+                // PlaybackParams changes how quickly those frames are consumed, so
+                // multiplying by speed here would apply the clip rate twice.
                 val actualMs = lastSeekMs +
-                    (elapsedFrames * clockSpeed * 1000.0 / sampleRate).toLong()
+                    (elapsedFrames * 1000.0 / sampleRate).toLong()
                 if (abs(positionMs - actualMs) > DRIFT_CORRECTION_MS &&
                     now - lastSyncMs >= CORRECTION_COOLDOWN_MS) {
                     pendingSeekMs = positionMs
@@ -398,8 +398,9 @@ class AudioEngine(context: Context) {
         private fun reanchorPlaybackClock(output: AudioTrack) {
             val head = output.playbackHeadPosition.toLong() and 0xffffffffL
             val elapsedFrames = (head - startHeadFrames).coerceAtLeast(0L)
-            val clockSpeed = appliedSpeed.takeIf { it.isFinite() } ?: requestedSpeed
-            lastSeekMs += (elapsedFrames * clockSpeed * 1000.0 / sampleRate).toLong()
+            // The head is already measured in consumed source frames; do not
+            // multiply by PlaybackParams speed a second time.
+            lastSeekMs += (elapsedFrames * 1000.0 / sampleRate).toLong()
             startHeadFrames = head
         }
 
