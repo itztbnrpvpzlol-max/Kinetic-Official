@@ -243,11 +243,8 @@ internal fun DirectSurfaceVideoPreview(
         }
     }
 
-    LaunchedEffect(player, playback, layer.start, layer.srcOffset, layer.p(PropId.SPEED).base) {
+    LaunchedEffect(player, playback, layer.start, layer.srcOffset, layer.p(PropId.SPEED)) {
         if (playback != null) {
-            val clipStartUs = (layer.start * 1_000_000.0).toLong()
-            val sourceOffsetUs = (layer.srcOffset * 1_000_000.0).toLong()
-            val clipSpeed = layer.speedAt(editor.time)
             var lastGeneration = Long.MIN_VALUE
             var lastPlaying = false
             var lastSentNs = 0L
@@ -259,15 +256,20 @@ internal fun DirectSurfaceVideoPreview(
                 if (clock.generation != lastGeneration || clock.playing != lastPlaying ||
                     nowNs - lastSentNs > 100_000_000L
                 ) {
+                    val anchorTime = (clock.positionUs / 1_000_000.0).toFloat()
+                    val mappedSourceOffsetUs = (
+                        (layer.srcOffset + layer.sourceElapsedAt(anchorTime)) * 1_000_000.0
+                    ).toLong().coerceAtLeast(0L)
                     player.syncMasterClock(
                         clock.positionUs, clock.monotonicNs, clock.speed, clock.playing,
-                        clipStartUs, sourceOffsetUs, clipSpeed, clock.generation
+                        clock.positionUs, mappedSourceOffsetUs, layer.speedAt(anchorTime),
+                        clock.generation
                     )
                     lastGeneration = clock.generation
                     lastPlaying = clock.playing
                     lastSentNs = nowNs
                 }
-                delay(50L)
+                delay(16L)
             }
         }
     }
