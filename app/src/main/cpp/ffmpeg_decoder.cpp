@@ -633,7 +633,19 @@ static void* decoderThread(void* opaque) {
         const int readResult = av_read_frame(session->format, session->packet);
         if (readResult == AVERROR_EOF) {
             eof = true;
-            avcodec_send_packet(session->codec, nullptr);
+            int flushResult = avcodec_send_packet(session->codec, nullptr);
+            if (flushResult == AVERROR(EAGAIN)) {
+                // The decoder still has output queued. Drain it before retrying
+                // the null packet; ignoring EAGAIN here can lose delayed B-frames.
+                bool received = false;
+                if (!drainDecoder(session, &received)) break;
+                flushResult = avcodec_send_packet(session->codec, nullptr);
+            }
+            if (flushResult < 0 && flushResult != AVERROR_EOF) {
+                setError(session, "FFmpeg could not flush delayed video frames: " +
+                    ffmpegError(flushResult));
+                break;
+            }
             bool received = false;
             if (!drainDecoder(session, &received)) break;
             continue;
