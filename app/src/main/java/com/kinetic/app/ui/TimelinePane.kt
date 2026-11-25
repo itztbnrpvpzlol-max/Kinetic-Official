@@ -363,7 +363,7 @@ private fun Ruler(editor: EditorState, pps: Float, contentW: Dp, leadingPad: Dp)
                 drawPath(head, KColors.Accent)
             }
         }
-        // Cached frames (valid in the RAM frame cache) show as a green bar along the top of the ruler.
+        // Verified disk-prerendered frame ranges show as a green bar along the top of the ruler.
         val cacheFps = editor.fps.coerceAtLeast(1)
         editor.frameCache.ranges.forEach { r ->
             val x1 = originX + r.first / cacheFps.toFloat() * pps * dens
