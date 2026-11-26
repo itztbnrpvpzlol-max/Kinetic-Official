@@ -148,12 +148,13 @@ object EffectStackRunner {
      */
     fun processBitmap(
         source: Bitmap, effects: List<EffectInstance>, time: Float, layerTime: Float,
-        frameRate: Float, layerWidth: Float, layerHeight: Float, adjustment: Boolean = false
+        frameRate: Float, layerWidth: Float, layerHeight: Float, adjustment: Boolean = false,
+        cacheResult: Boolean = true
     ): Bitmap? {
         val active = pictureEffects(effects)
         if (active.isEmpty() || !EffectCraftNative.available || source.isRecycled) return null
-        val key = effectCacheKey(source, active, time, layerTime, frameRate, layerWidth, layerHeight, "bitmap:$adjustment")
-        cachedEffect(key)?.let { cached ->
+        val key = if (cacheResult) effectCacheKey(source, active, time, layerTime, frameRate, layerWidth, layerHeight, "bitmap:$adjustment") else null
+        if (key != null) cachedEffect(key)?.let { cached ->
             return runCatching { cached.bitmap.copy(Bitmap.Config.ARGB_8888, true) }.getOrNull()
         }
         val output = runCatching { source.copy(Bitmap.Config.ARGB_8888, true) }.getOrNull() ?: return null
@@ -171,7 +172,7 @@ object EffectStackRunner {
             count
         }.getOrDefault(-1)
         if (applied > 0) {
-            rememberEffect(key, output)
+            if (key != null) rememberEffect(key, output)
             return output
         }
         if (!output.isRecycled) output.recycle()
@@ -190,12 +191,13 @@ object EffectStackRunner {
      */
     fun processBitmapGrown(
         source: Bitmap, effects: List<EffectInstance>, time: Float, layerTime: Float, frameRate: Float,
-        layerWidth: Float, layerHeight: Float, maxPixels: Int, adjustment: Boolean = false
+        layerWidth: Float, layerHeight: Float, maxPixels: Int, adjustment: Boolean = false,
+        cacheResult: Boolean = true
     ): Effected? {
         val active = pictureEffects(effects)
         if (active.isEmpty() || !EffectCraftNative.available || source.isRecycled) return null
-        val key = effectCacheKey(source, active, time, layerTime, frameRate, layerWidth, layerHeight, "grown:$adjustment:$maxPixels")
-        cachedEffect(key)?.let { cached ->
+        val key = if (cacheResult) effectCacheKey(source, active, time, layerTime, frameRate, layerWidth, layerHeight, "grown:$adjustment:$maxPixels") else null
+        if (key != null) cachedEffect(key)?.let { cached ->
             val copy = runCatching { cached.bitmap.copy(Bitmap.Config.ARGB_8888, true) }.getOrNull()
             if (copy != null) return Effected(copy, cached.left, cached.top, cached.right, cached.bottom)
         }
@@ -214,7 +216,7 @@ object EffectStackRunner {
             if (count <= 0) return@runCatching null
             val (ow, oh) = info[0] to info[1]
             if (ow <= 0 || oh <= 0) return@runCatching null
-            val out = ByteBuffer.allocateDirect(ow * oh * 4)
+            val out = scratch(ow * oh * 4)
             if (EffectCraftNative.nativeTakeGrown(out) < 0) return@runCatching null
             out.rewind()
             val bitmap = Bitmap.createBitmap(ow, oh, Bitmap.Config.ARGB_8888)
@@ -225,7 +227,7 @@ object EffectStackRunner {
             val top = info[3] * sy
             val right = info[4] * sx
             val bottom = info[5] * sy
-            rememberEffect(key, bitmap, left, top, right, bottom)
+            if (key != null) rememberEffect(key, bitmap, left, top, right, bottom)
             Effected(bitmap, left, top, right, bottom)
         }.getOrNull()
     }
