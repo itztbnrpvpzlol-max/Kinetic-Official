@@ -54,8 +54,8 @@ internal object GlExportPath {
         return visual.all { l ->
             (l.type == LayerType.VIDEO || l.type == LayerType.IMAGE || l.type == LayerType.TEXT || l.type == LayerType.SHAPE) &&
                 (l.uri != null || l.type == LayerType.TEXT || l.type == LayerType.SHAPE) &&
-                !l.is3D && !l.motionBlur && l.effectStack.isEmpty() && l.effects.isEmpty() &&
-                !(l.maskClips && l.maskPath != null) && l.blendMode == "Normal"
+                !l.is3D && !l.motionBlur && l.effectStack.isEmpty() &&
+                !(l.maskClips && l.maskPath != null) && l.blendMode == "Normal" && "Grayscale" !in l.effects
         }
     }
 }
