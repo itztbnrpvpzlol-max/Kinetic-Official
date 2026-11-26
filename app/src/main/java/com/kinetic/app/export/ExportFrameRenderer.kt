@@ -85,7 +85,7 @@ internal class ExportFrameRenderer(
         val stack = EffectStackRunner.pictureEffects(layer.effectStack).take(12)
         if (stack.isEmpty()) return
         val processed = EffectStackRunner.processBitmap(
-            bitmap, stack, time, time - layer.start, fps.toFloat(), COMP_W, COMP_H, adjustment = true
+            bitmap, stack, time, time - layer.start, fps.toFloat(), COMP_W, COMP_H, adjustment = true, cacheResult = false
         ) ?: return
         paint.reset()
         paint.isFilterBitmap = true
@@ -105,7 +105,7 @@ internal class ExportFrameRenderer(
         if (stack.isEmpty()) return piece
         val effected = EffectStackRunner.processBitmapGrown(
             piece.bitmap, stack, time, time - layer.start, fps.toFloat(),
-            layer.width, layer.height, MAX_EFFECT_PIXELS
+            layer.width, layer.height, MAX_EFFECT_PIXELS, cacheResult = layer.type == LayerType.IMAGE
         ) ?: return piece
         val d = piece.dest
         return Piece(
