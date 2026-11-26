@@ -374,7 +374,11 @@ Java_com_kinetic_app_engine_NativeRenderEngine_nativeGlEnsureCompositionCache(
     const int safeHeight = std::max(1, height);
     const int64_t requiredBytes = static_cast<int64_t>(safeWidth) *
                                   static_cast<int64_t>(safeHeight) * 4LL;
-    if (width <= 0 || height <= 0 || budgetBytes <= 0 || requiredBytes > budgetBytes) {
+    GLint maxTextureSize = 0;
+    glGetIntegerv(GL_MAX_TEXTURE_SIZE, &maxTextureSize);
+    if (width <= 0 || height <= 0 || maxTextureSize <= 0 ||
+        width > maxTextureSize || height > maxTextureSize ||
+        budgetBytes <= 0 || requiredBytes > budgetBytes) {
         releaseCompositionTarget();
         return JNI_FALSE;
     }
@@ -398,6 +402,15 @@ Java_com_kinetic_app_engine_NativeRenderEngine_nativeGlEnsureCompositionCache(
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0,
                  GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    const GLenum allocationError = glGetError();
+    if (allocationError != GL_NO_ERROR) {
+        __android_log_print(ANDROID_LOG_WARN, "KRE",
+            "Composition texture allocation failed: GL error 0x%x (%dx%d)",
+            allocationError, width, height);
+        glDeleteFramebuffers(1, &framebuffer);
+        glDeleteTextures(1, &texture);
+        return JNI_FALSE;
+    }
     glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
                            GL_TEXTURE_2D, texture, 0);
@@ -573,10 +586,18 @@ Java_com_kinetic_app_engine_NativeRenderEngine_nativeGlInit(JNIEnv*, jobject) {
         gTexturePosition >= 0 && gTextureUv >= 0 && gTextureSampler >= 0 &&
         gTextureAlpha >= 0 && gTextureGray >= 0 &&
         gSolidPosition >= 0 && gSolidColor >= 0;
-    const bool externalLocationsValid = !gExternalProgram ||
-        (gExternalPosition >= 0 && gExternalUv >= 0 && gExternalSampler >= 0 &&
-         gExternalAlpha >= 0 && gExternalGray >= 0 && gExternalMatrix >= 0);
-    if (!locationsValid || !externalLocationsValid) {
+    const bool externalLocationsValid = gExternalProgram &&
+        gExternalPosition >= 0 && gExternalUv >= 0 && gExternalSampler >= 0 &&
+        gExternalAlpha >= 0 && gExternalGray >= 0 && gExternalMatrix >= 0;
+    if (gExternalProgram && !externalLocationsValid) {
+        __android_log_print(ANDROID_LOG_WARN, "KRE",
+            "External video shader linked with invalid inputs; disabling OES video sampling");
+        glDeleteProgram(gExternalProgram);
+        gExternalProgram = 0;
+        gExternalPosition = gExternalUv = gExternalSampler = -1;
+        gExternalAlpha = gExternalGray = gExternalMatrix = -1;
+    }
+    if (!locationsValid) {
         __android_log_print(ANDROID_LOG_ERROR, "KRE", "Required GLES3 shader inputs were not linked");
         if (gTextureProgram) glDeleteProgram(gTextureProgram);
         if (gExternalProgram) glDeleteProgram(gExternalProgram);
@@ -590,7 +611,13 @@ Java_com_kinetic_app_engine_NativeRenderEngine_nativeGlInit(JNIEnv*, jobject) {
         gSolidPosition = gSolidColor = -1;
         return JNI_FALSE;
     }
-    __android_log_print(ANDROID_LOG_INFO, "KRE", "Native GLES3 renderer initialized");
+    GLint maxTextureSize = 0;
+    glGetIntegerv(GL_MAX_TEXTURE_SIZE, &maxTextureSize);
+    __android_log_print(ANDROID_LOG_INFO, "KRE",
+        "Native GLES renderer initialized: GL %s, GLSL %s, maxTexture=%d, externalVideo=%s",
+        reinterpret_cast<const char*>(glGetString(GL_VERSION)),
+        reinterpret_cast<const char*>(glGetString(GL_SHADING_LANGUAGE_VERSION)),
+        maxTextureSize, gExternalProgram ? "yes" : "no");
     return JNI_TRUE;
 }
 
