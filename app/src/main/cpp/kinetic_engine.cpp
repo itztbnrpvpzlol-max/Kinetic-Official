@@ -621,6 +621,11 @@ Java_com_kinetic_app_engine_NativeRenderEngine_nativeGlInit(JNIEnv*, jobject) {
     return JNI_TRUE;
 }
 
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_kinetic_app_engine_NativeRenderEngine_nativeGlHasExternalVideo(JNIEnv*, jobject) {
+    return gExternalProgram ? JNI_TRUE : JNI_FALSE;
+}
+
 extern "C" JNIEXPORT void JNICALL
 Java_com_kinetic_app_engine_NativeRenderEngine_nativeGlDrawTexture(
         JNIEnv* env, jobject, jint textureId, jfloatArray vertices,
