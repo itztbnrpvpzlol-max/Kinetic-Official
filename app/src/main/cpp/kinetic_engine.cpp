@@ -525,9 +525,17 @@ Java_com_kinetic_app_engine_NativeRenderEngine_nativeGlInit(JNIEnv*, jobject) {
         "void main(){ fragColor=uColor; }";
 
     gTextureProgram = linkGlProgram(vertex, textureFragment);
-    gExternalProgram = linkGlProgram(vertex, externalFragment);
     gSolidProgram = linkGlProgram(solidVertex, solidFragment);
-    if (!gTextureProgram || !gExternalProgram || !gSolidProgram) {
+
+    // External OES video sampling is an optional capability. A driver that
+    // cannot compile this extension must not disable the regular GLES renderer.
+    const char* extensionText = reinterpret_cast<const char*>(glGetString(GL_EXTENSIONS));
+    const bool hasExternalEssl3 = extensionText &&
+        std::strstr(extensionText, "GL_OES_EGL_image_external_essl3") != nullptr;
+    gExternalProgram = hasExternalEssl3 ? linkGlProgram(vertex, externalFragment) : 0;
+    if (!gTextureProgram || !gSolidProgram) {
+        __android_log_print(ANDROID_LOG_ERROR, "KRE",
+            "Core GLES3 programs unavailable (texture=%u solid=%u)", gTextureProgram, gSolidProgram);
         if (gTextureProgram) glDeleteProgram(gTextureProgram);
         if (gExternalProgram) glDeleteProgram(gExternalProgram);
         if (gSolidProgram) glDeleteProgram(gSolidProgram);
@@ -538,28 +546,37 @@ Java_com_kinetic_app_engine_NativeRenderEngine_nativeGlInit(JNIEnv*, jobject) {
         gVertexArrayObject = 0;
         return JNI_FALSE;
     }
+    if (!gExternalProgram) {
+        __android_log_print(ANDROID_LOG_WARN, "KRE",
+            "External OES GLES3 video shader unavailable; 2D GPU rendering remains enabled");
+    }
 
     gTexturePosition = glGetAttribLocation(gTextureProgram, "aPosition");
     gTextureUv = glGetAttribLocation(gTextureProgram, "aTexCoord");
     gTextureSampler = glGetUniformLocation(gTextureProgram, "uTexture");
     gTextureAlpha = glGetUniformLocation(gTextureProgram, "uAlpha");
     gTextureGray = glGetUniformLocation(gTextureProgram, "uGray");
-    gExternalPosition = glGetAttribLocation(gExternalProgram, "aPosition");
-    gExternalUv = glGetAttribLocation(gExternalProgram, "aTexCoord");
-    gExternalSampler = glGetUniformLocation(gExternalProgram, "uTexture");
-    gExternalAlpha = glGetUniformLocation(gExternalProgram, "uAlpha");
-    gExternalGray = glGetUniformLocation(gExternalProgram, "uGray");
-    gExternalMatrix = glGetUniformLocation(gExternalProgram, "uTexMatrix");
+    gExternalPosition = gExternalUv = gExternalSampler = -1;
+    gExternalAlpha = gExternalGray = gExternalMatrix = -1;
+    if (gExternalProgram) {
+        gExternalPosition = glGetAttribLocation(gExternalProgram, "aPosition");
+        gExternalUv = glGetAttribLocation(gExternalProgram, "aTexCoord");
+        gExternalSampler = glGetUniformLocation(gExternalProgram, "uTexture");
+        gExternalAlpha = glGetUniformLocation(gExternalProgram, "uAlpha");
+        gExternalGray = glGetUniformLocation(gExternalProgram, "uGray");
+        gExternalMatrix = glGetUniformLocation(gExternalProgram, "uTexMatrix");
+    }
     gSolidPosition = glGetAttribLocation(gSolidProgram, "aPosition");
     gSolidColor = glGetUniformLocation(gSolidProgram, "uColor");
 
     const bool locationsValid =
         gTexturePosition >= 0 && gTextureUv >= 0 && gTextureSampler >= 0 &&
         gTextureAlpha >= 0 && gTextureGray >= 0 &&
-        gExternalPosition >= 0 && gExternalUv >= 0 && gExternalSampler >= 0 &&
-        gExternalAlpha >= 0 && gExternalGray >= 0 && gExternalMatrix >= 0 &&
         gSolidPosition >= 0 && gSolidColor >= 0;
-    if (!locationsValid) {
+    const bool externalLocationsValid = !gExternalProgram ||
+        (gExternalPosition >= 0 && gExternalUv >= 0 && gExternalSampler >= 0 &&
+         gExternalAlpha >= 0 && gExternalGray >= 0 && gExternalMatrix >= 0);
+    if (!locationsValid || !externalLocationsValid) {
         __android_log_print(ANDROID_LOG_ERROR, "KRE", "Required GLES3 shader inputs were not linked");
         if (gTextureProgram) glDeleteProgram(gTextureProgram);
         if (gExternalProgram) glDeleteProgram(gExternalProgram);
@@ -594,7 +611,7 @@ extern "C" JNIEXPORT void JNICALL
 Java_com_kinetic_app_engine_NativeRenderEngine_nativeGlDrawExternalTexture(
         JNIEnv* env, jobject, jint textureId, jfloatArray vertices,
         jfloat alpha, jfloat gray, jfloatArray textureMatrix, jint blendMode) {
-    if (!vertices || env->GetArrayLength(vertices) < 16 ||
+    if (!gExternalProgram || !vertices || env->GetArrayLength(vertices) < 16 ||
         !textureMatrix || env->GetArrayLength(textureMatrix) < 16) return;
     jfloat* data = env->GetFloatArrayElements(vertices, nullptr);
     jfloat* matrix = env->GetFloatArrayElements(textureMatrix, nullptr);
