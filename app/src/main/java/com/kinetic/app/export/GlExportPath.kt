@@ -610,7 +610,7 @@ internal class GlFrameComposer(
             decoder.textureId, decoder.texMatrix,
             (decoder.displayWidth * k).toInt().coerceAtLeast(2), (decoder.displayHeight * k).toInt().coerceAtLeast(2)
         )
-        drawProcessed(layer, time, captured, RectF(left, top, left + w, top + h), stack, true)
+        drawProcessed(layer, time, captured, RectF(left, top, left + w, top + h), stack, true, cacheResult = false)
     }
 
     private fun drawImage(layer: Layer, time: Float) {
@@ -639,15 +639,15 @@ internal class GlFrameComposer(
 
     private fun drawVector(layer: Layer, time: Float) {
         val bitmap = LayerRaster.render(layer, time, targetEdge(layer), allowUpscale = true) ?: return
-        drawProcessed(layer, time, bitmap, RectF(0f, 0f, layer.width, layer.height), effectStack(layer), true)
+        drawProcessed(layer, time, bitmap, RectF(0f, 0f, layer.width, layer.height), effectStack(layer), true, cacheResult = false)
     }
 
     private fun drawProcessed(
         layer: Layer, time: Float, source: Bitmap, dest: RectF,
-        stack: List<com.kinetic.app.model.EffectInstance>, ownsSource: Boolean
+        stack: List<com.kinetic.app.model.EffectInstance>, ownsSource: Boolean, cacheResult: Boolean = true
     ) {
         val effected = if (stack.isEmpty()) null else EffectStackRunner.processBitmapGrown(
-            source, stack, time, time - layer.start, fps.toFloat(), layer.width, layer.height, MAX_EFFECT_PIXELS
+            source, stack, time, time - layer.start, fps.toFloat(), layer.width, layer.height, MAX_EFFECT_PIXELS, cacheResult = cacheResult
         )
         val bitmap = effected?.bitmap ?: source
         val rect = if (effected != null) {
