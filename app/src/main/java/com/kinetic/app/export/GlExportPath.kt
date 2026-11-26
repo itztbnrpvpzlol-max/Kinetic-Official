@@ -54,8 +54,8 @@ internal object GlExportPath {
         return visual.all { l ->
             (l.type == LayerType.VIDEO || l.type == LayerType.IMAGE || l.type == LayerType.TEXT || l.type == LayerType.SHAPE) &&
                 (l.uri != null || l.type == LayerType.TEXT || l.type == LayerType.SHAPE) &&
-                !l.is3D && !(l.maskClips && l.maskPath != null) && l.blendMode == "Normal" &&
-                "Grayscale" !in l.effects
+                !l.is3D && !l.motionBlur && l.effectStack.isEmpty() && l.effects.isEmpty() &&
+                !(l.maskClips && l.maskPath != null) && l.blendMode == "Normal"
         }
     }
 }
@@ -555,8 +555,8 @@ internal class GlFrameComposer(
         }
         var thumb: Bitmap? = null
         val now = SystemClock.elapsedRealtime()
-        if (wantThumbnail && now - lastThumbAt >= 400L) {
-            thumb = runCatching { renderer.readThumbnail(540) }.getOrNull()
+        if (wantThumbnail && now - lastThumbAt >= 1_200L) {
+            thumb = runCatching { renderer.readThumbnail(320) }.getOrNull()
             lastThumbAt = now
         }
         renderer.present(presentationNs)
