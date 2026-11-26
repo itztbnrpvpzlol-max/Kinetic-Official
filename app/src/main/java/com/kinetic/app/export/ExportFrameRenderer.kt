@@ -105,7 +105,7 @@ internal class ExportFrameRenderer(
         if (stack.isEmpty()) return piece
         val effected = EffectStackRunner.processBitmapGrown(
             piece.bitmap, stack, time, time - layer.start, fps.toFloat(),
-            layer.width, layer.height, MAX_EFFECT_PIXELS, cacheResult = layer.type == LayerType.IMAGE
+            layer.width, layer.height, MAX_EFFECT_PIXELS, cacheResult = false
         ) ?: return piece
         val d = piece.dest
         return Piece(
