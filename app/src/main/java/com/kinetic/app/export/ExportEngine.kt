@@ -122,7 +122,7 @@ object ExportEngine {
         // 2. Video encoder fed through a GL surface.
         fun buildFormat(fast: Boolean) = MediaFormat.createVideoFormat(codec.mime, settings.width, settings.height).apply {
             if (fast) {
-                setInteger(MediaFormat.KEY_PRIORITY, 1)
+                setInteger(MediaFormat.KEY_PRIORITY, 0)
                 setInteger(MediaFormat.KEY_OPERATING_RATE, 480)
             }
             setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
