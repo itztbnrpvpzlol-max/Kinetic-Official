@@ -1165,7 +1165,7 @@ private class CompositionGlRenderer(
             onVideoSurfaceAvailable(id, existing.surface)
             return
         }
-        if (program == 0) return
+        if (program == 0 || externalProgram == 0) return
         val names = IntArray(1)
         GLES20.glGenTextures(1, names, 0)
         if (names[0] == 0) return
@@ -1297,7 +1297,10 @@ private class CompositionGlRenderer(
             // all shader programs and draw calls are owned by the C++ renderer.
             program = 1
             solidProgram = 1
-            externalProgram = 1
+            externalProgram = if (NativeRenderEngine.nativeGlHasExternalVideo()) 1 else 0
+            if (externalProgram == 0) {
+                Log.w("KineticGpu", "GLES3 core renderer active; external OES video unavailable, using cached video frames")
+            }
         } catch (error: Throwable) {
             program = 0
             solidProgram = 0
