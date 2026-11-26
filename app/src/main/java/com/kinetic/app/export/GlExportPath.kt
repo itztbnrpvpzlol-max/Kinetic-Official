@@ -397,11 +397,11 @@ internal class SurfaceVideoDecoder(
             outputSurface = Surface(texture)
             created = MediaCodec.createDecoderByType(mime)
             try {
-                format.setInteger(MediaFormat.KEY_PRIORITY, 1)
+                format.setInteger(MediaFormat.KEY_PRIORITY, 0)
                 format.setInteger(MediaFormat.KEY_OPERATING_RATE, 480)
                 created.configure(format, outputSurface, null, 0)
             } catch (e: Exception) {
-                format.setInteger(MediaFormat.KEY_PRIORITY, 0)
+                format.setInteger(MediaFormat.KEY_PRIORITY, 1)
                 if (android.os.Build.VERSION.SDK_INT >= 29) format.removeKey(MediaFormat.KEY_OPERATING_RATE)
                 created.configure(format, outputSurface, null, 0)
             }
