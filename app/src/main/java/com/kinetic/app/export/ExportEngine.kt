@@ -162,7 +162,7 @@ object ExportEngine {
                 val time = (settings.start + i.toFloat() / settings.fps).coerceAtMost(settings.end - 0.0001f)
                 val presentationNs = i * 1_000_000_000L / settings.fps
                 val now = SystemClock.elapsedRealtime()
-                val wantPreview = wantPreviews && (i == total - 1 || now - lastPreviewAt >= 400L)
+                val wantPreview = wantPreviews && (i == total - 1 || now - lastPreviewAt >= 1_200L)
                 val activeComposer = composer
                 if (activeComposer != null) {
                     activeComposer.render(time, presentationNs, wantPreview)?.let { onPreview(it) }
