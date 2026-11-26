@@ -26,6 +26,7 @@ object NativeRenderEngine {
 
     /** Initializes the native OpenGL ES 3.x composition renderer on the GL thread. */
     external fun nativeGlInit(): Boolean
+    external fun nativeGlHasExternalVideo(): Boolean
     external fun nativeGlEnsureCompositionCache(width: Int, height: Int, budgetBytes: Long): Boolean
     external fun nativeGlReleaseCompositionCache()
     external fun nativeGlPresentCompositionCache(width: Int, height: Int): Boolean
