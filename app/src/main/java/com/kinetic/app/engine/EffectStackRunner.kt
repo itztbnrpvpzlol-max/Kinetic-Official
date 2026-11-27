@@ -111,7 +111,7 @@ object EffectStackRunner {
         synchronized(effectCacheLock) {
             effectBitmapCache.remove(key)?.let { old ->
                 effectBitmapCacheBytes -= old.bitmap.allocationByteCount.toLong()
-                if (!old.bitmap.isRecycled) old.bitmap.recycle()
+                // Cache entries may be read concurrently; drop ownership and let GC reclaim.
             }
             effectBitmapCache[key] = CachedEffectBitmap(copy, left, top, right, bottom)
             effectBitmapCacheBytes += copy.allocationByteCount.toLong()
@@ -120,14 +120,15 @@ object EffectStackRunner {
                 val old = iterator.next().value
                 iterator.remove()
                 effectBitmapCacheBytes -= old.bitmap.allocationByteCount.toLong()
-                if (!old.bitmap.isRecycled) old.bitmap.recycle()
+                // Do not recycle a bitmap another render thread may currently be copying.
             }
         }
     }
 
     /** Explicitly drops retained effect results, for memory-pressure handling. */
     fun clearEffectCache() = synchronized(effectCacheLock) {
-        effectBitmapCache.values.forEach { if (!it.bitmap.isRecycled) it.bitmap.recycle() }
+        // Effect results are immutable and may be read concurrently. Drop references
+        // instead of recycling bitmaps that another render thread may be copying.
         effectBitmapCache.clear()
         effectBitmapCacheBytes = 0L
     }
