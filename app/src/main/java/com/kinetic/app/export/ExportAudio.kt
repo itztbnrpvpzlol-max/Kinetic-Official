@@ -216,7 +216,14 @@ internal object ExportAudio {
             setInteger(MediaFormat.KEY_BIT_RATE, bitrate)
             setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 64 * 1024)
         }
-        val encoder = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_AUDIO_AAC)
+        // If the platform cannot create an AAC encoder, release every decoder
+        // opened above before propagating the export failure.
+        val encoder = try {
+            MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_AUDIO_AAC)
+        } catch (error: Throwable) {
+            sources.forEach { runCatching { it.second.close() } }
+            throw error
+        }
         val samples = ArrayList<EncodedSample>()
         var outputFormat: MediaFormat? = null
         var ended = false
