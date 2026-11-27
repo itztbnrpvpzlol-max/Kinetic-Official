@@ -35,6 +35,11 @@ object MediaLoader {
 
     private val retrievers = ConcurrentHashMap<String, MediaMetadataRetriever>()
     private val retrieverLocks = ConcurrentHashMap<String, Any>()
+    // Never intern per-frame cache keys: the JVM string pool retains them globally.
+    // A small striped lock array bounds synchronization state independently of timeline length.
+    private val frameDecodeLocks = Array(64) { Any() }
+    private fun frameDecodeLock(key: String): Any =
+        frameDecodeLocks[(key.hashCode() and Int.MAX_VALUE) % frameDecodeLocks.size]
     private val videoFrameSpecs = ConcurrentHashMap<String, VideoFrameSpec>()
     private val sequentialVideoDecoder = SequentialVideoFrameDecoder()
     private val retrieverRegistryLock = Any()
@@ -198,7 +203,7 @@ object MediaLoader {
             val bucket = if (type == LayerType.VIDEO) (timeSec * sampleFps.toFloat()).toInt() else 0
             val sourceKey = mediaCacheIdentity(uri)
             val key = if (type == LayerType.IMAGE) "$sourceKey@image@$maxEdge" else "$sourceKey@$sampleFps@$maxEdge@$bucket"
-            synchronized(key.intern()) {
+            synchronized(frameDecodeLock(key)) {
                 val diskFile = if (type == LayerType.VIDEO || persistToDisk) previewFrameFile(ctx, key, type) else null
                 val memoryBytes = compressedPreviewFrameCache.get(key)
                 val ramBitmap = memoryBytes?.let { BitmapFactory.decodeByteArray(it, 0, it.size) }
