@@ -254,15 +254,24 @@ internal object ExportAudio {
         fun feed(pcm: ByteArray, size: Int, ptsUs: Long, last: Boolean) {
             var offset = 0
             var pts = ptsUs
+            var inputWaits = 0
             while (true) {
                 val index = encoder.dequeueInputBuffer(10_000)
                 if (index < 0) {
                     drain(0)
+                    if (++inputWaits >= 1_000) {
+                        throw java.io.IOException("Audio encoder stopped accepting input.")
+                    }
                     continue
                 }
+                inputWaits = 0
                 val buffer = encoder.getInputBuffer(index) ?: throw java.io.IOException("Audio encoder returned no input buffer.")
                 buffer.clear()
-                val chunk = minOf(buffer.remaining(), size - offset)
+                val remaining = size - offset
+                val chunk = minOf(buffer.remaining(), remaining)
+                if (chunk <= 0) {
+                    throw java.io.IOException("Audio encoder input buffer has no available capacity.")
+                }
                 buffer.put(pcm, offset, chunk)
                 offset += chunk
                 val done = offset >= size
@@ -312,6 +321,7 @@ internal object ExportAudio {
             // The last input carried the end-of-stream flag; collect whatever the encoder still holds.
             var guard = 0
             while (!ended && guard++ < 1_000) drain(10_000)
+            if (!ended) throw java.io.IOException("Audio encoder did not finish the output stream.")
         } finally {
             runCatching { encoder.stop() }
             runCatching { encoder.release() }
