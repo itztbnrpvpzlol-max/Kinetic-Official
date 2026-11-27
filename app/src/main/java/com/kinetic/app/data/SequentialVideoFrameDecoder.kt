@@ -58,10 +58,13 @@ internal class SequentialVideoFrameDecoder {
     @Synchronized
     fun decodeFrameShared(context: Context, uri: Uri, identity: String, targetUs: Long, maxEdge: Int): Bitmap? {
         val target = targetUs.coerceAtLeast(0L)
+        // Never retain a decoded frame from a previous source or preview size.
+        // The bitmap may still be in use by a caller, so drop our reference only.
+        if (sharedIdentity != identity || sharedEdge != maxEdge) clearSharedFrame()
         val cached = sharedFrame
-        if (cached != null && !cached.isRecycled && sharedIdentity == identity && sharedEdge == maxEdge &&
-            target >= sharedRequestedUs && target <= sharedPresentationUs
-        ) return cached
+        if (cached != null && !cached.isRecycled && target >= sharedRequestedUs && target <= sharedPresentationUs) {
+            return cached
+        }
         val frame = decodeFrame(context, uri, identity, targetUs, maxEdge) ?: return null
         sharedFrame = frame
         sharedIdentity = identity
@@ -81,6 +84,7 @@ internal class SequentialVideoFrameDecoder {
             val needsNewSource = active == null || active.identity != identity
             if (needsNewSource) {
                 closeSession()
+                if (sharedIdentity != identity) clearSharedFrame()
                 active = openSession(context, uri, identity, target)
                 session = active
             } else {
@@ -132,6 +136,17 @@ internal class SequentialVideoFrameDecoder {
     fun release() {
         closeSession()
         fallbackIdentity = null
+        clearSharedFrame()
+    }
+
+    private fun clearSharedFrame() {
+        // Frames are shared with preview callers; releasing the cache reference is
+        // safe, recycling here could invalidate a bitmap currently being drawn.
+        sharedFrame = null
+        sharedIdentity = null
+        sharedEdge = 0
+        sharedRequestedUs = 0L
+        sharedPresentationUs = 0L
     }
 
     private fun openSession(context: Context, uri: Uri, identity: String, targetUs: Long): Session? {
