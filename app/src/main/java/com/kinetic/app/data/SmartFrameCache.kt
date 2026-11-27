@@ -161,7 +161,7 @@ object SmartFrameCache {
     suspend fun fetch(
         ctx: Context, uri: Uri, timeSec: Float, fps: Int, edge: Int, playing: Boolean, persistToDisk: Boolean
     ): Bitmap? {
-        val media = uri.toString()
+        val media = MediaLoader.cacheIdentity(uri)
         val bucket = (timeSec * fps).toInt()
         val key = Key(media, fps, edge, bucket)
         val exact = synchronized(lock) { frames[key]?.bitmap }
@@ -262,7 +262,7 @@ object SmartFrameCache {
         scope: CoroutineScope, ctx: Context, uri: Uri, fps: Int,
         edgeOf: (Boolean) -> Int, target: () -> PrefetchTarget?
     ): Job = scope.launch {
-        val media = uri.toString()
+        val media = MediaLoader.cacheIdentity(uri)
         while (isActive) {
             val t = target()
             if (t == null) {
