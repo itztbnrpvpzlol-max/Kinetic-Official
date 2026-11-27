@@ -37,9 +37,12 @@ object MediaLoader {
     private val retrieverLocks = ConcurrentHashMap<String, Any>()
     // Never intern per-frame cache keys: the JVM string pool retains them globally.
     // A small striped lock array bounds synchronization state independently of timeline length.
-    private val frameDecodeLocks = Array(64) { Any() }
-    private fun frameDecodeLock(key: String): Any =
-        frameDecodeLocks[(key.hashCode() and Int.MAX_VALUE) % frameDecodeLocks.size]
+    private val foregroundFrameDecodeLocks = Array(64) { Any() }
+    private val backgroundFrameDecodeLocks = Array(64) { Any() }
+    private fun frameDecodeLock(key: String, lowPriority: Boolean): Any {
+        val locks = if (lowPriority) backgroundFrameDecodeLocks else foregroundFrameDecodeLocks
+        return locks[(key.hashCode() and Int.MAX_VALUE) % locks.size]
+    }
     private val videoFrameSpecs = ConcurrentHashMap<String, VideoFrameSpec>()
     private val sequentialVideoDecoder = SequentialVideoFrameDecoder()
     private val retrieverRegistryLock = Any()
@@ -128,7 +131,13 @@ object MediaLoader {
                 retrieverLru[key] = Unit
                 existing
             } else {
-                val created = MediaMetadataRetriever().apply { setDataSource(ctx, uri) }
+                val created = MediaMetadataRetriever()
+                try {
+                    created.setDataSource(ctx, uri)
+                } catch (failure: Throwable) {
+                    runCatching { created.release() }
+                    throw failure
+                }
                 retrievers[key] = created
                 retrieverLru[key] = Unit
                 while (retrieverLru.size > maxCachedRetrievers) {
@@ -203,7 +212,7 @@ object MediaLoader {
             val bucket = if (type == LayerType.VIDEO) (timeSec * sampleFps.toFloat()).toInt() else 0
             val sourceKey = mediaCacheIdentity(uri)
             val key = if (type == LayerType.IMAGE) "$sourceKey@image@$maxEdge" else "$sourceKey@$sampleFps@$maxEdge@$bucket"
-            synchronized(frameDecodeLock(key)) {
+            synchronized(frameDecodeLock(key, lowPriorityRequest)) {
                 val diskFile = if (type == LayerType.VIDEO || persistToDisk) previewFrameFile(ctx, key, type) else null
                 val memoryBytes = compressedPreviewFrameCache.get(key)
                 val ramBitmap = memoryBytes?.let { BitmapFactory.decodeByteArray(it, 0, it.size) }
@@ -271,6 +280,8 @@ object MediaLoader {
             }
         }
     }
+
+    internal fun cacheIdentity(uri: Uri): String = mediaCacheIdentity(uri)
 
     private fun mediaCacheIdentity(uri: Uri): String {
         val file = uri.path?.let(::File)
@@ -583,9 +594,20 @@ object MediaLoader {
             } else {
                 val frame = r.getFrameAtTime(timeUs, option) ?: return@synchronized null
                 val longest = maxOf(frame.width, frame.height)
-                if (longest <= maxEdge) frame else {
+                if (longest <= maxEdge) {
+                    frame
+                } else {
                     val scale = maxEdge.toFloat() / longest
-                    Bitmap.createScaledBitmap(frame, (frame.width * scale).toInt(), (frame.height * scale).toInt(), true)
+                    try {
+                        Bitmap.createScaledBitmap(
+                            frame,
+                            (frame.width * scale).toInt().coerceAtLeast(1),
+                            (frame.height * scale).toInt().coerceAtLeast(1),
+                            true
+                        )
+                    } finally {
+                        if (!frame.isRecycled) frame.recycle()
+                    }
                 }
             }
         }
