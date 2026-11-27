@@ -208,8 +208,13 @@ object SmartFrameCache {
         try {
             if (has(key)) return false
             val startedNs = System.nanoTime()
+            // Look-ahead is background work: keep it off the single foreground
+            // preview decoder so a cache miss for the current frame is never queued
+            // behind speculative future frames. It yields whenever playback requests
+            // an interactive decode.
             val bitmap = MediaLoader.bitmapFor(
-                ctx, uri, LayerType.VIDEO, (key.bucket + 0.5f) / key.fps, key.fps, key.edge, false
+                ctx, uri, LayerType.VIDEO, (key.bucket + 0.5f) / key.fps,
+                key.fps, key.edge, persistToDisk = false, lowPriorityRequest = true
             ) ?: return false
             val ms = (System.nanoTime() - startedNs) / 1_000_000f
             recordDecode(ms, key.fps)
