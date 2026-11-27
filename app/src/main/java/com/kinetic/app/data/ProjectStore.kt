@@ -126,7 +126,12 @@ class ProjectStore(context: Context) {
             } catch (_: Exception) { null }
         }?.sortedByDescending { it.updatedAt } ?: emptyList()
 
+    private fun validProjectId(id: String): Boolean =
+        id.length in 1..80 && id.all { it.isLetterOrDigit() || it == '-' || it == '_' }
+
+    @Synchronized
     fun save(editor: EditorState) {
+        require(validProjectId(editor.projectId)) { "Invalid project ID." }
         val layers = JSONArray()
         editor.projectLayers.forEach { layer -> layers.put(layerToJson(layer)) }
         val json = JSONObject()
@@ -143,15 +148,21 @@ class ProjectStore(context: Context) {
             .put("beatMarkers", JSONArray().also { markers -> editor.beatMarkers.forEach { markers.put(it.toDouble()) } })
             .put("layers", layers)
         val target = File(root, "${editor.projectId}.kinetic")
-        val temp = File(root, "${editor.projectId}.tmp")
-        temp.writeText(json.toString())
-        if (!temp.renameTo(target)) {
-            target.writeText(json.toString())
-            temp.delete()
+        // Unique temp files prevent overlapping autosaves from clobbering each other.
+        val temp = File(root, ".${editor.projectId}-${UUID.randomUUID()}.tmp")
+        try {
+            temp.writeText(json.toString())
+            // Never fall back to overwriting the live project: a failed rename must
+            // leave the previous valid project untouched.
+            if (!temp.renameTo(target)) {
+                throw java.io.IOException("Couldn't atomically save project.")
+            }
+        } finally {
+            if (temp.exists()) temp.delete()
         }
     }
 
-    fun load(id: String): LoadedProject? = try {
+    fun load(id: String): LoadedProject? = if (!validProjectId(id)) null else try {
         val json = JSONObject(File(root, "$id.kinetic").readText())
         val layersJson = json.optJSONArray("layers") ?: JSONArray()
         val layers = (0 until layersJson.length()).mapNotNull { i ->
@@ -175,7 +186,7 @@ class ProjectStore(context: Context) {
             json.optInt("resolution", 1), json.optDouble("time", 0.0).toFloat(), layers, comp, beatMarkers)
     } catch (_: Exception) { null }
 
-    fun delete(id: String) { File(root, "$id.kinetic").delete() }
+    fun delete(id: String) { if (validProjectId(id)) File(root, "$id.kinetic").delete() }
 
     private fun layerToJson(l: Layer): JSONObject {
         val props = JSONObject()
