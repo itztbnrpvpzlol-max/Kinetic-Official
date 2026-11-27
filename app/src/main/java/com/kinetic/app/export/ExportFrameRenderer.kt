@@ -87,11 +87,15 @@ internal class ExportFrameRenderer(
         val processed = EffectStackRunner.processBitmap(
             bitmap, stack, time, time - layer.start, fps.toFloat(), COMP_W, COMP_H, adjustment = true, cacheResult = false
         ) ?: return
-        paint.reset()
-        paint.isFilterBitmap = true
-        paint.alpha = opacityOf(layer, time)
-        canvas.drawBitmap(processed, 0f, 0f, paint)
-        processed.recycle()
+        try {
+            paint.reset()
+            paint.isFilterBitmap = true
+            paint.alpha = opacityOf(layer, time)
+            canvas.drawBitmap(processed, 0f, 0f, paint)
+        } finally {
+            if (!processed.isRecycled) processed.recycle()
+            paint.reset()
+        }
     }
 
     private class Piece(val bitmap: Bitmap, val dest: RectF, val recycle: Boolean)
@@ -121,8 +125,6 @@ internal class ExportFrameRenderer(
             drawLayer(layer, frameTime)
             return
         }
-        // Video frames and vector/text artwork can change during the shutter interval.
-        // Rasterize those at every temporal sample instead of smearing one frozen frame.
         val temporalContent = layer.type == LayerType.VIDEO ||
             layer.type == LayerType.SHAPE || layer.type == LayerType.TEXT
         val fixedRaw = if (temporalContent) null else rasterFor(layer, frameTime)
@@ -136,37 +138,47 @@ internal class ExportFrameRenderer(
         val checkpoint = canvas.saveLayer(null, compositePaint)
         var reusedFrom: Bitmap? = null
         var reusedPiece: Piece? = null
-        for (index in times.indices) {
-            val sampleTime = times[index]
-            val raw = fixedRaw ?: rasterFor(layer, sampleTime) ?: continue
-            val canReuse = fixedEffects == null && !animatedEffects && !raw.recycle
-            val piece: Piece
-            if (fixedEffects != null) {
-                piece = fixedEffects
-            } else {
-                val cachedPiece = reusedPiece
-                if (canReuse && cachedPiece != null && reusedFrom === raw.bitmap) {
-                    piece = cachedPiece
+        var activeTransient: Piece? = null
+        try {
+            for (index in times.indices) {
+                val sampleTime = times[index]
+                val raw = fixedRaw ?: rasterFor(layer, sampleTime) ?: continue
+                val canReuse = fixedEffects == null && !animatedEffects && !raw.recycle
+                val piece: Piece
+                if (fixedEffects != null) {
+                    piece = fixedEffects
                 } else {
-                    val made = applyEffects(layer, raw, if (fixedRaw == null || animatedEffects) sampleTime else frameTime)
-                    if (canReuse) {
-                        if (cachedPiece != null && cachedPiece !== raw && cachedPiece !== made) release(cachedPiece)
-                        reusedFrom = raw.bitmap
-                        reusedPiece = made
+                    val cachedPiece = reusedPiece
+                    if (canReuse && cachedPiece != null && reusedFrom === raw.bitmap) {
+                        piece = cachedPiece
+                    } else {
+                        val made = applyEffects(layer, raw, if (fixedRaw == null || animatedEffects) sampleTime else frameTime)
+                        if (canReuse) {
+                            if (cachedPiece != null && cachedPiece !== raw && cachedPiece !== made) release(cachedPiece)
+                            reusedFrom = raw.bitmap
+                            reusedPiece = made
+                        }
+                        piece = made
                     }
-                    piece = made
+                }
+                val kept = piece === fixedEffects || (canReuse && piece === reusedPiece)
+                if (piece !== raw && !kept) activeTransient = piece
+                try {
+                    drawPiece(layer, piece, sampleTime, MotionBlur.sampleAlpha(opacity, index, times.size))
+                } finally {
+                    activeTransient?.let { release(it) }
+                    activeTransient = null
+                    if (raw !== fixedRaw) release(raw)
                 }
             }
-            drawPiece(layer, piece, sampleTime, MotionBlur.sampleAlpha(opacity, index, times.size))
-            val kept = piece === fixedEffects || (canReuse && piece === reusedPiece)
-            if (piece !== raw && !kept) release(piece)
-            if (raw !== fixedRaw) release(raw)
+        } finally {
+            activeTransient?.let { release(it) }
+            canvas.restoreToCount(checkpoint)
+            compositePaint.xfermode = null
+            reusedPiece?.let { if (it.bitmap !== reusedFrom) release(it) }
+            if (fixedEffects != null && fixedEffects !== fixedRaw) release(fixedEffects)
+            if (fixedRaw != null) release(fixedRaw)
         }
-        canvas.restoreToCount(checkpoint)
-        compositePaint.xfermode = null
-        reusedPiece?.let { if (it.bitmap !== reusedFrom) release(it) }
-        if (fixedEffects != null && fixedEffects !== fixedRaw) release(fixedEffects)
-        if (fixedRaw != null) release(fixedRaw)
     }
 
     /** Effected stills that cannot change from frame to frame, kept so they are processed once per export, not once per frame. */
@@ -204,31 +216,30 @@ internal class ExportFrameRenderer(
 
     private fun drawPiece(layer: Layer, piece: Piece, time: Float, sampleAlpha: Float?) {
         val mask = layer.maskAt(time).takeIf { layer.maskClips }
-        canvas.save()
-        canvas.scale(sx, sy)
-        canvas.concat(layerMatrix(layer, time, byId))
-        if (mask != null) {
-            canvas.saveLayer(RectF(piece.dest).apply { union(0f, 0f, layer.width, layer.height) }, null)
+        val checkpoint = canvas.save()
+        try {
+            canvas.scale(sx, sy)
+            canvas.concat(layerMatrix(layer, time, byId))
+            if (mask != null) {
+                canvas.saveLayer(RectF(piece.dest).apply { union(0f, 0f, layer.width, layer.height) }, null)
+            }
+            paint.reset()
+            paint.isFilterBitmap = true
+            paint.isAntiAlias = true
+            if (sampleAlpha != null) {
+                paint.alpha = (sampleAlpha * 255f).roundToInt().coerceIn(0, 255)
+                paint.xfermode = null
+            } else {
+                paint.alpha = opacityOf(layer, time)
+                paint.xfermode = CompositeSnapshot.blendMode(layer.blendMode)
+            }
+            paint.colorFilter = if ("Grayscale" in layer.effects) grayscale else null
+            canvas.drawBitmap(piece.bitmap, null, piece.dest, paint)
+            if (mask != null) applyMask(layer, mask)
+        } finally {
+            canvas.restoreToCount(checkpoint)
+            paint.reset()
         }
-        paint.reset()
-        paint.isFilterBitmap = true
-        paint.isAntiAlias = true
-        if (sampleAlpha != null) {
-            paint.alpha = (sampleAlpha * 255f).roundToInt().coerceIn(0, 255)
-            paint.xfermode = null
-        } else {
-            paint.alpha = opacityOf(layer, time)
-            paint.xfermode = CompositeSnapshot.blendMode(layer.blendMode)
-        }
-        paint.colorFilter = if ("Grayscale" in layer.effects) grayscale else null
-        canvas.drawBitmap(piece.bitmap, null, piece.dest, paint)
-        if (mask != null) {
-            applyMask(layer, mask)
-            canvas.restore()
-        }
-        canvas.restore()
-        paint.xfermode = null
-        paint.colorFilter = null
     }
 
     private fun applyMask(layer: Layer, mask: com.kinetic.app.model.LayerMask) {
@@ -327,13 +338,26 @@ internal class ExportFrameRenderer(
             decoder.decodeFrameShared(context, uri, identity, targetUs, targetEdge)?.let { return it }
         }
         // Some files defeat the sequential decoder; the retriever is slower but accepts them.
-        val retriever = retrievers.getOrPut(key) { MediaMetadataRetriever().also { it.setDataSource(context, uri) } }
+        val retrieverKey = "$key|$uri"
+        val retriever = retrievers.getOrPut(retrieverKey) {
+            MediaMetadataRetriever().also { created ->
+                try {
+                    created.setDataSource(context, uri)
+                } catch (failure: Throwable) {
+                    runCatching { created.release() }
+                    throw failure
+                }
+            }
+        }
         val frame = retriever.getFrameAtTime(targetUs, MediaMetadataRetriever.OPTION_CLOSEST) ?: return null
         val longEdge = max(frame.width, frame.height)
         if (longEdge <= targetEdge) return frame
         val k = targetEdge.toFloat() / longEdge
-        return Bitmap.createScaledBitmap(frame, (frame.width * k).toInt().coerceAtLeast(1), (frame.height * k).toInt().coerceAtLeast(1), true)
-            .also { if (it !== frame) frame.recycle() }
+        return try {
+            Bitmap.createScaledBitmap(frame, (frame.width * k).toInt().coerceAtLeast(1), (frame.height * k).toInt().coerceAtLeast(1), true)
+        } finally {
+            if (!frame.isRecycled) frame.recycle()
+        }
     }
 
     override fun close() {
