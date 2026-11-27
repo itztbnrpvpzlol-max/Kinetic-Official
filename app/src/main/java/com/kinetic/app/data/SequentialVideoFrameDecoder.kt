@@ -122,12 +122,14 @@ internal class SequentialVideoFrameDecoder {
                 // activate the retriever fallback after an explicit failure signal.
                 fallbackIdentity = identity
                 closeSession()
+                clearSharedFrame()
             }
             return decoded
         } catch (error: Exception) {
             Log.w(TAG, "Sequential MediaCodec decode failed; enabling retriever fallback", error)
             fallbackIdentity = identity
             closeSession()
+            clearSharedFrame()
             return null
         }
     }
