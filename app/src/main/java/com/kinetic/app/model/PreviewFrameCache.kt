@@ -52,7 +52,8 @@ class PreviewFrameCache {
     private val decoded = object : LinkedHashMap<Int, Pair<Long, Bitmap>>(32, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Int, Pair<Long, Bitmap>>?): Boolean {
             val remove = size > DECODED_MAX
-            if (remove) eldest?.value?.second?.let { if (!it.isRecycled) it.recycle() }
+            // Returned bitmaps may still be in use by the preview draw call. Drop the
+            // cache reference and let GC reclaim them; recycling here races Canvas.
             return remove
         }
     }
@@ -81,7 +82,8 @@ class PreviewFrameCache {
                 evictToBudget()
                 return
             }
-            decoded.values.forEach { if (!it.second.isRecycled) it.second.recycle() }
+            // Decoded frames are shared with the preview renderer; never recycle them
+            // while a draw may still hold a reference.
             decoded.clear()
             entries.clear()
             bytes = 0L
@@ -145,7 +147,7 @@ class PreviewFrameCache {
                 }
                 entries[frame] = Entry(sig, target, target.length())
                 bytes += target.length()
-                decoded.remove(frame)?.second?.let { if (!it.isRecycled) it.recycle() }
+                decoded.remove(frame)
                 evictToBudget()
             } catch (_: Throwable) {
                 temp.delete()
@@ -159,7 +161,7 @@ class PreviewFrameCache {
             bytes -= it.size
             it.file.delete()
         }
-        decoded.remove(frame)?.second?.let { if (!it.isRecycled) it.recycle() }
+        decoded.remove(frame)
     }
 
     private fun evictToBudget() {
@@ -205,8 +207,8 @@ class PreviewFrameCache {
             synchronized(lock) {
                 val current = entries[frame]
                 if (current?.sig == sig && signatures?.sigAt(frame) == sig) {
-                    decoded.put(frame, sig to bitmap)?.second?.let { if (!it.isRecycled) it.recycle() }
-                } else if (!bitmap.isRecycled) bitmap.recycle()
+                    decoded.put(frame, sig to bitmap)
+                } // Stale decoded frames are simply dropped; they may be shared.
             }
         }
     }
@@ -243,7 +245,6 @@ class PreviewFrameCache {
     fun clear() {
         synchronized(lock) {
             entries.keys.toList().forEach(::removeEntry)
-            decoded.values.forEach { if (!it.second.isRecycled) it.second.recycle() }
             decoded.clear()
             directory?.listFiles()?.forEach { it.delete() }
             bytes = 0L
