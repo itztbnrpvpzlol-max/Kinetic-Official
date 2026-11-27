@@ -85,7 +85,7 @@ internal class PcmStream(context: Context, uri: Uri) : AutoCloseable {
         if (!inputDone) {
             val inIndex = codec.dequeueInputBuffer(2_000)
             if (inIndex >= 0) {
-                val buffer = codec.getInputBuffer(inIndex)!!
+                val buffer = codec.getInputBuffer(inIndex) ?: throw java.io.IOException("Audio decoder returned no input buffer.")
                 val size = extractor.readSampleData(buffer, 0)
                 if (size < 0) {
                     codec.queueInputBuffer(inIndex, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
@@ -106,7 +106,7 @@ internal class PcmStream(context: Context, uri: Uri) : AutoCloseable {
             }
             in 0..Int.MAX_VALUE -> {
                 if (info.size > 0) {
-                    val buffer = codec.getOutputBuffer(out)!!
+                    val buffer = codec.getOutputBuffer(out) ?: run { codec.releaseOutputBuffer(out, false); throw java.io.IOException("Audio decoder returned no output buffer.") }
                     buffer.position(info.offset)
                     buffer.limit(info.offset + info.size)
                     val ch = channels.coerceAtLeast(1)
@@ -228,7 +228,7 @@ internal object ExportAudio {
                 when {
                     index == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> outputFormat = encoder.outputFormat
                     index >= 0 -> {
-                        val buffer = encoder.getOutputBuffer(index)!!
+                        val buffer = encoder.getOutputBuffer(index) ?: run { encoder.releaseOutputBuffer(index, false); throw java.io.IOException("Audio encoder returned no output buffer.") }
                         if (info.size > 0 && info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG == 0) {
                             val bytes = ByteArray(info.size)
                             buffer.position(info.offset)
@@ -253,7 +253,7 @@ internal object ExportAudio {
                     drain(0)
                     continue
                 }
-                val buffer = encoder.getInputBuffer(index)!!
+                val buffer = encoder.getInputBuffer(index) ?: throw java.io.IOException("Audio encoder returned no input buffer.")
                 buffer.clear()
                 val chunk = minOf(buffer.remaining(), size - offset)
                 buffer.put(pcm, offset, chunk)
