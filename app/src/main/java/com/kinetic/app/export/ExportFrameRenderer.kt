@@ -170,13 +170,17 @@ internal class ExportFrameRenderer(
     }
 
     /** Effected stills that cannot change from frame to frame, kept so they are processed once per export, not once per frame. */
-    private val staticEffected = HashMap<String, Pair<Int, Piece>>()
+    private val staticEffected = HashMap<String, Pair<String, Piece>>()
 
     private fun drawLayer(layer: Layer, time: Float) {
         if (layer.type == LayerType.IMAGE) {
             val stack = EffectStackRunner.pictureEffects(layer.effectStack).take(12)
             if (stack.isNotEmpty() && !EffectStackRunner.isTimeDependent(stack) && !MotionBlur.effectsAnimated(layer)) {
-                val key = stack.hashCode() * 31 + layer.width.toBits() * 7 + layer.height.toBits()
+                val key = buildString {
+                    append(layer.uri.orEmpty()).append('|')
+                    append(layer.width).append('x').append(layer.height).append('|')
+                    append(EffectStackRunner.stackJson(stack, 0f))
+                }
                 var cached = staticEffected[layer.id]?.takeIf { it.first == key && !it.second.bitmap.isRecycled }
                 if (cached == null) {
                     staticEffected.remove(layer.id)?.second?.let { release(it) }
@@ -279,7 +283,10 @@ internal class ExportFrameRenderer(
                     ?.let { Piece(it, RectF(0f, 0f, layer.width, layer.height), recycle = true) }
             LayerType.IMAGE -> {
                 val uri = layer.uri ?: return null
-                val bmp = images.getOrPut(layer.id) { loadImage(Uri.parse(uri), target) ?: return null }
+                // A layer can be retargeted to another image while retaining its ID.
+                // Include the URI so a previous export decode is never reused for new media.
+                val imageKey = layer.id + "|" + uri
+                val bmp = images.getOrPut(imageKey) { loadImage(Uri.parse(uri), target) ?: return null }
                 Piece(bmp, fit(bmp, layer), recycle = false)
             }
             LayerType.VIDEO -> {
