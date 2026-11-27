@@ -134,9 +134,23 @@ object EffectStackRunner {
     }
 
     private val directBuffers = object : ThreadLocal<ByteBuffer?>() {}
+    // Keep reusable native memory modest on low-RAM devices. Large export frames
+    // get a temporary buffer instead of pinning their full size to a worker thread.
+    private const val MAX_RETAINED_SCRATCH_BYTES = 16 * 1024 * 1024
+
+    private fun pixelBufferBytes(width: Int, height: Int): Int? {
+        if (width <= 0 || height <= 0) return null
+        val bytes = width.toLong() * height.toLong() * 4L
+        return bytes.takeIf { it in 1L..Int.MAX_VALUE.toLong() }?.toInt()
+    }
 
     private fun scratch(bytes: Int): ByteBuffer {
+        require(bytes > 0) { "Invalid effect buffer size: $bytes" }
         val cached = directBuffers.get()
+        if (bytes > MAX_RETAINED_SCRATCH_BYTES) {
+            // Do not retain unusually large export buffers for the lifetime of this thread.
+            return ByteBuffer.allocateDirect(bytes)
+        }
         if (cached != null && cached.capacity() >= bytes) return cached.also { it.clear() }
         return ByteBuffer.allocateDirect(bytes).also { directBuffers.set(it) }
     }
@@ -154,13 +168,14 @@ object EffectStackRunner {
     ): Bitmap? {
         val active = pictureEffects(effects)
         if (active.isEmpty() || !EffectCraftNative.available || source.isRecycled) return null
+        val bufferBytes = pixelBufferBytes(source.width, source.height) ?: return null
         val key = if (cacheResult) effectCacheKey(source, active, time, layerTime, frameRate, layerWidth, layerHeight, "bitmap:$adjustment") else null
         if (key != null) cachedEffect(key)?.let { cached ->
             return runCatching { cached.bitmap.copy(Bitmap.Config.ARGB_8888, true) }.getOrNull()
         }
         val output = runCatching { source.copy(Bitmap.Config.ARGB_8888, true) }.getOrNull() ?: return null
         val applied = runCatching {
-            val buffer = scratch(output.width * output.height * 4)
+            val buffer = scratch(bufferBytes)
             output.copyPixelsToBuffer(buffer)
             val count = EffectCraftNative.nativeProcessImage(
                 buffer, output.width, output.height, layerWidth.toDouble(), layerHeight.toDouble(), stackJson(active, time),
@@ -205,7 +220,8 @@ object EffectStackRunner {
         return runCatching {
             val w = source.width
             val h = source.height
-            val input = scratch(w * h * 4)
+            val inputBytes = pixelBufferBytes(w, h) ?: return@runCatching null
+            val input = scratch(inputBytes)
             val copy = if (source.config == Bitmap.Config.ARGB_8888) source else source.copy(Bitmap.Config.ARGB_8888, false)
             copy.copyPixelsToBuffer(input)
             if (copy !== source) copy.recycle()
@@ -216,9 +232,9 @@ object EffectStackRunner {
             )
             if (count <= 0) return@runCatching null
             val (ow, oh) = info[0] to info[1]
-            if (ow <= 0 || oh <= 0) return@runCatching null
-            val out = scratch(ow * oh * 4)
-            if (EffectCraftNative.nativeTakeGrown(out) < 0) return@runCatching null
+            val outputBytes = pixelBufferBytes(ow, oh) ?: return@runCatching null
+            val out = scratch(outputBytes)
+            if (EffectCraftNative.nativeTakeGrown(out) != outputBytes) return@runCatching null
             out.rewind()
             val bitmap = Bitmap.createBitmap(ow, oh, Bitmap.Config.ARGB_8888)
             bitmap.copyPixelsFromBuffer(out)
