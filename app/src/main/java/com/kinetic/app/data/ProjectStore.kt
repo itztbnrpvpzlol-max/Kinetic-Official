@@ -99,12 +99,15 @@ class ProjectStore(context: Context) {
                     val relative = staged.relativeTo(source)
                     val destination = File(File(filesRoot, folder), relative.path)
                     destination.parentFile?.mkdirs()
-                    val temporary = File(destination.parentFile, destination.name + ".restore-tmp")
-                    staged.copyTo(temporary, overwrite = true)
-                    if (destination.exists()) destination.delete()
-                    if (!temporary.renameTo(destination)) {
-                        temporary.copyTo(destination, overwrite = true)
-                        temporary.delete()
+                    val temporary = File(destination.parentFile, ".${destination.name}-${UUID.randomUUID()}.restore-tmp")
+                    try {
+                        staged.copyTo(temporary, overwrite = true)
+                        // Keep the old file intact if the replacement cannot be committed.
+                        if (!temporary.renameTo(destination)) {
+                            throw java.io.IOException("Couldn't safely restore ${destination.name}.")
+                        }
+                    } finally {
+                        if (temporary.exists()) temporary.delete()
                     }
                 }
             }
